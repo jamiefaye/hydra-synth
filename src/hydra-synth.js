@@ -120,7 +120,7 @@ class HydraRenderer {
 
     if(detectAudio) this._initAudio()
 
-    if(autoLoop) loop(this.tick.bind(this)).start()
+    if(autoLoop) this.looper = loop(this.tick.bind(this)).start()
 
     // final argument is properties that the user can set, all others are treated as read-only
     this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
@@ -135,7 +135,16 @@ class HydraRenderer {
     this.saveFrame = true
   }
 
-  hush() {
+// If closeRegl is true, then hush all the entire regl stuff so we don't get lingering ticks.
+  hush(closeRegl) {
+  	if (closeRegl) {
+  			if (this.looper) {
+  					this.looper.stop();
+  			}
+  			
+  		  this.regl.destroy();
+  			return;
+  	}
     this.s.forEach((source) => {
       source.clear()
     })
