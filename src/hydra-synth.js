@@ -1,6 +1,6 @@
 
 import Output from './output.js'
-import loop from 'raf-loop'
+import {loop} from './raf-loop.js'
 import Source from './hydra-source.js'
 import MouseTools from './lib/mouse.js'
 import Audio from './lib/audio.js'
@@ -13,8 +13,14 @@ import regl from 'regl'
 // const window = global.window
 
 
-
-const Mouse = MouseTools()
+let Mouse;
+if (!(typeof self !== 'undefined' && self.constructor && self.constructor.name === 'DedicatedWorkerGlobalScope')) {
+  Mouse = MouseTools();
+	console.log("Not running as a web worker");
+} else {
+	  Mouse = {x: 0, y: 0}
+		console.log("Running as a web worker");
+}
 // to do: add ability to pass in certain uniforms and transforms
 class HydraRenderer {
 
@@ -134,17 +140,10 @@ class HydraRenderer {
     this.imageCallback = callback
     this.saveFrame = true
   }
+  
 
-// If closeRegl is true, then hush all the entire regl stuff so we don't get lingering ticks.
-  hush(closeRegl) {
-  	if (closeRegl) {
-  			if (this.looper) {
-  					this.looper.stop();
-  			}
-  			
-  		  this.regl.destroy();
-  			return;
-  	}
+
+  hush() {
     this.s.forEach((source) => {
       source.clear()
     })
