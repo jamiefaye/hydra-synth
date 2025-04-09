@@ -20,7 +20,6 @@ export default function (transforms) {
     shaderParams.uniforms.forEach((uniform) => uniforms[uniform.name] = uniform)
     shaderParams.uniforms = Object.values(uniforms)
     return shaderParams
-
 }
 
 
@@ -34,7 +33,9 @@ function generateGlsl (transforms, shaderParams) {
   transforms.forEach((transform) => {
     var inputs = formatArguments(transform, shaderParams.uniforms.length)
     inputs.forEach((input) => {
-      if(input.isUniform) shaderParams.uniforms.push(input)
+      if(input.isUniform) {
+      	shaderParams.uniforms.push(input)
+      }
     })
 
     // add new glsl function to running list of functions

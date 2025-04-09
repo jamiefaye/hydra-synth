@@ -1,16 +1,18 @@
 
 import Output from './output.js'
+import {OutputWgsl} from './outputWgsl.js';
 import {loop} from './raf-loop.js'
 import Source from './hydra-source.js'
+import {HydraSourceWGSL} from './hydra-sourceWGSL.js'
 import MouseTools from './lib/mouse.js'
 import Audio from './lib/audio.js'
 import VidRecorder from './lib/video-recorder.js'
 import ArrayUtils from './lib/array-utils.js'
-// import strudel from './lib/strudel.js'
 import Sandbox from './eval-sandbox.js'
 import Generator from './generator-factory.js'
 import regl from 'regl'
 // const window = global.window
+import {wgslHydra} from './wgsl-hydra.js';
 
 
 let Mouse;
@@ -34,6 +36,7 @@ class HydraRenderer {
     autoLoop = true,
     detectAudio = true,
     enableStreamCapture = true,
+    genWGSL = true, // **** JFF Hack!!
     canvas,
     precision,
     extendTransforms = {} // add your own functions on init
@@ -47,6 +50,9 @@ class HydraRenderer {
     this.height = height
     this.renderAll = false
     this.detectAudio = detectAudio
+
+    this.genWGSL = genWGSL;
+    this.wgslReady = false;
 
     this._initCanvas(canvas)
 
@@ -64,6 +70,7 @@ class HydraRenderer {
       speed: 1,
       mouse: Mouse,
       render: this._render.bind(this),
+      _destroy: this._destroy.bind(this),
       setResolution: this.setResolution.bind(this),
       update: (dt) => {},// user defined update function
       hush: this.hush.bind(this),
@@ -92,8 +99,6 @@ class HydraRenderer {
       this.precision = isIOS ? 'highp' : 'mediump'
     }
 
-
-
     this.extendTransforms = extendTransforms
 
     // boolean to store when to save screenshot
@@ -104,29 +109,45 @@ class HydraRenderer {
 
     this.generator = undefined
 
-    this._initRegl()
-    this._initOutputs(numOutputs)
-    this._initSources(numSources)
-    this._generateGlslTransforms()
+		if (this.genWGSL) {
+			this.wgslHydra = new wgslHydra(this.canvas, 4);
 
-    this.synth.screencap = () => {
-      this.saveFrame = true
+			this.wgslPromise = this.wgslHydra.setupHydra().then(()=>{
+				this._initOutputsWgsl(numOutputs);
+				this._initSourcesWgsl(numSources);
+				this._generateGlslTransforms();	
+				if(autoLoop) this.looper = loop(this.tick.bind(this)).start();
+				this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
+
+			});
+
+		} else {
+		// Run with regl
+        this._initRegl()
+        this._initOutputs(numOutputs)
+        this._initSources(numSources)
+        this._generateGlslTransforms()
+    
+        this.synth.screencap = () => {
+          this.saveFrame = true
+        }
+    
+        if (enableStreamCapture) {
+          try {
+            this.captureStream = this.canvas.captureStream(25)
+            // to do: enable capture stream of specific sources and outputs
+            this.synth.vidRecorder = new VidRecorder(this.captureStream)
+          } catch (e) {
+            console.warn('[hydra-synth warning]\nnew MediaSource() is not currently supported on iOS.')
+            console.error(e)
+          }
+        }
     }
-
-    if (enableStreamCapture) {
-      try {
-        this.captureStream = this.canvas.captureStream(25)
-        // to do: enable capture stream of specific sources and outputs
-        this.synth.vidRecorder = new VidRecorder(this.captureStream)
-      } catch (e) {
-        console.warn('[hydra-synth warning]\nnew MediaSource() is not currently supported on iOS.')
-        console.error(e)
-      }
-    }
-
     if(detectAudio) this._initAudio()
 
-    if(autoLoop) this.looper = loop(this.tick.bind(this)).start()
+    if(this.genWGSL) return;
+    
+     if (autoLoop) this.looper = loop(this.tick.bind(this)).start()
 
     // final argument is properties that the user can set, all others are treated as read-only
     this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
@@ -141,7 +162,18 @@ class HydraRenderer {
     this.saveFrame = true
   }
   
-
+// Teardown this hydra-synth, stopping periodic activity and reclaiming memory.
+  _destroy() {
+ 		this.hush();
+ 		if (this.looper) {
+ 			this.looper.stop();
+ 			delete this.looper;
+ 		}
+ 		if (this.regl) {
+ 			this.regl.destroy();
+ 			delete this.regl;
+ 		}
+ }
 
   hush() {
     this.s.forEach((source) => {
@@ -383,6 +415,26 @@ class HydraRenderer {
     this.output = this.o[0]
   }
 
+  _initOutputsWgsl (numOutputs) {
+    const self = this
+    this.o = (Array(numOutputs)).fill().map((el, index) => {
+      var o = new OutputWgsl({
+      	wgslHydra: this.wgslHydra,
+        width: this.width,
+        height: this.height,
+        chanNum: index,
+        label: `o${index}`
+      })
+    //  o.render()
+      o.id = index
+      self.synth['o'+index] = o
+      return o
+    })
+
+    // set default output
+    this.output = this.o[0]
+  }
+
   _initSources (numSources) {
     this.s = []
     for(var i = 0; i < numSources; i++) {
@@ -397,9 +449,25 @@ class HydraRenderer {
     return s
   }
 
+  _initSourcesWgsl (numSources) {
+    this.s = []
+    for(var i = 0; i < numSources; i++) {
+      this.createSourceWgsl(i)
+    }
+  }
+
+  createSourceWgsl (i) {
+    let s = new HydraSourceWGSL({regl: this.regl, pb: this.pb, width: this.width, height: this.height, label: `s${i}`})
+    this.synth['s' + this.s.length] = s
+    this.s.push(s)
+    return s
+  }
+
+
   _generateGlslTransforms () {
     var self = this
     this.generator = new Generator({
+    	genWGSL:  this.genWGSL,
       defaultOutput: this.o[0],
       defaultUniforms: this.o[0].uniforms,
       extendTransforms: this.extendTransforms,
@@ -434,41 +502,47 @@ class HydraRenderer {
     this.sandbox.set('time', this.synth.time += dt * 0.001 * this.synth.speed)
     this.timeSinceLastUpdate += dt
     if(!this.synth.fps || this.timeSinceLastUpdate >= 1000/this.synth.fps) {
-    //  console.log(1000/this.timeSinceLastUpdate)
-      this.synth.stats.fps = Math.ceil(1000/this.timeSinceLastUpdate)
-      if(this.synth.update) {
-        try { this.synth.update(this.timeSinceLastUpdate) } catch (e) { console.log(e) }
-      }
-    //  console.log(this.synth.speed, this.synth.time)
-      for (let i = 0; i < this.s.length; i++) {
-        this.s[i].tick(this.synth.time)
-      }
-    //  console.log(this.canvas.width, this.canvas.height)
-      for (let i = 0; i < this.o.length; i++) {
-        this.o[i].tick({
-          time: this.synth.time,
-          mouse: this.synth.mouse,
-          bpm: this.synth.bpm,
-          resolution: [this.canvas.width, this.canvas.height]
-        })
-      }
-      if (this.isRenderingAll) {
-        this.renderAll({
-          tex0: this.o[0].getCurrent(),
-          tex1: this.o[1].getCurrent(),
-          tex2: this.o[2].getCurrent(),
-          tex3: this.o[3].getCurrent(),
-          resolution: [this.canvas.width, this.canvas.height]
-        })
-      } else {
-
-        this.renderFbo({
-          tex0: this.output.getCurrent(),
-          resolution: [this.canvas.width, this.canvas.height]
-        })
-      }
-      this.timeSinceLastUpdate = 0
-    }
+        if (this.genWGSL) {
+        		// Visit sources.
+        		this.wgslHydra.requestAnimationFrame();
+        } else 
+        {
+        //  console.log(1000/this.timeSinceLastUpdate)
+          this.synth.stats.fps = Math.ceil(1000/this.timeSinceLastUpdate)
+          if(this.synth.update) {
+            try { this.synth.update(this.timeSinceLastUpdate) } catch (e) { console.log(e) }
+          }
+        //  console.log(this.synth.speed, this.synth.time)
+          for (let i = 0; i < this.s.length; i++) {
+            this.s[i].tick(this.synth.time)
+          }
+        //  console.log(this.canvas.width, this.canvas.height)
+          for (let i = 0; i < this.o.length; i++) {
+            this.o[i].tick({
+              time: this.synth.time,
+              mouse: this.synth.mouse,
+              bpm: this.synth.bpm,
+              resolution: [this.canvas.width, this.canvas.height]
+            })
+          }
+          if (this.isRenderingAll) {
+            this.renderAll({
+              tex0: this.o[0].getCurrent(),
+              tex1: this.o[1].getCurrent(),
+              tex2: this.o[2].getCurrent(),
+              tex3: this.o[3].getCurrent(),
+              resolution: [this.canvas.width, this.canvas.height]
+            })
+          } else {
+     
+            this.renderFbo({
+              tex0: this.output.getCurrent(),
+              resolution: [this.canvas.width, this.canvas.height]
+            })
+          }
+          this.timeSinceLastUpdate = 0
+        }
+     }
     if(this.saveFrame === true) {
       this.canvasToImage()
       this.saveFrame = false

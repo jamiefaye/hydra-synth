@@ -131,7 +131,7 @@ export default function formatArguments(transform, startIndex, synthContext) {
         }
       }
 
-      // add tp uniform array if is a function that will pass in a different value on each render frame,
+      // add to uniform array if is a function that will pass in a different value on each render frame,
       // or a texture/ external source
 
       if (typedArg.isUniform) {

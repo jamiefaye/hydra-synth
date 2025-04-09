@@ -3,6 +3,7 @@ import glslFunctions from './glsl/glsl-functions.js'
 
 class GeneratorFactory {
   constructor ({
+  	  genWGSL,
       defaultUniforms,
       defaultOutput,
       extendTransforms = [],
@@ -14,6 +15,7 @@ class GeneratorFactory {
     this.changeListener = changeListener
     this.extendTransforms = extendTransforms
     this.generators = {}
+    this.isWGSL = genWGSL;
     this.init()
   }
   init () {
@@ -28,8 +30,6 @@ class GeneratorFactory {
       return class extends GlslSource {
       }
     })()
-
-    
 
     // add user definied transforms
     if (Array.isArray(this.extendTransforms)) {
@@ -66,8 +66,8 @@ class GeneratorFactory {
   }
 
   setFunction(obj) {
-    var processedGlsl = processGlsl(obj)
-    if(processedGlsl) this._addMethod(obj.name, processedGlsl)
+    var processedGL = this.isWGSL ? processWgsl(obj) : processGlsl(obj)
+    if(processedGL) this._addMethod(obj.name, processedGL)
   }
 }
 
@@ -93,6 +93,35 @@ const typeLookup = {
     args: ['vec2 _st', 'vec4 _c0']
   }
 }
+
+const WGSLtypeLookup = {
+  'src': {
+    returnType: 'vec4<f32>',
+    args: ['_st : vec2<f32>']
+  },
+  'coord': {
+    returnType: 'vec2<f32>',
+    args: ['_st : vec2<f32>']
+  },
+  'color': {
+    returnType: 'vec4<f32>',
+    args: ['_c0 : vec4<f32>']
+  },
+  'combine': {
+    returnType: 'vec4<f32>',
+    args: [' _c0 : vec4<f32>', '_c1 : vec4<f32>']
+  },
+  'combineCoord': {
+    returnType: 'vec2<f32>',
+    args: ['_st : vec2<f32>', '_c0 : vec4<f32>']
+  }
+}
+
+function mapGlslToWgsl(type) {
+	if (type === 'float') return "f32";
+	return type;
+}
+
 // expects glsl of format
 // {
 //   name: 'osc', // name that will be used to access function as well as within glsl
@@ -154,6 +183,36 @@ function processGlsl(obj) {
         type: 'vec4'
       })
     return Object.assign({}, obj, { glsl: glslFunction})
+  } else {
+    console.warn(`type ${obj.type} not recognized`, obj)
+  }
+
+}
+
+// Variation that does WGSL. Big differences are rearranging the order of type and argname,
+// and the newer function signature syntax.
+function processWgsl(obj) {
+  let t = WGSLtypeLookup[obj.type]
+  if(t) {
+  let baseArgs = t.args.map((arg) => arg).join(", ")
+  // @todo: make sure this works for all input types, add validation
+  let customArgs = obj.inputs.map((input) => ` ${input.name} : ${mapGlslToWgsl(input.type)}`).join(', ')
+  let args = `${baseArgs}${customArgs.length > 0 ? ', '+ customArgs: ''}`
+//  console.log('args are ', args)
+
+    let wgslFunction =
+`
+   fn ${obj.name}(${args})->${t.returnType}{
+      ${obj.wgsl}
+  }
+`;
+  // Can we skip doing this??
+  // add extra input to beginning for backward combatibility @todo update compiler so this is no longer necessary
+    if(obj.type === 'combine' || obj.type === 'combineCoord') obj.inputs.unshift({
+        name: 'color',
+        type: 'vec4'
+      })
+    return Object.assign({}, obj, { wgsl: wgslFunction})
   } else {
     console.warn(`type ${obj.type} not recognized`, obj)
   }

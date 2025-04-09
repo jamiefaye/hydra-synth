@@ -85,7 +85,10 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(vec3(_noise(vec3(_st*scale, offset*time))), 1.0);`
+`   return vec4(vec3(_noise(vec3(_st*scale, offset*time))), 1.0);`,
+  wgsl:
+`   return vec4<f32>(vec3<f32>(_noise(vec3(_st*scale, offset*time))), 1.0);`,
+  needs: ["_noise"]
 },
 {
   name: 'voronoi',
@@ -133,7 +136,37 @@ export default () => [
    // Assign a color using the closest point position
    color += dot(m_point,vec2(.3,.6));
    color *= 1.0 - blending*m_dist;
-   return vec4(color, 1.0);`
+   return vec4(color, 1.0);`,
+wgsl:
+`
+	 var color = vec3<f32>(.0);
+   // Scale
+   var _st = st * scale;
+   // Tile the space
+   let i_st = floor(_st);
+   let f_st = fract(_st);
+   var m_dist : f32 = 10.;  // minimun distance
+   var m_point : vec2<f32>; // minimum point
+   for (var j=-1; j<=1; j++ ) {
+   for (var i=-1; i<=1; i++ ) {
+   var neighbor = vec2<f32>(f32(i),f32(j));
+   var p = i_st + neighbor;
+   var point = fract(sin(vec2<f32>(dot(p,vec2<f32>(127.1,311.7)),dot(p,vec2<f32>(269.5,183.3))))*43758.5453);
+   point = 0.5 + 0.5*sin(time*speed + 6.2831*point);
+   let diff = neighbor + point - f_st;
+   let dist = length(diff);
+   if( dist < m_dist ) {
+   m_dist = dist;
+   m_point = point;
+   }
+   }
+   }
+   // Assign a color using the closest point position
+   color += dot(m_point,vec2(.3,.6));
+   color *= 1.0 - blending*m_dist;
+ return vec4<f32>(color, 1.0);
+ }
+`
 },
 {
   name: 'osc',
@@ -160,7 +193,14 @@ export default () => [
    float r = sin((st.x-offset/frequency+time*sync)*frequency)*0.5  + 0.5;
    float g = sin((st.x+time*sync)*frequency)*0.5 + 0.5;
    float b = sin((st.x+offset/frequency+time*sync)*frequency)*0.5  + 0.5;
-   return vec4(r, g, b, 1.0);`
+   return vec4(r, g, b, 1.0);`,
+
+  wgsl:
+`  let st = vec2<f32>(_st);
+   let r = f32(sin((st.x-offset/frequency+time*sync)*frequency)*0.5  + 0.5);
+   let g = f32(sin((st.x+time*sync)*frequency)*0.5 + 0.5);
+   let b = f32(sin((st.x+offset/frequency+time*sync)*frequency)*0.5  + 0.5);
+   return vec4<f32>(r, g, b, 1.0);`
 },
 {
   name: 'shape',
@@ -188,7 +228,14 @@ export default () => [
    float a = atan(st.x,st.y)+3.1416;
    float r = (2.*3.1416)/sides;
    float d = cos(floor(.5+a/r)*r-a)*length(st);
-   return vec4(vec3(1.0-smoothstep(radius,radius + smoothing + 0.0000001,d)), 1.0);`
+   return vec4(vec3(1.0-smoothstep(radius,radius + smoothing + 0.0000001,d)), 1.0);`,
+  wgsl:
+`   vec2 st = _st * 2. - 1.;
+   // Angle and radius from the current pixel
+   let a = f32(atan2(st.x,st.y)+3.1416);
+   let r = f32((2.*3.1416)/sides);
+   let d = f32(cos(floor(.5+a/r)*r-a)*length(st));
+   return vec4<f32>(vec3<f32>(1.0-smoothstep(radius,radius + smoothing + 0.0000001,d)), 1.0);`
 },
 {
   name: 'gradient',
@@ -201,7 +248,9 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(_st, sin(time*speed), 1.0);`
+`   return vec4(_st, sin(time*speed), 1.0);`,
+  wgsl:
+`   return vec4<f32>(_st, sin(time*speed), 1.0);`
 },
 {
   name: 'src',
@@ -215,6 +264,9 @@ export default () => [
   ],
   glsl:
 `   //  vec2 uv = gl_FragCoord.xy/vec2(1280., 720.);
+   return texture2D(tex, fract(_st));`,
+  wgsl:
+` 
    return texture2D(tex, fract(_st));`
 },
 {
@@ -243,7 +295,9 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(r, g, b, a);`
+`   return vec4(r, g, b, a);`,
+  wgsl:
+`   return vec4<f32>(r, g, b, a);`
 },
 {
   name: 'rotate',
@@ -264,6 +318,12 @@ export default () => [
 `   vec2 xy = _st - vec2(0.5);
    float ang = angle + speed *time;
    xy = mat2(cos(ang),-sin(ang), sin(ang),cos(ang))*xy;
+   xy += 0.5;
+   return xy;`,
+  wgsl:
+`  var xy = _st - vec2<f32>(0.5);
+   let ang = f32(angle + speed *time);
+   xy = mat2x2<f32>(cos(ang),-sin(ang), sin(ang),cos(ang))*xy;
    xy += 0.5;
    return xy;`
 },
@@ -302,6 +362,12 @@ export default () => [
    xy*=(1.0/vec2(amount*xMult, amount*yMult));
    xy+=vec2(offsetX, offsetY);
    return xy;
+   `,
+  wgsl:
+`  var xy = _st - vec2<f32>(offsetX, offsetY);
+   xy*=(1.0/vec2(amount*xMult, amount*yMult));
+   xy+=vec2<f32>(offsetX, offsetY);
+   return xy;
    `
 },
 {
@@ -321,6 +387,9 @@ export default () => [
   ],
   glsl:
 `   vec2 xy = vec2(pixelX, pixelY);
+   return (floor(_st * xy) + 0.5)/xy;`,
+  wgsl:
+`  let xy = vec2<f32>(pixelX, pixelY);
    return (floor(_st * xy) + 0.5)/xy;`
 },
 {
@@ -344,7 +413,14 @@ export default () => [
    c2 = floor(c2);
    c2/= vec4(bins);
    c2 = pow(c2, vec4(1.0/gamma));
-   return vec4(c2.xyz, _c0.a);`
+   return vec4(c2.xyz, _c0.a);`,
+  wgsl:
+`  let c2 : vec4<f32> = pow(_c0, vec4<f32>(gamma));
+   c2 *= vec4(bins);
+   c2 = floor(c2);
+   c2/= vec4(bins);
+   c2 = pow(c2, vec4<f32>(1.0/gamma));
+   return vec4<f32>(c2.xyz, _c0.a);`
 },
 {
   name: 'shift',
@@ -377,7 +453,14 @@ export default () => [
    c2.g = fract(c2.g + g);
    c2.b = fract(c2.b + b);
    c2.a = fract(c2.a + a);
-   return vec4(c2.rgba);`
+   return vec4(c2.rgba);`,
+  wgsl:
+`  let c2 = vec4<f32>(_c0);
+   c2.r = fract(c2.r + r);
+   c2.g = fract(c2.g + g);
+   c2.b = fract(c2.b + b);
+   c2.a = fract(c2.a + a);
+   return vec4<f32>(c2.rgba);`
 },
 {
   name: 'repeat',
@@ -408,6 +491,11 @@ export default () => [
 `   vec2 st = _st * vec2(repeatX, repeatY);
    st.x += step(1., mod(st.y,2.0)) * offsetX;
    st.y += step(1., mod(st.x,2.0)) * offsetY;
+   return fract(st);`,
+  wgsl:
+`  let st = _st * vec2<f32>(repeatX, repeatY);
+   st.x += step(1., st.y % 2.0) * offsetX;
+   st.y += step(1., st.x % 2.0) * offsetY;
    return fract(st);`
 },
 {
@@ -439,6 +527,11 @@ export default () => [
 `   vec2 st = _st * vec2(repeatX, repeatY);
    st.x += step(1., mod(st.y,2.0)) + _c0.r * offsetX;
    st.y += step(1., mod(st.x,2.0)) + _c0.g * offsetY;
+   return fract(st);`,
+  wgsl:
+`  let st = _st * vec2<f32>(repeatX, repeatY);
+   st.x += step(1., st.y %2.0) + _c0.r * offsetX;
+   st.y += step(1., st.x %2.0) + _c0.g * offsetY;
    return fract(st);`
 },
 {
@@ -460,6 +553,11 @@ export default () => [
 `   vec2 st = _st * vec2(reps, 1.0);
    //  float f =  mod(_st.y,2.0);
    st.y += step(1., mod(st.x,2.0))* offset;
+   return fract(st);`,
+  wgsl:
+`   var st = _st * vec2<f32>(reps, 1.0);
+   //  float f =  mod(_st.y,2.0);
+   st.y += step(1., st.x % 2.0)* offset;
    return fract(st);`
 },
 {
@@ -481,6 +579,11 @@ export default () => [
 `   vec2 st = _st * vec2(reps, 1.0);
    //  float f =  mod(_st.y,2.0);
    st.y += step(1., mod(st.x,2.0)) + _c0.r * offset;
+   return fract(st);`,
+  wgsl:
+`  let st = _st * vec2<f32>(reps, 1.0);
+   //  float f =  mod(_st.y,2.0);
+   st.y += step(1., st.x %2.0) + _c0.r * offset;
    return fract(st);`
 },
 {
@@ -502,6 +605,11 @@ export default () => [
 `   vec2 st = _st * vec2(1.0, reps);
    //  float f =  mod(_st.y,2.0);
    st.x += step(1., mod(st.y,2.0))* offset;
+   return fract(st);`,
+  wgsl:
+`   var st = _st * vec2<f32>(1.0, reps);
+   //  float f =  mod(_st.y,2.0);
+   st.x += step(1., st.y %2.0)* offset;
    return fract(st);`
 },
 {
@@ -521,6 +629,11 @@ export default () => [
   ],
   glsl:
 `   vec2 st = _st * vec2(reps, 1.0);
+   //  float f =  mod(_st.y,2.0);
+   st.x += step(1., mod(st.y,2.0)) + _c0.r * offset;
+   return fract(st);`,
+  wgsl:
+`   let st = _st * vec2<f32>(reps, 1.0);
    //  float f =  mod(_st.y,2.0);
    st.x += step(1., mod(st.y,2.0)) + _c0.r * offset;
    return fract(st);`
@@ -543,7 +656,16 @@ export default () => [
    float pi = 2.*3.1416;
    a = mod(a,pi/nSides);
    a = abs(a-pi/nSides/2.);
-   return r*vec2(cos(a), sin(a));`
+   return r*vec2(cos(a), sin(a));`,
+ wgsl:
+`  var st = _st;
+   st -= 0.5;
+   let r : f32 = length(st);
+   var a : f32 = atan2(st.y, st.x);
+   let pi : f32 = 2.*3.1416;
+   a = a % (pi/nSides);
+   a = abs(a-pi/nSides/2.);
+   return r*vec2<f32>(cos(a), sin(a));`
 },
 {
   name: 'modulateKaleid',
@@ -560,6 +682,14 @@ export default () => [
    float r = length(st);
    float a = atan(st.y, st.x);
    float pi = 2.*3.1416;
+   a = mod(a,pi/nSides);
+   a = abs(a-pi/nSides/2.);
+   return (_c0.r+r)*vec2(cos(a), sin(a));`,
+  wgsl:
+`  let st = _st - 0.5;
+   let r : f32= length(st);
+   let a : f32 = atan2(st.y, st.x);
+   let pi : f32= 2.*3.1416;
    a = mod(a,pi/nSides);
    a = abs(a-pi/nSides/2.);
    return (_c0.r+r)*vec2(cos(a), sin(a));`
@@ -593,7 +723,13 @@ export default () => [
 `
    _st.x += scrollX + time*speedX;
    _st.y += scrollY + time*speedY;
-   return fract(_st);`
+   return fract(_st);`,
+  wgsl:
+`
+	 let st : vec2<f32> = _st
+   st.x += scrollX + time*speedX;
+   st.y += scrollY + time*speedY;
+   return fract(st);`
 },
 {
   name: 'scrollX',
@@ -612,7 +748,11 @@ export default () => [
   ],
   glsl:
 `   _st.x += scrollX + time*speed;
-   return fract(_st);`
+   return fract(_st);`,
+  wgsl:
+`  var st : vec2<f32>  = _st;
+	 st.x += scrollX + time*speed;
+   return fract(st);`
 },
 {
   name: 'modulateScrollX',
@@ -631,7 +771,11 @@ export default () => [
   ],
   glsl:
 `   _st.x += _c0.r*scrollX + time*speed;
-   return fract(_st);`
+   return fract(_st);`,
+   wgsl:
+`  let st : vec2(<f32>  = _st; 
+	st.x += _c0.r*scrollX + time*speed;
+   return fract(st);`
 },
 {
   name: 'scrollY',
@@ -650,7 +794,11 @@ export default () => [
   ],
   glsl:
 `   _st.y += scrollY + time*speed;
-   return fract(_st);`
+   return fract(_st);`,
+  wgsl:
+`  let st : vec2<f32>  = _st;
+   st.y += scrollY + time*speed;
+   return fract(st);`
 },
 {
   name: 'modulateScrollY',
@@ -669,7 +817,11 @@ export default () => [
   ],
   glsl:
 `   _st.y += _c0.r*scrollY + time*speed;
-   return fract(_st);`
+   return fract(_st);`,
+  wgsl:
+`  let st : vec2<f32>  = _st;
+   st.y += _c0.r*scrollY + time*speed;
+   return fract(st);`
 },
 {
   name: 'add',
@@ -682,6 +834,8 @@ export default () => [
     }
   ],
   glsl:
+`   return (_c0+_c1)*amount + _c0*(1.0-amount);`,
+  wgsl:
 `   return (_c0+_c1)*amount + _c0*(1.0-amount);`
 },
 {
@@ -695,6 +849,8 @@ export default () => [
     }
   ],
   glsl:
+`   return (_c0-_c1)*amount + _c0*(1.0-amount);`,
+  wgsl:
 `   return (_c0-_c1)*amount + _c0*(1.0-amount);`
 },
 {
@@ -704,7 +860,9 @@ export default () => [
 
   ],
   glsl:
-`   return vec4(mix(_c0.rgb, _c1.rgb, _c1.a), clamp(_c0.a + _c1.a, 0.0, 1.0));`
+`   return vec4(mix(_c0.rgb, _c1.rgb, _c1.a), clamp(_c0.a + _c1.a, 0.0, 1.0));`,
+  wgsl:
+`   return vec4<f32>(mix(_c0.rgb, _c1.rgb, _c1.a), clamp(_c0.a + _c1.a, 0.0, 1.0));`
 },
 {
   name: 'blend',
@@ -717,6 +875,8 @@ export default () => [
     }
   ],
   glsl:
+`   return _c0*(1.0-amount)+_c1*amount;`,
+  wgsl:
 `   return _c0*(1.0-amount)+_c1*amount;`
 },
 {
@@ -730,6 +890,8 @@ export default () => [
     }
   ],
   glsl:
+`   return _c0*(1.0-amount)+(_c0*_c1)*amount;`,
+  wgsl:
 `   return _c0*(1.0-amount)+(_c0*_c1)*amount;`
 },
 {
@@ -739,7 +901,9 @@ export default () => [
 
   ],
   glsl:
-`   return vec4(abs(_c0.rgb-_c1.rgb), max(_c0.a, _c1.a));`
+`   return vec4(abs(_c0.rgb-_c1.rgb), max(_c0.a, _c1.a));`,
+  wgsl:
+`   return vec4<f32>(abs(_c0.rgb-_c1.rgb), max(_c0.a, _c1.a));`
 },
 {
   name: 'modulate',
@@ -752,6 +916,9 @@ export default () => [
     }
   ],
   glsl:
+`   //  return fract(st+(_c0.xy-0.5)*amount);
+   return _st + _c0.xy*amount;`,
+  wgsl:
 `   //  return fract(st+(_c0.xy-0.5)*amount);
    return _st + _c0.xy*amount;`
 },
@@ -774,6 +941,11 @@ export default () => [
 `   vec2 xy = _st - vec2(0.5);
    xy*=(1.0/vec2(offset + multiple*_c0.r, offset + multiple*_c0.g));
    xy+=vec2(0.5);
+   return xy;`,
+  wgsl:
+`  var xy : vec2<f32> = _st - vec2<f32>(0.5);
+   xy*=(1.0/vec2<f32>(offset + multiple*_c0.r, offset + multiple*_c0.g));
+   xy+=vec2<f32>(0.5);
    return xy;`
 },
 {
@@ -793,6 +965,9 @@ export default () => [
   ],
   glsl:
 `   vec2 xy = vec2(offset + _c0.x*multiple, offset + _c0.y*multiple);
+   return (floor(_st * xy) + 0.5)/xy;`,
+  wgsl:
+`   let xy : vec2<f32> = vec2<f32>(offset + _c0.x*multiple, offset + _c0.y*multiple);
    return (floor(_st * xy) + 0.5)/xy;`
 },
 {
@@ -813,7 +988,13 @@ export default () => [
   glsl:
 `   vec2 xy = _st - vec2(0.5);
    float angle = offset + _c0.x * multiple;
-   xy = mat2(cos(angle),-sin(angle), sin(angle),cos(angle))*xy;
+   xy = mat2x2(cos(angle),-sin(angle), sin(angle),cos(angle))*xy;
+   xy += 0.5;
+   return xy;`,
+  wgsl:
+`  var xy : vec2<f32> = _st - vec2(0.5);
+   float angle = offset + _c0.x * multiple;
+   xy = mat2x2<f32>(cos(angle),-sin(angle), sin(angle),cos(angle))*xy;
    xy += 0.5;
    return xy;`
 },
@@ -828,6 +1009,8 @@ export default () => [
     }
   ],
   glsl:
+`   return _st + (vec2(_c0.g - _c0.r, _c0.b - _c0.g) * amount * 1.0/resolution);`,
+  wgsl:
 `   return _st + (vec2(_c0.g - _c0.r, _c0.b - _c0.g) * amount * 1.0/resolution);`
 },
 {
@@ -841,7 +1024,9 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4((1.0-_c0.rgb)*amount + _c0.rgb*(1.0-amount), _c0.a);`
+`   return vec4((1.0-_c0.rgb)*amount + _c0.rgb*(1.0-amount), _c0.a);`,
+  wgsl:
+`   return vec4<f32>((1.0-_c0.rgb)*amount + _c0.rgb*(1.0-amount), _c0.a);`
 },
 {
   name: 'contrast',
@@ -855,7 +1040,10 @@ export default () => [
   ],
   glsl:
 `   vec4 c = (_c0-vec4(0.5))*vec4(amount) + vec4(0.5);
-   return vec4(c.rgb, _c0.a);`
+   return vec4(c.rgb, _c0.a);`,
+  wgsl:
+`   vec4 c = (_c0-vec4(0.5))*vec4(amount) + vec4(0.5);
+   return vec4<f32>(c.rgb, _c0.a);`
 },
 {
   name: 'brightness',
@@ -868,7 +1056,9 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(_c0.rgb + vec3(amount), _c0.a);`
+`   return vec4(_c0.rgb + vec3(amount), _c0.a);`,
+  wgsl:
+`   return vec4<f32>(_c0.rgb + vec3(amount), _c0.a);`
 },
 {
   name: 'mask',
@@ -878,7 +1068,10 @@ export default () => [
   ],
   glsl:
   `   float a = _luminance(_c1.rgb);
-  return vec4(_c0.rgb*a, a*_c0.a);`
+  return vec4(_c0.rgb*a, a*_c0.a);`,
+  wgsl:
+  `   float a = _luminance(_c1.rgb);
+  return vec4<f32>(_c0.rgb*a, a*_c0.a);`
 },
 
 {
@@ -898,6 +1091,9 @@ export default () => [
   ],
   glsl:
 `   float a = smoothstep(threshold-(tolerance+0.0000001), threshold+(tolerance+0.0000001), _luminance(_c0.rgb));
+   return vec4(_c0.rgb*a, a);`,
+  wgsl:
+`   let a : f32 = smoothstep(threshold-(tolerance+0.0000001), threshold+(tolerance+0.0000001), _luminance(_c0.rgb));
    return vec4(_c0.rgb*a, a);`
 },
 {
@@ -916,7 +1112,9 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(vec3(smoothstep(threshold-(tolerance+0.0000001), threshold+(tolerance+0.0000001), _luminance(_c0.rgb))), _c0.a);`
+`   return vec4(vec3(smoothstep(threshold-(tolerance+0.0000001), threshold+(tolerance+0.0000001), _luminance(_c0.rgb))), _c0.a);`,
+  wgsl:
+`   return vec4<f32>(vec3<f32>(smoothstep(threshold-(tolerance+0.0000001), threshold+(tolerance+0.0000001), _luminance(_c0.rgb))), _c0.a);`
 },
 {
   name: 'color',
@@ -948,7 +1146,13 @@ export default () => [
    vec4 pos = step(0.0, c); // detect whether negative
    // if > 0, return r * _c0
    // if < 0 return (1.0-r) * _c0
-   return vec4(mix((1.0-_c0)*abs(c), c*_c0, pos));`
+   return vec4(mix((1.0-_c0)*abs(c), c*_c0, pos));`,
+  wgsl:
+`  let c = vec4<f32>(r, g, b, a);
+   let pos : vec4<f32> = step(vec4<f32>(0.0), c); // detect whether negative
+   // if > 0, return r * _c0
+   // if < 0 return (1.0-r) * _c0
+   return vec4<f32>(mix((1.0-_c0)*abs(c), c*_c0, pos));`
 },
 {
   name: 'saturate',
@@ -963,7 +1167,11 @@ export default () => [
   glsl:
 `   const vec3 W = vec3(0.2125, 0.7154, 0.0721);
    vec3 intensity = vec3(dot(_c0.rgb, W));
-   return vec4(mix(intensity, _c0.rgb, amount), _c0.a);`
+   return vec4(mix(intensity, _c0.rgb, amount), _c0.a);`,
+  wgsl:
+`   const W = vec3<f32>(0.2125, 0.7154, 0.0721);
+    let intensity = vec3<f32>(dot(_c0.rgb, W));
+   return vec4<f32>(mix(intensity, _c0.rgb, amount), _c0.a);`
 },
 {
   name: 'hue',
@@ -979,7 +1187,13 @@ export default () => [
 `   vec3 c = _rgbToHsv(_c0.rgb);
    c.r += hue;
    //  c.r = fract(c.r);
-   return vec4(_hsvToRgb(c), _c0.a);`
+   return vec4(_hsvToRgb(c), _c0.a);`,
+  wgsl:
+`   var c  = _rgbToHsv(_c0.rgb);
+   c.r = c.r + hue;
+   //  c.r = fract(c.r);
+   return vec4<f32>(_hsvToRgb(c), _c0.a);`,
+   needs: ["_rgbToHsv", "_hsvToRgb"]
 },
 {
   name: 'colorama',
@@ -996,7 +1210,14 @@ export default () => [
    c += vec3(amount);
    c = _hsvToRgb(c);
    c = fract(c);
-   return vec4(c, _c0.a);`
+   return vec4(c, _c0.a);`,
+  wgsl:
+`  var c : vec3<f32> = _rgbToHsv(_c0.rgb);
+   c += vec3<f32>(amount);
+   c = _hsvToRgb(c);
+   c = fract(c);
+   return vec4(c, _c0.a);`,
+  needs: ["_rgbToHsv", "_hsvToRgb"]
 },
 {
   name: 'prev',
@@ -1005,6 +1226,8 @@ export default () => [
 
   ],
   glsl:
+`   return texture2D(prevBuffer, fract(_st));`,
+  wgsl:
 `   return texture2D(prevBuffer, fract(_st));`
 },
 {
@@ -1023,6 +1246,13 @@ export default () => [
    }
    float sum(vec2 _st, vec4 s) { // vec4 is not a typo, because argument type is not overloaded
    vec2 v = _st.xy * s.xy;
+   return v.x + v.y;`,
+  wgsl:
+`  let v = vec4<f32> = _c0 * s;
+   return v.r + v.g + v.b + v.a;
+   }
+   fn sum( _st : vec2<f32>, s : vec4<f32>) -> f32 { // vec4 is not a typo, because argument type is not overloaded
+   v : vec2<f32> = _st.xy * s.xy;
    return v.x + v.y;`
 },
 {
@@ -1041,7 +1271,9 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(_c0.r * scale + offset);`
+`   return vec4(_c0.r * scale + offset);`,
+  wgsl:
+`   return vec4<f32>(_c0.r * scale + offset);`
 },
 {
   name: 'g',
@@ -1059,7 +1291,9 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(_c0.g * scale + offset);`
+`   return vec4(_c0.g * scale + offset);`,
+  wgsl:
+`   return vec4<f32>(_c0.g * scale + offset);`
 },
 {
   name: 'b',
@@ -1077,7 +1311,9 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(_c0.b * scale + offset);`
+`   return vec4(_c0.b * scale + offset);`,
+  wgsl:
+`   return vec4<f32>(_c0.b * scale + offset);`
 },
 {
   name: 'a',
@@ -1095,6 +1331,8 @@ export default () => [
     }
   ],
   glsl:
-`   return vec4(_c0.a * scale + offset);`
+`   return vec4(_c0.a * scale + offset);`,
+  wgsl:
+`   return vec4<f32>(_c0.a * scale + offset);`
 }
 ]
