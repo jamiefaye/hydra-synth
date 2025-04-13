@@ -1,43 +1,23 @@
 {
   "name": "hydra-synth",
-  "version": "1.3.29",
-  "description": "base synth for hydra-editor",
+  "private": true,
+  "version": "1.4.0",
+  "files": ["dist"],
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./dist/hydra-synth.umd.js",
+  "module":"./dist/hydra-synth.es.js",
   "exports": {
-    ".": {
-      "import": "./src/hydra-synth.js",
-      "require": "./src/index.js"
-    },
-    "./src/glsl/glsl-functions.js": {
-      "import": "./src/glsl/glsl-functions.js",
-      "require": "./src/glsl/glsl-functions.js"
+   	".": {
+			"import": "./dist/hydra-synth.es.js",
+      "require": "./dist/hydra-synth.umd.js"
     }
   },
-  "unpkg": "./dist/hydra-synth.js",
   "scripts": {
-    "dev-ssl": "budo ./dev/index.js --ssl --open --live --port 8000 --",
-    "dev": "budo ./dev/index.js --open --live --port 8000 -- -p esmify",
-    "build": "browserify ./src/index.js -p esmify --standalone Hydra > dist/hydra-synth.js --base=/hydra/"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ojack/hydra-synth.git"
-  },
-  "keywords": [
-    "webgl",
-    "regl",
-    "graphics",
-    "livecoding",
-    "synth"
-  ],
-  "author": "ojack",
-  "license": "AGPL",
-  "bugs": {
-    "url": "https://github.com/ojack/hydra-synth/issues"
-  },
-  "homepage": "https://github.com/ojack/hydra-synth#readme",
-  "dependencies": {
+   "dependencies": {
     "meyda": "^5.6.3",
     "events": "^1.0.2",
     "inherits": "^2.0.1",
@@ -45,8 +25,6 @@
     "webgpu-utils": "^1.10.1"
   },
   "devDependencies": {
-    "browserify": "^17.0.0",
-    "budo": "^11.8.4",
-    "esmify": "^2.1.1"
+    "vite": "^6.2.0"
   }
 }

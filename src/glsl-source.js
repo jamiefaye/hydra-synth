@@ -80,6 +80,7 @@ GlslSource.prototype.compile = function (transforms) {
   }).join('')}
 
  ${shaderInfo.glslFunctions.map((transform) => {
+ 	if (this.isWGSL && transform.transform.strange) return '';
     return `
             ${transform.transform.wgsl}
           `

@@ -141,10 +141,10 @@ wgsl:
 `
 	 var color = vec3<f32>(.0);
    // Scale
-   var _st = st * scale;
+   var st = _st * scale;
    // Tile the space
-   let i_st = floor(_st);
-   let f_st = fract(_st);
+   let i_st = floor(st);
+   let f_st = fract(st);
    var m_dist : f32 = 10.;  // minimun distance
    var m_point : vec2<f32>; // minimum point
    for (var j=-1; j<=1; j++ ) {
@@ -162,10 +162,9 @@ wgsl:
    }
    }
    // Assign a color using the closest point position
-   color += dot(m_point,vec2(.3,.6));
-   color *= 1.0 - blending*m_dist;
+   color = color + dot(m_point,vec2(.3,.6));
+   color = color * (1.0 - blending*m_dist);
  return vec4<f32>(color, 1.0);
- }
 `
 },
 {
@@ -196,7 +195,7 @@ wgsl:
    return vec4(r, g, b, 1.0);`,
 
   wgsl:
-`  let st = vec2<f32>(_st);
+`  var st = vec2<f32>(_st);
    let r = f32(sin((st.x-offset/frequency+time*sync)*frequency)*0.5  + 0.5);
    let g = f32(sin((st.x+time*sync)*frequency)*0.5 + 0.5);
    let b = f32(sin((st.x+offset/frequency+time*sync)*frequency)*0.5  + 0.5);
@@ -230,7 +229,7 @@ wgsl:
    float d = cos(floor(.5+a/r)*r-a)*length(st);
    return vec4(vec3(1.0-smoothstep(radius,radius + smoothing + 0.0000001,d)), 1.0);`,
   wgsl:
-`   vec2 st = _st * 2. - 1.;
+`  var st = _st * 2. - 1.;
    // Angle and radius from the current pixel
    let a = f32(atan2(st.x,st.y)+3.1416);
    let r = f32((2.*3.1416)/sides);
@@ -260,14 +259,20 @@ wgsl:
       type: 'sampler2D',
       name: 'tex',
       default: NaN,
+
     }
   ],
+  strange: true,
   glsl:
 `   //  vec2 uv = gl_FragCoord.xy/vec2(1280., 720.);
    return texture2D(tex, fract(_st));`,
-  wgsl:
-` 
-   return texture2D(tex, fract(_st));`
+
+// This variant expects a strange value of the tex variable
+  wgsl: // was texture2D
+  `
+		return texture2D(tex, fract(_st));`,
+		
+		
 },
 {
   name: 'solid',
@@ -324,7 +329,7 @@ wgsl:
 `  var xy = _st - vec2<f32>(0.5);
    let ang = f32(angle + speed *time);
    xy = mat2x2<f32>(cos(ang),-sin(ang), sin(ang),cos(ang))*xy;
-   xy += 0.5;
+   xy = xy + 0.5;
    return xy;`
 },
 {
@@ -365,8 +370,8 @@ wgsl:
    `,
   wgsl:
 `  var xy = _st - vec2<f32>(offsetX, offsetY);
-   xy*=(1.0/vec2(amount*xMult, amount*yMult));
-   xy+=vec2<f32>(offsetX, offsetY);
+   xy = xy * (1.0/vec2(amount*xMult, amount*yMult));
+   xy = xy + vec2<f32>(offsetX, offsetY);
    return xy;
    `
 },
@@ -415,8 +420,8 @@ wgsl:
    c2 = pow(c2, vec4(1.0/gamma));
    return vec4(c2.xyz, _c0.a);`,
   wgsl:
-`  let c2 : vec4<f32> = pow(_c0, vec4<f32>(gamma));
-   c2 *= vec4(bins);
+`  var c2 : vec4<f32> = pow(_c0, vec4<f32>(gamma));
+   c2 = c2 * vec4(bins);
    c2 = floor(c2);
    c2/= vec4(bins);
    c2 = pow(c2, vec4<f32>(1.0/gamma));
@@ -455,7 +460,7 @@ wgsl:
    c2.a = fract(c2.a + a);
    return vec4(c2.rgba);`,
   wgsl:
-`  let c2 = vec4<f32>(_c0);
+`  var c2 = vec4<f32>(_c0);
    c2.r = fract(c2.r + r);
    c2.g = fract(c2.g + g);
    c2.b = fract(c2.b + b);
@@ -493,9 +498,9 @@ wgsl:
    st.y += step(1., mod(st.x,2.0)) * offsetY;
    return fract(st);`,
   wgsl:
-`  let st = _st * vec2<f32>(repeatX, repeatY);
-   st.x += step(1., st.y % 2.0) * offsetX;
-   st.y += step(1., st.x % 2.0) * offsetY;
+`  var st = _st * vec2<f32>(repeatX, repeatY);
+   st.x = st.x + step(1., _mod(st.y, 2.0)) * offsetX;
+   st.y = st.y + step(1., _mod(st.x, 2.0)) * offsetY;
    return fract(st);`
 },
 {
@@ -529,9 +534,9 @@ wgsl:
    st.y += step(1., mod(st.x,2.0)) + _c0.g * offsetY;
    return fract(st);`,
   wgsl:
-`  let st = _st * vec2<f32>(repeatX, repeatY);
-   st.x += step(1., st.y %2.0) + _c0.r * offsetX;
-   st.y += step(1., st.x %2.0) + _c0.g * offsetY;
+`  var st = _st * vec2<f32>(repeatX, repeatY);
+   st.x = st.x + step(1., _mod(st.y, 2.0)) + _c0.r * offsetX;
+   st.y = st.x + step(1., _mod(st.x, 2.0)) + _c0.g * offsetY;
    return fract(st);`
 },
 {
@@ -557,7 +562,7 @@ wgsl:
   wgsl:
 `   var st = _st * vec2<f32>(reps, 1.0);
    //  float f =  mod(_st.y,2.0);
-   st.y += step(1., st.x % 2.0)* offset;
+   st.y = st.y + (step(1., _mod(st.x, 2.0))* offset);
    return fract(st);`
 },
 {
@@ -581,9 +586,9 @@ wgsl:
    st.y += step(1., mod(st.x,2.0)) + _c0.r * offset;
    return fract(st);`,
   wgsl:
-`  let st = _st * vec2<f32>(reps, 1.0);
+`  var st = _st * vec2<f32>(reps, 1.0);
    //  float f =  mod(_st.y,2.0);
-   st.y += step(1., st.x %2.0) + _c0.r * offset;
+   st.y = st.y + (step(1., _mod(st.x, 2.0)) + _c0.r * offset);
    return fract(st);`
 },
 {
@@ -609,7 +614,7 @@ wgsl:
   wgsl:
 `   var st = _st * vec2<f32>(1.0, reps);
    //  float f =  mod(_st.y,2.0);
-   st.x += step(1., st.y %2.0)* offset;
+   st.x = st.x + step(1., _mod(st.y, 2.0))* offset;
    return fract(st);`
 },
 {
@@ -633,9 +638,9 @@ wgsl:
    st.x += step(1., mod(st.y,2.0)) + _c0.r * offset;
    return fract(st);`,
   wgsl:
-`   let st = _st * vec2<f32>(reps, 1.0);
+`   var st = _st * vec2<f32>(reps, 1.0);
    //  float f =  mod(_st.y,2.0);
-   st.x += step(1., mod(st.y,2.0)) + _c0.r * offset;
+   st.x = st.x + step(1., _mod(st.y,2.0)) + _c0.r * offset;
    return fract(st);`
 },
 {
@@ -659,11 +664,11 @@ wgsl:
    return r*vec2(cos(a), sin(a));`,
  wgsl:
 `  var st = _st;
-   st -= 0.5;
+   st = st - 0.5;
    let r : f32 = length(st);
    var a : f32 = atan2(st.y, st.x);
    let pi : f32 = 2.*3.1416;
-   a = a % (pi/nSides);
+   a = _mod(a, pi/nSides);
    a = abs(a-pi/nSides/2.);
    return r*vec2<f32>(cos(a), sin(a));`
 },
@@ -686,13 +691,13 @@ wgsl:
    a = abs(a-pi/nSides/2.);
    return (_c0.r+r)*vec2(cos(a), sin(a));`,
   wgsl:
-`  let st = _st - 0.5;
+`  var st = _st - 0.5;
    let r : f32= length(st);
-   let a : f32 = atan2(st.y, st.x);
+   var a : f32 = atan2(st.y, st.x);
    let pi : f32= 2.*3.1416;
-   a = mod(a,pi/nSides);
+   a = _mod(a,pi/nSides);
    a = abs(a-pi/nSides/2.);
-   return (_c0.r+r)*vec2(cos(a), sin(a));`
+   return (_c0.r+r)*vec2<f32>(cos(a), sin(a));`
 },
 {
   name: 'scroll',
@@ -726,9 +731,9 @@ wgsl:
    return fract(_st);`,
   wgsl:
 `
-	 let st : vec2<f32> = _st
-   st.x += scrollX + time*speedX;
-   st.y += scrollY + time*speedY;
+	 var st : vec2<f32> = _st
+   st.x = st.x + scrollX + time*speedX;
+   st.y =  st.y + scrollY + time*speedY;
    return fract(st);`
 },
 {
@@ -751,7 +756,7 @@ wgsl:
    return fract(_st);`,
   wgsl:
 `  var st : vec2<f32>  = _st;
-	 st.x += scrollX + time*speed;
+	 st.x = st.x + scrollX + time*speed;
    return fract(st);`
 },
 {
@@ -773,8 +778,8 @@ wgsl:
 `   _st.x += _c0.r*scrollX + time*speed;
    return fract(_st);`,
    wgsl:
-`  let st : vec2(<f32>  = _st; 
-	st.x += _c0.r*scrollX + time*speed;
+`   var st : vec2(<f32>  = _st; 
+	  st.x = st.x + _c0.r*scrollX + time*speed;
    return fract(st);`
 },
 {
@@ -796,8 +801,8 @@ wgsl:
 `   _st.y += scrollY + time*speed;
    return fract(_st);`,
   wgsl:
-`  let st : vec2<f32>  = _st;
-   st.y += scrollY + time*speed;
+`  var st : vec2<f32>  = _st;
+   st.y = st.y + scrollY + time*speed;
    return fract(st);`
 },
 {
@@ -819,8 +824,8 @@ wgsl:
 `   _st.y += _c0.r*scrollY + time*speed;
    return fract(_st);`,
   wgsl:
-`  let st : vec2<f32>  = _st;
-   st.y += _c0.r*scrollY + time*speed;
+`  var st : vec2<f32>  = _st;
+   st.y = st.y + _c0.r*scrollY + time*speed;
    return fract(st);`
 },
 {
@@ -944,8 +949,8 @@ wgsl:
    return xy;`,
   wgsl:
 `  var xy : vec2<f32> = _st - vec2<f32>(0.5);
-   xy*=(1.0/vec2<f32>(offset + multiple*_c0.r, offset + multiple*_c0.g));
-   xy+=vec2<f32>(0.5);
+   xy =xy *(1.0/vec2<f32>(offset + multiple*_c0.r, offset + multiple*_c0.g));
+   xy= xy + vec2<f32>(0.5);
    return xy;`
 },
 {
@@ -988,14 +993,14 @@ wgsl:
   glsl:
 `   vec2 xy = _st - vec2(0.5);
    float angle = offset + _c0.x * multiple;
-   xy = mat2x2(cos(angle),-sin(angle), sin(angle),cos(angle))*xy;
+   xy = mat2(cos(angle),-sin(angle), sin(angle),cos(angle))*xy;
    xy += 0.5;
    return xy;`,
   wgsl:
 `  var xy : vec2<f32> = _st - vec2(0.5);
-   float angle = offset + _c0.x * multiple;
+   let angle = offset + _c0.x * multiple;
    xy = mat2x2<f32>(cos(angle),-sin(angle), sin(angle),cos(angle))*xy;
-   xy += 0.5;
+   xy = xy +  0.5;
    return xy;`
 },
 {
@@ -1042,7 +1047,7 @@ wgsl:
 `   vec4 c = (_c0-vec4(0.5))*vec4(amount) + vec4(0.5);
    return vec4(c.rgb, _c0.a);`,
   wgsl:
-`   vec4 c = (_c0-vec4(0.5))*vec4(amount) + vec4(0.5);
+`   let c = vec4<f32> ((_c0-vec4(0.5))*vec4(amount) + vec4(0.5));
    return vec4<f32>(c.rgb, _c0.a);`
 },
 {
@@ -1070,7 +1075,7 @@ wgsl:
   `   float a = _luminance(_c1.rgb);
   return vec4(_c0.rgb*a, a*_c0.a);`,
   wgsl:
-  `   float a = _luminance(_c1.rgb);
+  `   let a = _luminance(_c1.rgb);
   return vec4<f32>(_c0.rgb*a, a*_c0.a);`
 },
 
@@ -1213,10 +1218,10 @@ wgsl:
    return vec4(c, _c0.a);`,
   wgsl:
 `  var c : vec3<f32> = _rgbToHsv(_c0.rgb);
-   c += vec3<f32>(amount);
+   c = c + vec3<f32>(amount);
    c = _hsvToRgb(c);
    c = fract(c);
-   return vec4(c, _c0.a);`,
+   return vec4<f32>(c, _c0.a);`,
   needs: ["_rgbToHsv", "_hsvToRgb"]
 },
 {
@@ -1227,8 +1232,11 @@ wgsl:
   ],
   glsl:
 `   return texture2D(prevBuffer, fract(_st));`,
+
+// There is only one preview sampler per render chain
+// so we can get away with using an unmodified name.
   wgsl:
-`   return texture2D(prevBuffer, fract(_st));`
+`   return samplerprev(prevBuffer, fract(_st));`
 },
 {
   name: 'sum',

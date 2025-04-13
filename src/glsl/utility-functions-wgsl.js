@@ -1,6 +1,12 @@
 // functions that are only used within other functions
 
 export default {
+_mod: {
+    type: 'util',
+    wgsl: `fn _mod(x : f32, y: f32) -> f32 {
+				return x - y * floor(x / y);
+    }`
+  },
 _luminance: {
     type: 'util',
     wgsl: `fn _luminance(rgb : vec3<f32>) -> f32 {

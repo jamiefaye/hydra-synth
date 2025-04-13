@@ -20,12 +20,14 @@ class OutputWgsl {
 
 
  getCurrent() {
-  return this.fbos[this.pingPongIndex]
+ 	let opposite = this.wgslHydra.fboPingPong === 0 ? 1 : 0;
+  return this.fbos[opposite]
 }
 
 getTexture() {
-   var index = this.pingPongIndex ? 0 : 1
-  return this.fbos[index]
+	 let opposite = this.wgslHydra.fboPingPong === 0 ? 1 : 0;
+   let tex = this.wgslHydra.channelTexInfo[this.chanNum].views[opposite];
+   return tex;
 }
 
 init () {
@@ -51,7 +53,7 @@ async render(passes) {
     })
  // Present the pass fragment to the wgsl-hydra instance for this channel.
  // Setup the tick handler
- 		this.hydraChan = await this.wgslHydra.setupHydraChain(this.chanNum,[] , pass);
+ 		this.hydraChan = await this.wgslHydra.setupHydraChain(this.chanNum, uniforms , pass);
  /*
  	self.draw = self.regl({
     	frag: pass.frag,

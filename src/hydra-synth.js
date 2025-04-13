@@ -36,7 +36,7 @@ class HydraRenderer {
     autoLoop = true,
     detectAudio = true,
     enableStreamCapture = true,
-    genWGSL = true, // **** JFF Hack!!
+    genWGSL = false, // **** JFF Hack!!
     canvas,
     precision,
     extendTransforms = {} // add your own functions on init
@@ -109,6 +109,7 @@ class HydraRenderer {
 
     this.generator = undefined
 
+		this.numOutputs = numOutputs
 		if (this.genWGSL) {
 			this.wgslHydra = new wgslHydra(this.canvas, 4);
 
@@ -116,9 +117,8 @@ class HydraRenderer {
 				this._initOutputsWgsl(numOutputs);
 				this._initSourcesWgsl(numSources);
 				this._generateGlslTransforms();	
-				if(autoLoop) this.looper = loop(this.tick.bind(this)).start();
 				this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
-
+				if(autoLoop) this.looper = loop(this.tick.bind(this)).start();
 			});
 
 		} else {
@@ -457,7 +457,7 @@ class HydraRenderer {
   }
 
   createSourceWgsl (i) {
-    let s = new HydraSourceWGSL({regl: this.regl, pb: this.pb, width: this.width, height: this.height, label: `s${i}`})
+    let s = new HydraSourceWGSL({hs: this.wgslHydra, pb: this.pb, width: this.width, height: this.height, chanNum: i, label: `s${i}`})
     this.synth['s' + this.s.length] = s
     this.s.push(s)
     return s
@@ -489,13 +489,23 @@ class HydraRenderer {
     if (output) {
       this.output = output
       this.isRenderingAll = false
+       if (this.wgslHydra) {
+      		 this.wgslHydra.showQuad = false;
+					if (output.chanNum < this.numOutputs ) {
+			 			this.wgslHydra.outChannel = output.chanNum;
+	      	}
+	      }
     } else {
       this.isRenderingAll = true
+     	if (this.wgslHydra) {
+      		 this.wgslHydra.showQuad = true;
+      	}
     }
   }
 
   // dt in ms
   tick (dt, uniforms) {
+    if(!this.sandbox) return;
     this.sandbox.tick()
     if(this.detectAudio === true) this.synth.a.tick()
   //  let updateInterval = 1000/this.synth.fps // ms
@@ -504,7 +514,11 @@ class HydraRenderer {
     if(!this.synth.fps || this.timeSinceLastUpdate >= 1000/this.synth.fps) {
         if (this.genWGSL) {
         		// Visit sources.
-        		this.wgslHydra.requestAnimationFrame();
+        		//  console.log(this.synth.speed, this.synth.time)
+          	for (let i = 0; i < this.s.length; i++) {
+            	this.s[i].tick(this.synth.time)
+          }
+        	this.wgslHydra.requestAnimationFrame();
         } else 
         {
         //  console.log(1000/this.timeSinceLastUpdate)

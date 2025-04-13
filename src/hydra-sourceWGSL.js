@@ -2,26 +2,37 @@ import Webcam from './lib/webcam.js'
 import Screen from './lib/screenmedia.js'
 
 class HydraSourceWGSL {
-  constructor ({ regl, width, height, pb, label = ""}) {
+  constructor ({ hs, width, height, chanNum, pb, label = ""}) {
     this.label = label
- //   this.regl = regl
+    this.hs = hs
     this.src = null
     this.dynamic = true
     this.width = width
     this.height = height
-//    this.tex = this.regl.texture({
-//      //  shape: [width, height]
-//      shape: [ 1, 1 ]
-//    })
-    this.pb = pb
+    this.chanNum = chanNum;
+    this.pb = pb;
+    this.lastTexture;
+    this.oneShotDone = false;
   }
 
   init (opts, params) {
     if ('src' in opts) {
       this.src = opts.src
-//      this.tex = this.regl.texture({ data: this.src, ...params })
+      this.tex = this.makeTexture(this.width, this.height);
     }
     if ('dynamic' in opts) this.dynamic = opts.dynamic
+  }
+
+  makeTexture(width, height) {
+  	let tex = this.hs.device.createTexture({
+    size: [width, height, 1],
+    format: this.hs.format, // was "rgba8unorm"
+    usage:
+      GPUTextureUsage.TEXTURE_BINDING |
+      GPUTextureUsage.COPY_DST |
+      GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+  	return tex;
   }
 
   initCam (index, params) {
@@ -30,7 +41,8 @@ class HydraSourceWGSL {
       .then(response => {
         self.src = response.video
         self.dynamic = true
-        self.tex = self.regl.texture({ data: self.src, ...params })
+        self.tex = self.makeTexture(self.src.videoWidth, self.src.videoHeight);
+       // self.tex = self.regl.texture({ data: self.src, ...params })
       })
       .catch(err => console.log('could not get camera', err))
   }
@@ -45,20 +57,22 @@ class HydraSourceWGSL {
     const onload = vid.addEventListener('loadeddata', () => {
       this.src = vid
       vid.play()
-      this.tex = this.regl.texture({ data: this.src, ...params})
+      // this.tex = this.regl.texture({ data: this.src, ...params})
+      this.tex = this.makeTexture(this.src.videoWidth, this.src.videoHeight);
       this.dynamic = true
     })
     vid.src = url
   }
 
   initImage (url = '', params) {
+  	this.oneShotDone = false;
     const img = document.createElement('img')
     img.crossOrigin = 'anonymous'
     img.src = url
     img.onload = () => {
       this.src = img
       this.dynamic = false
-      this.tex = this.regl.texture({ data: this.src, ...params})
+      this.tex = this.makeTexture(this.src.width, this.src.height);
     }
   }
 
@@ -103,12 +117,12 @@ class HydraSourceWGSL {
       }
     }
     this.src = null
-    this.tex = this.regl.texture({ shape: [ 1, 1 ] })
+    //if (this.regl) this.tex = this.regl.texture({ shape: [ 1, 1 ] })
   }
 
   tick (time) {
-    //  console.log(this.src, this.tex.width, this.tex.height)
-    if (this.src !== null && this.dynamic === true) {
+  	
+  	if (this.src !== null && this.dynamic === true) {
       if (this.src.videoWidth && this.src.videoWidth !== this.tex.width) {
         console.log(
           this.src.videoWidth,
@@ -116,8 +130,14 @@ class HydraSourceWGSL {
           this.tex.width,
           this.tex.height
         )
-        this.tex.resize(this.src.videoWidth, this.src.videoHeight)
+        //this.tex.resize(this.src.videoWidth, this.src.videoHeight)
       }
+    }
+    this.updateTexture();
+  }
+
+ /*
+    //  console.log(this.src, this.tex.width, this.tex.height)
 
       if (this.src.width && this.src.width !== this.tex.width) {
         this.tex.resize(this.src.width, this.src.height)
@@ -125,11 +145,43 @@ class HydraSourceWGSL {
 
       this.tex.subimage(this.src)
     }
-  }
+    
+    */
+
+ updateTexture() {
+ 	
+ 	  if (!this.src) return;
+ 	  if (!this.dynamic) {
+ 	  	// non-dynamic textures only need to be copied-in once.
+ 	     if (!this.oneShotDone) {
+ 	  	 	this.hs.device.queue.copyExternalImageToTexture(
+    			{ source: this.src, flipY: true},
+    			{ texture: this.tex },
+    			[this.src.width, this.src.height],
+  			);
+  			this.oneShotDone = true;
+		 }
+  		return;
+ 	  }
+
+    		// return this.hs.device.importExternalTexture({source: this.src});
+    this.hs.device.queue.copyExternalImageToTexture(
+    		{ source: this.src, flipY: true },
+    		{ texture: this.tex },
+    		[this.src.videoWidth, this.src.videoHeight],
+  		);
+    }
 
   getTexture () {
-    return this.tex
+  	if (!this.tex) return undefined;
+  	if (this.lastTexture !== this.tex || !this.lastTextureView) {
+  		// this.lastTexture = this.tex;
+  		 this.lastTextureView = this.tex.createView();
+  	}
+  	if (this.lastTextureView) return this.lastTextureView;
+    return undefined;
   }
+
 }
 
 export {HydraSourceWGSL}

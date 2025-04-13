@@ -6,11 +6,12 @@ import arrayUtils from './lib/array-utils.js'
 
 
 // converts a tree of javascript functions to a shader
-export default function (transforms) {
-    var shaderParams = {
+export default function (transforms, synth) {
+   var shaderParams = {
       uniforms: [], // list of uniforms used in shader
       glslFunctions: [], // list of functions used in shader
-      fragColor: ''
+      fragColor: '',
+      wgsl: synth && synth.isWGSL
     }
 
     var gen = generateGlsl(transforms, shaderParams)('st')
@@ -44,7 +45,16 @@ function generateGlsl (transforms, shaderParams) {
     // current function for generating frag color shader code
     var f0 = fragColor
     if (transform.transform.type === 'src') {
-      fragColor = (uv) => `${shaderString(uv, transform.name, inputs, shaderParams)}`
+    	// special case for textures as sources.
+    	// We may need to jam in a customized sampler for each possibility
+    	if (shaderParams.wgsl && inputs[0].type === "sampler2D") {
+    		 let texName = inputs[0].name;
+    		 let sampName = 'samp' + texName;
+    		 fragColor = (uv) => `textureSample( ${texName}, ${sampName}, st)`;
+    	} else { // all other types of 'src' are conventional.
+      	fragColor = (uv) => `${shaderString(uv, transform.name, inputs, shaderParams)}`
+      }
+
     } else if (transform.transform.type === 'coord') {
       fragColor = (uv) => `${f0(`${shaderString(uv, transform.name, inputs, shaderParams)}`)}`
     } else if (transform.transform.type === 'color') {

@@ -1,8 +1,6 @@
-//import { createTextureFromImage } from 'webgpu-utils';
-
 
 // Class to manage the drawing of a frame buffer object to a browser canvas.
-class FBOToCanvas {
+class FBO4ToCanvas {
 	
 	constructor (canvas, device) {
 		this.canvas = canvas;
@@ -28,11 +26,7 @@ class FBOToCanvas {
       }
 
       this.device = await adapter.requestDevice();
-			let fru =  './fritzpix.jpg';
-			let fritzPic = await createTextureFromImage(this.device, fru, {
- 		 		flipY: true,
-			});
-			this.sourceTexture = fritzPic;
+
 			
   }
 
@@ -54,12 +48,17 @@ class FBOToCanvas {
   	@builtin(position) position : vec4f,
   	@location(0) texcoord : vec2f,
 	 };
-   @group(0) @binding(0) var ourSamp: sampler;
-	 @group(0) @binding(1) var ourTex:  texture_2d<f32>;
+   @group(0) @binding(0) var ourSamp0: sampler;
+	 @group(0) @binding(1) var ourTex0:  texture_2d<f32>;
+   @group(0) @binding(2) var ourSamp1: sampler;
+	 @group(0) @binding(3) var ourTex1:  texture_2d<f32>;
+   @group(0) @binding(4) var ourSamp2: sampler;
+	 @group(0) @binding(5) var ourTex2:  texture_2d<f32>;
+	 @group(0) @binding(6) var ourSamp3: sampler;
+	 @group(0) @binding(7) var ourTex3:  texture_2d<f32>;
 `;
-
       // Step 4: Define shaders
-      const vertexShaderCode = codePrefix + `
+    const vertexShaderCode = codePrefix + `
         @vertex
         fn main(@builtin(vertex_index) vertexIndex : u32) -> VertexOutput {
           var positions = array<vec2<f32>, 6>(
@@ -78,14 +77,36 @@ class FBOToCanvas {
         }
       `;
 
-      const fragmentShaderCode = codePrefix + `
+    const fragmentShaderCode = codePrefix + `
         @fragment
         fn main(ourIn: VertexOutput) -> @location(0) vec4<f32> {
-          var uv :vec2<f32>;
-          uv = ourIn.texcoord; //* ourStruct.scale + ourStruct.offset;
-          return textureSample(ourTex, ourSamp, uv);
+         var uv :vec2<f32>;
+         uv = ourIn.texcoord; //* ourStruct.scale + ourStruct.offset;
+
+        var st = vec2<f32>(1.0 - uv.x, uv.y);
+        st = st * vec2<f32>(2.0);
+        let q = floor(st).xy*(vec2<f32>(2.0, 1.0));
+        let quad : i32 = i32(q.x) + i32(q.y);
+        st.x =  st.x + step(1., st.y % 2.0);
+        st.y = st.y + step(1., st.x %2.0);
+        st = fract(st);
+
+        let val0 = textureSample(ourTex0, ourSamp0, st);
+        let val1 = textureSample(ourTex1, ourSamp1, st);
+        let val2 = textureSample(ourTex2, ourSamp2, st);
+        let val3 = textureSample(ourTex3, ourSamp3, st);
+   
+        if(quad == 0){
+					return val3;
+        } else if (quad == 1) {
+					return val2;
+        } else if (quad == 2){
+					return val1;
+        } else {
+  				return val0;
         }
-      `;
+      }
+`;
 
       // Step 5: Create shader modules
       const vertexShaderModule = this.device.createShaderModule({ label: "vertFBO", code: vertexShaderCode });
@@ -97,6 +118,7 @@ class FBOToCanvas {
 		this.textureBindGroupLayout = this.device.createBindGroupLayout({
 			label: "FBOtextureBindGroupLayout",
   		entries: [
+//  0
      	{
       	binding: 0, // Binding index for sampler.
      	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
@@ -106,7 +128,7 @@ class FBOToCanvas {
     	},
     	
      	{
-      	binding: 1, // Binding index for texture.
+      	binding: 1, // Binding index for texture 0 
      	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
       	texture: {
           sampleType: "float",
@@ -114,6 +136,65 @@ class FBOToCanvas {
           multisampled: false,
         },
     	},
+    	
+ // 1
+      	{
+      	binding: 2, // Binding index for sampler.
+     	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
+     	  sampler: {
+          type: "filtering",
+        },
+    	},
+    	
+     	{
+      	binding: 3, // Binding index for texture 1
+     	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
+      	texture: {
+          sampleType: "float",
+          viewDimension: "2d",
+          multisampled: false,
+        },
+    	},
+    	
+ // 2
+      {
+      	binding: 4, // Binding index for sampler.
+     	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
+     	  sampler: {
+          type: "filtering",
+        },
+    	},
+    	
+     	{
+      	binding: 5, // Binding index for texture 2
+     	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
+      	texture: {
+          sampleType: "float",
+          viewDimension: "2d",
+          multisampled: false,
+        },
+    	},
+    	
+  // 3   	
+      	{
+      	binding: 6, // Binding index for sampler.
+     	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
+     	  sampler: {
+          type: "filtering",
+        },
+    	},
+  
+     	{
+      	binding: 7, // Binding index for texture 3
+     	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
+      	texture: {
+          sampleType: "float",
+          viewDimension: "2d",
+          multisampled: false,
+        },
+    	},
+ 
+ 
   		],
 		});
 
@@ -140,20 +221,30 @@ class FBOToCanvas {
         layout: this.pipelineLayout
       });
 
- 		this.sampler = this.device.createSampler();
+ 		this.sampler0 = this.device.createSampler();
+ 		this.sampler1 = this.device.createSampler();
+ 		this.sampler2 = this.device.createSampler();
+ 		this.sampler3 = this.device.createSampler();
+ 		 		 		 		
 	 	//this.refreshCanvas(this.sourceTexture);
  }
 
-	refreshCanvas(tex) {
+	refreshCanvases(tex0, tex1, tex2, tex3) {
 		// Create binding for our source texture, which may well have changed.
-		if (tex) this.sourceTexture = tex;
+
 
 		this.textureBindGroup = this.device.createBindGroup({
 			 label: "texture bind group",
   	   layout: this.textureBindGroupLayout,
   		 entries: [
-      	 {binding: 0, resource: this.sampler},
-    		 {binding: 1, resource: this.sourceTexture.createView()}
+      	 {binding: 0, resource: this.sampler0},
+    		 {binding: 1, resource: tex0.createView()},
+      	 {binding: 2, resource: this.sampler1},
+    		 {binding: 3, resource: tex1.createView()},
+     	   {binding: 4, resource: this.sampler2},
+    		 {binding: 5, resource: tex2.createView()},
+      	 {binding: 6, resource: this.sampler3},
+    		 {binding: 7, resource: tex3.createView()}	 
      	 ],
 		});	
 
@@ -184,4 +275,4 @@ class FBOToCanvas {
 		}
 };
 
-export {FBOToCanvas}
+export {FBO4ToCanvas}
