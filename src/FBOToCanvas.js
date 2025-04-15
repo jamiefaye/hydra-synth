@@ -165,7 +165,7 @@ class FBOToCanvas {
         colorAttachments: [{
           label: "FBO canvas textureView attachment",
           view: canvasTextureView,
-          clearValue: { r: 0.9, g: 0.9, b: 0.9, a: 1.0 },
+          clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
           loadOp: "clear",
           storeOp: "store",
         }],

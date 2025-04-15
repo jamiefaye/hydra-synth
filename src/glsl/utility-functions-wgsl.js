@@ -120,8 +120,8 @@ _luminance: {
         let K = vec4<f32>(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
         let p : vec3<f32> = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
         let cv : vec3<f32> = p - K.xxx;
-        let cvmin =  vec3<f32>(0.0);
-        let cvmax =  vec3<f32>(1.0);
+        let cvmin =  vec3<f32>(0.0, 0.0, 0.0);
+        let cvmax =  vec3<f32>(1.0, 1.0, 1.0);
         return  vec3<f32> (c.z * mix(K.xxx, clamp(cv, cvmin, cvmax), c.y));
     }`
   }

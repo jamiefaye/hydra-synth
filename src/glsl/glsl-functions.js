@@ -162,7 +162,7 @@ wgsl:
    }
    }
    // Assign a color using the closest point position
-   color = color + dot(m_point,vec2(.3,.6));
+   color = color + dot(m_point,vec2<f32>(.3,.6));
    color = color * (1.0 - blending*m_dist);
  return vec4<f32>(color, 1.0);
 `
@@ -267,12 +267,12 @@ wgsl:
 `   //  vec2 uv = gl_FragCoord.xy/vec2(1280., 720.);
    return texture2D(tex, fract(_st));`,
 
-// This variant expects a strange value of the tex variable
-  wgsl: // was texture2D
+// This variant should not be actually used as texture sampler stuff
+// is handled explicitly in generateGlsl.
+  wgsl:
   `
-		return texture2D(tex, fract(_st));`,
-		
-		
+//		return texture2D(tex, fract(_st));`,
+	
 },
 {
   name: 'solid',
@@ -370,7 +370,7 @@ wgsl:
    `,
   wgsl:
 `  var xy = _st - vec2<f32>(offsetX, offsetY);
-   xy = xy * (1.0/vec2(amount*xMult, amount*yMult));
+   xy = xy * (1.0/vec2<f32>(amount*xMult, amount*yMult));
    xy = xy + vec2<f32>(offsetX, offsetY);
    return xy;
    `
@@ -499,8 +499,8 @@ wgsl:
    return fract(st);`,
   wgsl:
 `  var st = _st * vec2<f32>(repeatX, repeatY);
-   st.x = st.x + step(1., _mod(st.y, 2.0)) * offsetX;
-   st.y = st.y + step(1., _mod(st.x, 2.0)) * offsetY;
+   st.x = st.x + (step(1., _mod(st.y, 2.0)) * offsetX);
+   st.y = st.y + (step(1., _mod(st.x, 2.0)) * offsetY);
    return fract(st);`
 },
 {
@@ -535,8 +535,8 @@ wgsl:
    return fract(st);`,
   wgsl:
 `  var st = _st * vec2<f32>(repeatX, repeatY);
-   st.x = st.x + step(1., _mod(st.y, 2.0)) + _c0.r * offsetX;
-   st.y = st.x + step(1., _mod(st.x, 2.0)) + _c0.g * offsetY;
+   st.x = st.x + (step(1., _mod(st.y, 2.0)) + _c0.r * offsetX);
+   st.y = st.y + (step(1., _mod(st.x, 2.0)) + _c0.g * offsetY);
    return fract(st);`
 },
 {
@@ -614,7 +614,7 @@ wgsl:
   wgsl:
 `   var st = _st * vec2<f32>(1.0, reps);
    //  float f =  mod(_st.y,2.0);
-   st.x = st.x + step(1., _mod(st.y, 2.0))* offset;
+   st.x = st.x + (step(1., _mod(st.y, 2.0))* offset);
    return fract(st);`
 },
 {
@@ -640,7 +640,7 @@ wgsl:
   wgsl:
 `   var st = _st * vec2<f32>(reps, 1.0);
    //  float f =  mod(_st.y,2.0);
-   st.x = st.x + step(1., _mod(st.y,2.0)) + _c0.r * offset;
+   st.x = st.x + (step(1., _mod(st.y,2.0)) + _c0.r * offset);
    return fract(st);`
 },
 {
@@ -731,9 +731,9 @@ wgsl:
    return fract(_st);`,
   wgsl:
 `
-	 var st : vec2<f32> = _st
-   st.x = st.x + scrollX + time*speedX;
-   st.y =  st.y + scrollY + time*speedY;
+	 var st : vec2<f32> = _st;
+   st.x = st.x + (scrollX + time*speedX);
+   st.y =  st.y + (scrollY + time*speedY);
    return fract(st);`
 },
 {
@@ -756,7 +756,7 @@ wgsl:
    return fract(_st);`,
   wgsl:
 `  var st : vec2<f32>  = _st;
-	 st.x = st.x + scrollX + time*speed;
+	 st.x = st.x + (scrollX + time*speed);
    return fract(st);`
 },
 {
@@ -778,8 +778,8 @@ wgsl:
 `   _st.x += _c0.r*scrollX + time*speed;
    return fract(_st);`,
    wgsl:
-`   var st : vec2(<f32>  = _st; 
-	  st.x = st.x + _c0.r*scrollX + time*speed;
+`   var st : vec2<f32>  = _st; 
+	  st.x = st.x + (_c0.r*scrollX + time*speed);
    return fract(st);`
 },
 {
@@ -802,7 +802,7 @@ wgsl:
    return fract(_st);`,
   wgsl:
 `  var st : vec2<f32>  = _st;
-   st.y = st.y + scrollY + time*speed;
+   st.y = st.y + (scrollY + time*speed);
    return fract(st);`
 },
 {
@@ -825,7 +825,7 @@ wgsl:
    return fract(_st);`,
   wgsl:
 `  var st : vec2<f32>  = _st;
-   st.y = st.y + _c0.r*scrollY + time*speed;
+   st.y = st.y + (_c0.r*scrollY + time*speed);
    return fract(st);`
 },
 {
@@ -997,7 +997,7 @@ wgsl:
    xy += 0.5;
    return xy;`,
   wgsl:
-`  var xy : vec2<f32> = _st - vec2(0.5);
+`  var xy : vec2<f32> = _st - vec2<f32>(0.5);
    let angle = offset + _c0.x * multiple;
    xy = mat2x2<f32>(cos(angle),-sin(angle), sin(angle),cos(angle))*xy;
    xy = xy +  0.5;
@@ -1016,7 +1016,7 @@ wgsl:
   glsl:
 `   return _st + (vec2(_c0.g - _c0.r, _c0.b - _c0.g) * amount * 1.0/resolution);`,
   wgsl:
-`   return _st + (vec2(_c0.g - _c0.r, _c0.b - _c0.g) * amount * 1.0/resolution);`
+`   return _st + (vec2<f32>(_c0.g - _c0.r, _c0.b - _c0.g) * amount * 1.0/resolution);`
 },
 {
   name: 'invert',
@@ -1063,7 +1063,7 @@ wgsl:
   glsl:
 `   return vec4(_c0.rgb + vec3(amount), _c0.a);`,
   wgsl:
-`   return vec4<f32>(_c0.rgb + vec3(amount), _c0.a);`
+`   return vec4<f32>(_c0.rgb + vec3<f32>(amount), _c0.a);`
 },
 {
   name: 'mask',
@@ -1099,7 +1099,7 @@ wgsl:
    return vec4(_c0.rgb*a, a);`,
   wgsl:
 `   let a : f32 = smoothstep(threshold-(tolerance+0.0000001), threshold+(tolerance+0.0000001), _luminance(_c0.rgb));
-   return vec4(_c0.rgb*a, a);`
+   return vec4<f32>(_c0.rgb*a, a);`
 },
 {
   name: 'thresh',

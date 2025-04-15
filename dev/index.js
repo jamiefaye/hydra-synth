@@ -18,42 +18,29 @@ async function init () {
 
 console.log("Hydra loaded!");
 
-var hydra = new Hydra({detectAudio:false, makeGlobal: true, genWGSL: true})
+var hydra = new Hydra({detectAudio:true, makeGlobal: true, genWGSL: true}) // true false
 if (hydra.wgslPromise) await hydra.wgslPromise;
 
-//osc().out()
-// console.log(hydra)
-// window.hydra = hydra
-// // //osc().out()
-// exampleVideo()
-// exampleResize()
-//nonGlobalCanvas()
-
-//s0.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
-//src(s0).repeat().out()
-
-//s1.initCam();
-//src(s1).out();
-
-//osc(10, 0.9, 300).out(o2);
-//noise().blend(o2, 0.5).out();
 
 
 
-//noise(()=>{time}).out();
-//osc(8,-0.5, 1).color(-1.5, -1.5, -1.5).blend(o0).rotate(-0.5, -0.5).modulate(shape(4).rotate(0.5, 0.5).scale(2).repeatX(2, 2).repeatY(2, 2)).out(o1);
-
-//osc(()=>time % 5 *10, 0.9, 300).kaleid(31).out(o2);
-//noise([1,2,5,8,10]).blend(o2, 0.8).out();
+// *******************************************
+// test code follows:
 
 
+/*
+s0.initCam()
+src(s0)
+.saturate(2)
+.contrast(1.3)
+.layer(src(o0).mask(shape(4,2).scale(0.5,0.7).scrollX(0.25)).scrollX(0.001))
+.modulate(o0,0.001)
+.out()
 
-
-s1.initCam();
-src(s1).out(o0);
-
-// by Zach Krall
-// http://zachkrall.online/
+//noise(()=>time, ()=>time / 10.).out(o1);
+osc(()=>time).out(o2)
+render()
+*/
 
 osc(10, 0.9, 300)
 .color(0.9, 0.7, 0.8)
@@ -66,30 +53,68 @@ osc(10, 0.9, 300)
 )
 .scrollX(10)
 .colorama()
-.luma()
+//.luma()
 .repeatX(4)
 .repeatY(4)
 .modulate(
   osc(1, -0.9, 300)
 )
 .scale(2)
-.out(o0)
+.out(o1)
 
-//osc(()=>time % 5 *10, 0.9, 300).kaleid(31).out(o1);
 
-s1.initCam();
-src(s1).out(o1);
+//Glitch River
+//Flor de Fuego
+//https://flordefuego.github.io/
+voronoi(8,1)
+.mult(osc(10,0.1,()=>Math.sin(time)*3).saturate(3).kaleid(200))
+.modulate(o2,0.5)
+.add(o2,0.8)
+.scrollY(-0.01)
+.scale(0.99)
+.modulate(voronoi(8,1),0.008)
+.luma(0.3)
+.out(o2)
 
-s2.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
-src(s2).out(o2);
+s3.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
+src(s3).out(o3);
+render();
 
-osc(()=>time % 5 *10, 0.9, 300).kaleid(7).out(o3);
-//noise([1,2,5,8,10]).blend(o2, 0.8).out(o3);
 
-render()
+//ee_5 . FUGITIVE GEOMETRY VHS . audioreactive shapes and gradients
+// e_e // @eerie_ear
+//
+let s= ()=>
+  shape(4)
+.scrollX([-0.5,-0.2,0.3,-0.1,-0.1].smooth(0.1).fast(0.3))
+.scrollY([0.25,-0.2,0.3,-0.1,0.2].smooth(0.9).fast(0.15))
+//
+solid()
+.add(gradient(3,0.05).rotate(0.05,-0.2).posterize(2).contrast(0.6),[1,0,1,0.5,0,0.6].smooth(0.9))
+.add(s())
+.mult(s().scale(0.8).scrollX(0.01).scrollY(-0.01).rotate(0.2,0.06).add(gradient(3).contrast(0.6),[1,0,1,0.5].smooth(0.9),0.5).mult(src(o0).scale(0.98),()=>a.fft[0]*9)
+     )
+.diff(s().modulate(shape(500)).scale([1.7,1.2].smooth(0.9).fast(0.05)))
+.add(gradient(2).invert(),()=>a.fft[2])
+.mult(gradient(()=>a.fft[3]*8))
+.blend(src((o0),()=>a.fft[1]*40))
+.add(voronoi(()=>a.fft[1],()=>a.fft[3],()=>a.fft[0]).thresh(0.7).posterize(2,4).luma(0.9).scrollY(1,()=>a.fft[0]/30).colorama(3).thresh(()=>a.fft[1]).scale(()=>a.fft[3]*2),()=>a.fft[0]/2)
+  .out()
+//
+speed= 1
 
-//s0.initImage("https://upload.wikimedia.org/wikipedia/commons/2/25/Hydra-Foto.jpg")
-//s0.initVideo("https://media.giphy.com/media/AS9LIFttYzkc0/giphy.mp4");
-//src(s0).out()
+a.setSmooth(0.96)
+
+//noise(()=>time, ()=>time / 10.).out();
+
+
+
+
+
+// *******************************************
+// don't step on the following:
 }
+
+
+// Hello humans
 window.onload = init

@@ -1,6 +1,5 @@
 import {FBOToCanvas} from "./FBOToCanvas.js";
 import {FBO4ToCanvas} from "./FBO4ToCanvas.js";
-
 const oneShot = false;
 let fired = false;
 
@@ -29,7 +28,7 @@ const fragPrefix = `
       var positions = array<vec2<f32>, 6>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>(-1.0, 1.0),
-        vec2<f32>(1.0, -1.0 ),
+        vec2<f32>(1.0, -1.0),
 
         vec2<f32>(1.0, -1.0),
         vec2<f32>(-1.0, 1.0),
@@ -43,6 +42,36 @@ const fragPrefix = `
     }
 `;
 
+// Per channel data for a channel render-pass.
+class RenderPassEntry {
+	constructor(chan) {
+		this.chan = chan;
+	  this.channelTexInfo = [];
+		this.reset();
+	}
+
+	reset() {
+
+		this.pingPongs = 0;
+
+	  this.fragmentShaderSource = undefined;
+	  this.fragmentShaderModule = undefined
+	  this.pipelineLayout = undefined;
+	  this.pipeline = undefined;
+
+		this.uniformList = undefined;
+		this.channelUniforms = []; // all listEntries
+	  this.textureUniforms = []; // all uniformTextureListEntries
+	  this.valueUniforms = [];	 // all uniformValueListEntries
+	  this.bindGroupHeader = undefined;
+	  this.bindGroupLayout = undefined;
+
+		this.hasValueUniforms = false;
+	  this.structString = undefined;
+	  this.valueStructView = undefined;
+	  this.structUniformBuffer = undefined;
+		}
+};
 
 // ------------------------------------------------------------------------------
 // wgslHydra manages a set of N "channels", each one driving a given output channel.
@@ -54,25 +83,41 @@ class wgslHydra {
 
 	  this.aspect = this.canvas.width / this.canvas.height;
 
-
-	  this.fboPingPong = 0;
 	  this.numChannels =  numChannels ? numChannels : 4;
 
-	  this.channelTexInfo = new Array(numChannels);
-	  this.fragmentShaderSource = new Array(numChannels);
-	  this.fragmentShaderModule = new Array(numChannels);
-	  this.pipelineLayout = new Array(numChannels);
-	  this.pipeline = new Array(numChannels);
+		this.renderPassInfo = new Array(numChannels);
+		for (let i = 0; i < numChannels; ++i) this.renderPassInfo[i] = new RenderPassEntry(i);
 
-	  this.uniformList = new Array(numChannels);
-	  this.channelUniforms =  new Array(numChannels);
-	  this.bindGroupHeader = new Array(numChannels);
-	  this.bindGroupLayout = new Array(numChannels);
 	  this.time = 0.0;
 	  this.mousePos = {x: 0, y: 0};
 	  this.showQuad = false;
 	  this.outChannel = 0;
 
+	}
+
+  flipPingPongForChannel(chan) {
+ 		let rpe = this.renderPassInfo[chan]
+		let x = rpe.pingPongs === 0 ? 1 : 0;
+		rpe.pingPongs = x;
+  }
+
+	getCurrentTextureViewForChannel(chan) {
+		let rpe = this.renderPassInfo[chan];
+		let p = rpe.pingPongs;
+		return rpe.channelTexInfo.views[p];
+	}
+
+	getCurrentTextureForChannel(chan) {
+		let rpe = this.renderPassInfo[chan];
+		let p = rpe.pingPongs;
+		return rpe.channelTexInfo.textures[p];
+	}
+
+	getOppositeTextureViewForChannel(chan) {
+		let rpe = this.renderPassInfo[chan];
+		let p = rpe.pingPongs;
+		let x = p === 0 ? 1 : 0;
+		return rpe.channelTexInfo.views[x];
 	}
 
 	async setupHydra() {
@@ -103,7 +148,7 @@ class wgslHydra {
       this.context.configure({
         device: this.device,
         format: this.format,
-        alphaMode: "opaque",
+        alphaMode: "opaque",   //premultiplied / opaque
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
       });
 
@@ -196,14 +241,16 @@ class wgslHydra {
 		// ------------------------------------------------------------------------------
 		// Setup dest FBO and views for each channel:
 		//
+		
 		for (let chan = 0; chan < this.numChannels; ++chan) {
-	  	let destTexture = new Array(2);
-	  	let destTextureView = new Array(2);
+			let rpe = this.renderPassInfo[chan];
+	  	rpe.destTexture = new Array(2);
+	  	rpe.destTextureView = new Array(2);
 	  	for (let i = 0; i < 2; ++i) {
- 	 			destTexture[i] = this.device.createTexture(this.destTextureDescriptor);
- 	 			destTextureView[i] = destTexture[i].createView();
+ 	 			rpe.destTexture[i] = this.device.createTexture(this.destTextureDescriptor);
+ 	 			rpe.destTextureView[i] = rpe.destTexture[i].createView();
  	 		}
- 	 		this.channelTexInfo[chan] = {textures: destTexture, views: destTextureView};
+ 	 		rpe.channelTexInfo = {textures: rpe.destTexture, views: rpe.destTextureView};
 	 }
 	// create a vertex shader for all
 	 this.vertexShaderModule = this.device.createShaderModule({ label: "wgslvertex", code: vertexShaderCode });
@@ -218,38 +265,40 @@ class wgslHydra {
 		// set up a output render chain for a given channel number, uniforms list, and fragment shader string
 		//
   async setupHydraChain(chan, uniforms, shader) {
-  		this.uniformList[chan] = uniforms;
+			const rpe = this.renderPassInfo[chan];
+			rpe.reset();
+  		rpe.uniformList = uniforms;
 			this.generateUniformDeclarations(chan); // bindGroupHeader[chan]
-			this.fragmentShaderSource[chan] = vertexPrefix + fragPrefix + this.bindGroupHeader[chan] +  shader.frag; //  + this.fragPrefix
+			rpe.fragmentShaderSource = vertexPrefix + fragPrefix + rpe.bindGroupHeader +  shader.frag; //  + this.fragPrefix
 			
 			//console.log(this.fragmentShaderSource[chan]);
 
       // Step 5: Create fragment shader module
-      this.fragmentShaderModule[chan] = this.device.createShaderModule({ label: "wgslsfrag", code: this.fragmentShaderSource[chan] });
+      rpe.fragmentShaderModule = this.device.createShaderModule({ label: "wgslsfrag", code: rpe.fragmentShaderSource });
 
 		// Create BindGroupLayouts for our each of our BindGroups
 
 		// We then use those BindGroupLayouts to concoct a Pipeline Layout we can give the Pipeline proper.
-   	   this.pipelineLayout[chan] = this.device.createPipelineLayout({
-          bindGroupLayouts: [this.sharedBindGroupLayout, this.bindGroupLayout[chan]],
+   	   rpe.pipelineLayout = this.device.createPipelineLayout({
+          bindGroupLayouts: [this.sharedBindGroupLayout, rpe.bindGroupLayout],
       });
 
       // Step 6: Set up the render pipeline for this channel
-      this.pipeline[chan] = this.device.createRenderPipeline({
+      	rpe.pipeline = this.device.createRenderPipeline({
        	label: 'pipeline ' + chan,
         vertex: {
           module: this.vertexShaderModule,
           entryPoint: "main",
         },
         fragment: {
-          module: this.fragmentShaderModule[chan],
+          module: rpe.fragmentShaderModule,
           entryPoint: "main",
           targets: [{ format: this.format }],
         },
         primitive: {
           topology: "triangle-list",
         },
-        layout: this.pipelineLayout[chan]
+        layout: rpe.pipelineLayout
       });
 
 			this.createSamplerOrBuffersForChan(chan);
@@ -279,17 +328,19 @@ class wgslHydra {
 		this.mouseUniformValues[1] = this.mousePos.y;
 		this.device.queue.writeBuffer(this.mouseUniformBuffer, 0, this.mouseUniformValues);
 
+
 		// For each active channel...
     for (let chan = 0; chan < this.numChannels; ++chan) {
-			if (!this.pipeline[chan]) continue;
-
+ 			const rpe = this.renderPassInfo[chan];
+			if (!rpe.pipeline) continue;
+		  this.flipPingPongForChannel(chan);
       const renderPassDescriptor = {
       	label: "renderPassDescriptor",
         colorAttachments: [{
-          label: "canvas textureView attachment",
-          view: this.channelTexInfo[chan].views[this.fboPingPong],
-          clearValue: { r: 0.9, g: 0.9, b: 0.9, a: 1.0 },
-          loadOp: "load",
+          label: "canvas textureView attachment " + chan,
+          view: this.getCurrentTextureViewForChannel(chan),
+          clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+          loadOp: "clear",
           storeOp: "store",
         }],
       };
@@ -298,9 +349,9 @@ class wgslHydra {
 			//
 			let ubgData = await this.fillBindGroup(chan);
 		  let ubg = await this.device.createBindGroup(ubgData);
-		  this.setAllUniformValues(this.device, chan, this.time);
+
       const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
-      passEncoder.setPipeline(this.pipeline[chan]);
+      passEncoder.setPipeline(rpe.pipeline);
   		passEncoder.setBindGroup(0, this.sharedBindGroup);
   		passEncoder.setBindGroup(1, ubg);
       passEncoder.draw(6);  // call our vertex shader 6 times to make a box.
@@ -313,26 +364,26 @@ class wgslHydra {
     
     if (this.showQuad) {
 			await this.fbo4Renderer.refreshCanvases(
-			this.channelTexInfo[0].textures[this.fboPingPong],
-			this.channelTexInfo[1].textures[this.fboPingPong],
-			this.channelTexInfo[2].textures[this.fboPingPong],		
-			this.channelTexInfo[3].textures[this.fboPingPong]
+				this.getCurrentTextureForChannel(0),
+		  	this.getCurrentTextureForChannel(1),			
+		  	this.getCurrentTextureForChannel(2),
+		  	this.getCurrentTextureForChannel(3)
 			);
     	}
     else {
-    	await this.fboRenderer.refreshCanvas(this.channelTexInfo[this.outChannel].textures[this.fboPingPong]);
+    	await this.fboRenderer.refreshCanvas(this.getCurrentTextureForChannel(this.outChannel));
 		}
-    // Flip the ping-pong always as an integer.
-    this.fboPingPong = this.fboPingPong === 0 ? 1 : 0;
 	}
 
 	generateUniformDeclarations(chan) {
-		let uniInfo = this.uniformList[chan];
-		let bgLayoutentries = [];
-		let bindGroupEntry = "";
-		let i = 0;
+		const rpe = this.renderPassInfo[chan];
+		let uniInfo = rpe.uniformList;
 
-		this.channelUniforms[chan] = [];
+		let bindGroupEntry = "";
+		let i = 1;
+		let ui = 0;
+
+		rpe.channelUniforms = [];
 
 		Object.keys(uniInfo).forEach(key => {
   			if (key === 'prevBuffer') return;
@@ -340,63 +391,112 @@ class wgslHydra {
   			if (key.startsWith("tex")) {
   				// constructor(chan, index, name, valCallback)
   				uniEntry = new uniformTextureListEntry(chan, i, key, uniInfo[key]);
+  				rpe.textureUniforms.push(uniEntry);
+  				  			i += uniEntry.indexesUsed;
   			}
   			else {
-  				uniEntry = new uniformValueListEntry(chan, i, key, uniInfo[key], uniInfo);
+  				uniEntry = new uniformValueListEntry(chan, ui, key, uniInfo[key], uniInfo);
+  				rpe.valueUniforms.push(uniEntry);
+  				ui++;
   			}
-  			this.channelUniforms[chan].push(uniEntry);
-  			i += uniEntry.indexesUsed;
+  			rpe.channelUniforms.push(uniEntry);
+
   		})
- 		let bindings = "";
- 		let ourUniforms = this.channelUniforms[chan];
- 		for(let j = 0; j < ourUniforms.length; ++ j) {
- 			let aUnif = ourUniforms[j];
+
+ 		let ourUniforms = rpe.channelUniforms;
+ 		let ourValues = rpe.valueUniforms;
+		rpe.hasValueUniforms = ourValues.length > 0;
+		let bindings = "";
+		let bgLayoutentries = [];
+	if (rpe.hasValueUniforms) {
+    	// Create the binding struct for the uniform f32 values.
+    		let struct = `struct UF {
+`;
+    		for(let j = 0; j < ourValues.length; ++j) {
+    			struct = struct + ourValues[j].getStructLineItem();
+    		}
+    		struct = struct + `};
+    @group(1) @binding(0) var<uniform> uf : UF;
+`;
+    		rpe.structString = struct;
+    		bindings = struct;
+    		bgLayoutentries = [{
+    			binding: 0,
+    			visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
+    			buffer: { type: "uniform" } // Resource type
+        }];
+	} // We had value uniforms
+
+		let ourTextureUniforms = rpe.textureUniforms;
+		for(let j = 0; j < ourTextureUniforms.length; ++ j) { // textureUniforms
+ 			let aUnif = ourTextureUniforms[j];
  			let bgs = aUnif.bindGroupString()
  			bindings = bindings + bgs;
  			bgLayoutentries.push(...aUnif.getBindGroupLayoutEntries());
  		}
 
-		this.bindGroupLayout[chan] = this.device.createBindGroupLayout({
+		rpe.bindGroupLayout = this.device.createBindGroupLayout({
 			label: "bg layout " + chan,
   		entries: bgLayoutentries
   	});
-		this.bindGroupHeader[chan] = bindings;
+		rpe.bindGroupHeader = bindings;
 	}
 
 // called once since we can reuse samplers between frames.
 	createSamplerOrBuffersForChan(chan) {
-		let ourUniforms = this.channelUniforms[chan];
+		const rpe = this.renderPassInfo[chan];
+		// First handle the struct with the non-texture stuff
+		if (rpe.hasValueUniforms) {
+    		//rpe.structDefs = makeShaderDataDefinitions(rpe.structString);
+    		rpe.valueStructView = new Float32Array(rpe.valueUniforms.length);
+    		rpe.valueStructBuffer = this.device.createBuffer({
+      		size: rpe.valueStructView.byteLength,
+      		usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    		});
+		}
+		// Now make samplers, etc.
+		let ourUniforms = rpe.textureUniforms;
 		for (let i = 0; i < ourUniforms.length; ++i)
 				ourUniforms[i].createSamplerOrBuffers(this.device);
+	
 	}
 
 	fillBindGroup(chan) {
-		let ourUniforms = this.channelUniforms[chan];
-		if (!ourUniforms || ourUniforms.length === 0) {
+		const rpe = this.renderPassInfo[chan];
+		let allUniforms = rpe.channelUniforms;
+		if (!allUniforms || allUniforms.length === 0) {
 			return {label: "bg" + chan,
-				layout: this.bindGroupLayout[chan],
+				layout: rpe.bindGroupLayout,
 				entries: []
 			};
 		}
 
-		let bga =[];
+		let bga
+		if (rpe.hasValueUniforms) {
+			this.setAllValueUniformValues(chan, this.time);
+			this.device.queue.writeBuffer(rpe.valueStructBuffer, 0, rpe.valueStructView);
+			bga =[{binding: 0, resource: {buffer: rpe.valueStructBuffer}}];
+		} else bga = [];
 
+		let ourUniforms = rpe.textureUniforms;
 		for (let i = 0; i < ourUniforms.length; ++i) {
 			let aUniform = ourUniforms[i];
 			bga.push(...aUniform.getBindGroupEntries(this, this.time));
 		}
 		let bgd = {
 			label: "bg" + chan,
-			layout: this.bindGroupLayout[chan],
+			layout: rpe.bindGroupLayout,
 			entries: bga
 		}
 		return bgd;
  }
- 
- 	setAllUniformValues(device, chan, time) {
- 		let ourUniforms = this.channelUniforms[chan];
+
+
+ 	setAllValueUniformValues(chan, time) {
+ 		const rpe = this.renderPassInfo[chan];
+ 		let ourUniforms = rpe.valueUniforms;
  		for (let i = 0; i < ourUniforms.length; ++i) {
- 			ourUniforms[i].setUniformValues(device, time);
+ 			ourUniforms[i].setUniformValues(rpe, time);
  		}
  	}
 }
@@ -410,7 +510,7 @@ class uniformTextureListEntry {
 		this.valCallback = valCallback;
 		this.indexesUsed = 2;
 	}
-	
+
 	indexesUsed() {
 		return 2;
 	}
@@ -457,10 +557,6 @@ class uniformTextureListEntry {
 			{binding: this.index+1, resource: this.cbValue}
 		];
 	}
-	
-	setUniformValues(device, time) {
-
-	}
 }
 
 
@@ -470,14 +566,10 @@ class uniformValueListEntry {
 		this.index = index;
 		this.name = name;
 		this.valCallback = valCallback;
-		this.indexesUsed = 1;
+		this.indexesUsed = 0;
 	}
 
-	bindGroupString() {
-			let bge =`@group(1) @binding(${this.index}) var<uniform> ${this.name}:  f32;
-`;
-			return bge;
-		}
+
 
 	getBindGroupLayoutEntries() {
     return [{
@@ -487,30 +579,20 @@ class uniformValueListEntry {
     }]
 	}
 
-	createSamplerOrBuffers(device) {
-			// Create the shared uniform buffer
-		this.uniformBuffer = device.createBuffer({
-  			label: "value uniform buffer " + this.chan + " " + this.name,
-  			size: 4, // 32-bit float is 4 bytes
-  			usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-		});
 
-		// Create a typed array to hold the float value for time
-		this.uniformValues = new Float32Array(1); // Array of 1 float
-	}
+  getStructLineItem() {
+		return `${this.name} : f32,
+`;
+  }
 
-	getBindGroupEntries(renderer) {
-		return [
-			{binding: this.index, resource: {buffer: this.uniformBuffer}}
-		];
-	}
 
-	setUniformValues(device, time) {
+	setUniformValues(rpe, time) {
 		let argsToCB = {time: time, bpm: 120};
 	  this.cbValue = this.valCallback(undefined, argsToCB);
-		this.uniformValues[0] = this.cbValue;
-   	device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformValues);
-   //	console.log(this.cbValue);
+	  if (!this.cbValue || this.cbValue === NaN) {
+	  	this.cbValue = 0.0;
+	   }
+		rpe.valueStructView[this.index] = this.cbValue;
   }
 }
 

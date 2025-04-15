@@ -208,6 +208,7 @@ function processWgsl(obj) {
 `;
   // Can we skip doing this??
   // add extra input to beginning for backward combatibility @todo update compiler so this is no longer necessary
+
     if(obj.type === 'combine' || obj.type === 'combineCoord') obj.inputs.unshift({
         name: 'color',
         type: 'vec4'

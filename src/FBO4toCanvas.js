@@ -83,7 +83,7 @@ class FBO4ToCanvas {
          var uv :vec2<f32>;
          uv = ourIn.texcoord; //* ourStruct.scale + ourStruct.offset;
 
-        var st = vec2<f32>(1.0 - uv.x, uv.y);
+        var st = vec2<f32>(uv.x, uv.y);
         st = st * vec2<f32>(2.0);
         let q = floor(st).xy*(vec2<f32>(2.0, 1.0));
         let quad : i32 = i32(q.x) + i32(q.y);
@@ -96,14 +96,14 @@ class FBO4ToCanvas {
         let val2 = textureSample(ourTex2, ourSamp2, st);
         let val3 = textureSample(ourTex3, ourSamp3, st);
    
-        if(quad == 0){
-					return val3;
-        } else if (quad == 1) {
-					return val2;
-        } else if (quad == 2){
+        if(quad == 0){ // LLHC
 					return val1;
+        } else if (quad == 1) { // ULHC
+					return val0;
+        } else if (quad == 2){ // LRHC
+					return val3;
         } else {
-  				return val0;
+  				return val2; // URHC
         }
       }
 `;
@@ -164,7 +164,7 @@ class FBO4ToCanvas {
           type: "filtering",
         },
     	},
-    	
+
      	{
       	binding: 5, // Binding index for texture 2
      	  visibility: GPUShaderStage.FRAGMENT, // Shader stages where this binding is used
@@ -256,7 +256,7 @@ class FBO4ToCanvas {
         colorAttachments: [{
           label: "FBO canvas textureView attachment",
           view: canvasTextureView,
-          clearValue: { r: 0.9, g: 0.9, b: 0.9, a: 1.0 },
+          clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
           loadOp: "clear",
           storeOp: "store",
         }],

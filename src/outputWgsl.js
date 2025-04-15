@@ -20,13 +20,12 @@ class OutputWgsl {
 
 
  getCurrent() {
- 	let opposite = this.wgslHydra.fboPingPong === 0 ? 1 : 0;
-  return this.fbos[opposite]
+	let tex = this.wgslHydra.getCurrentTextureViewForChannel(this.chanNum);
+	return tex;
 }
 
 getTexture() {
-	 let opposite = this.wgslHydra.fboPingPong === 0 ? 1 : 0;
-   let tex = this.wgslHydra.channelTexInfo[this.chanNum].views[opposite];
+   let tex = this.wgslHydra.getOppositeTextureViewForChannel(this.chanNum);
    return tex;
 }
 
