@@ -18,10 +18,14 @@
     "preview": "vite preview"
   },
    "dependencies": {
+   	"acorn": "^8.7.0",
+    "astravel": "^0.5.0",
+    "astring": "^1.4.0",
     "meyda": "^5.6.3",
     "events": "^1.0.2",
     "inherits": "^2.0.1",
     "regl": "^2.1.1",
+    "comlink": "^4.4.2",
     "webgpu-utils": "^1.10.1"
   },
   "devDependencies": {

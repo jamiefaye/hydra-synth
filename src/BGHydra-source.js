@@ -1,8 +1,9 @@
-import {Webcam} from './lib/webcam.js'
-import Screen from './lib/screenmedia.js'
+//import Webcam from './lib/webcam.js'
+//import Screen from './lib/screenmedia.js'
 
-class HydraSource {
-  constructor ({ regl, width, height, pb, label = ""}) {
+class BGHydraSource {
+
+  constructor ({ regl, width, height, pb, sourceX, label = ""}) {
     this.label = label
     this.regl = regl
     this.src = null
@@ -14,6 +15,8 @@ class HydraSource {
       shape: [ 1, 1 ]
     })
     this.pb = pb
+    this.sourceX = sourceX
+    console.log ("Source with worker created");
   }
 
   init (opts, params) {
@@ -24,42 +27,25 @@ class HydraSource {
     if ('dynamic' in opts) this.dynamic = opts.dynamic
   }
 
+	activate(width, height) {
+		this.offscreencanvas= new OffscreenCanvas(width, height); 
+		this.bmr = this.offscreencanvas.getContext("bitmaprenderer");
+		this.init({src: this.offscreencanvas, dynamic: true});
+		console.log("activate complete");
+	}
+
+
   initCam (index, params) {
-    const self = this
-    Webcam(index)
-      .then(response => {
-        self.src = response.video
-        self.dynamic = true
-        self.tex = self.regl.texture({ data: self.src, ...params })
-      })
-      .catch(err => console.log('could not get camera', err))
+  	this.worker.openSourceProxy("webcam", this.sourceX, index, params);
   }
 
+
   initVideo (url = '', params) {
-    // const self = this
-    const vid = document.createElement('video')
-    vid.crossOrigin = 'anonymous'
-    vid.autoplay = true
-    vid.loop = true
-    vid.muted = true // mute in order to load without user interaction
-    const onload = vid.addEventListener('loadeddata', () => {
-      this.src = vid
-      vid.play()
-      this.tex = this.regl.texture({ data: this.src, ...params})
-      this.dynamic = true
-    })
-    vid.src = url
+  	this.worker.openSourceProxy("video", this.sourceX, url, params);
   }
 
   initImage (url = '', params) {
-    const img = document.createElement('img')
-    img.crossOrigin = 'anonymous'
-    img.src = url
-    img.onload = () => {
-      this.src = img
-      this.dynamic = false
-      this.tex = this.regl.texture({ data: this.src, ...params})
-    }
+   	this.worker.openSourceProxy("image", this.sourceX, url, params); 	
   }
 
   initStream (streamName, params) {
@@ -80,6 +66,8 @@ class HydraSource {
 
   // index only relevant in atom-hydra + desktop apps
   initScreen (index = 0, params) {
+   	this.worker.openSourceProxy("screen", index, 0, params);
+/*
     const self = this
     Screen()
       .then(function (response) {
@@ -89,6 +77,7 @@ class HydraSource {
         //  console.log("received screen input")
       })
       .catch(err => console.log('could not get screen', err))
+  */
   }
 
   resize (width, height) {
@@ -102,6 +91,10 @@ class HydraSource {
         this.src.srcObject.getTracks().forEach(track => track.stop())
       }
     }
+    
+    this.offscreencanvas = undefined;
+		this.bmr = undefined;
+
     this.src = null
     this.tex = this.regl.texture({ shape: [ 1, 1 ] })
   }
@@ -127,9 +120,20 @@ class HydraSource {
     }
   }
 
+
   getTexture () {
     return this.tex
   }
+
+
+	injectImage(img) {
+
+		if (!this.offscreencanvas) {
+			this.activate(img.width, img.height);
+		}
+		this.bmr.transferFromImageBitmap(img);
+	}
+
 }
 
-export default HydraSource
+export {BGHydraSource};

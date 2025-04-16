@@ -274,6 +274,7 @@ class HydraRenderer {
       this.width = canvas.width
       this.height = canvas.height
     } else {
+    	/*
       this.canvas = document.createElement('canvas')
       this.canvas.width = this.width
       this.canvas.height = this.height
@@ -281,6 +282,7 @@ class HydraRenderer {
       this.canvas.style.height = '100%'
       this.canvas.style.imageRendering = 'pixelated'
       document.body.appendChild(this.canvas)
+      */
     }
   }
 
@@ -504,7 +506,7 @@ class HydraRenderer {
   }
 
   // dt in ms
-  tick (dt, uniforms) {
+  tick (dt, uniforms, drawToCanvas) {
     if(!this.sandbox) return;
     this.sandbox.tick()
     if(this.detectAudio === true) this.synth.a.tick()
@@ -518,7 +520,7 @@ class HydraRenderer {
           	for (let i = 0; i < this.s.length; i++) {
             	this.s[i].tick(this.synth.time)
           }
-        	this.wgslHydra.requestAnimationFrame();
+        	this.wgslHydra.requestAnimationFrame(drawToCanvas);
         } else 
         {
         //  console.log(1000/this.timeSinceLastUpdate)

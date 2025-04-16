@@ -1,4 +1,4 @@
-import Webcam from './lib/webcam.js'
+import {Webcam} from './lib/webcam.js'
 import Screen from './lib/screenmedia.js'
 
 class HydraSourceWGSL {
@@ -151,13 +151,20 @@ class HydraSourceWGSL {
  updateTexture() {
  	
  	  if (!this.src) return;
+ 	   	  let w = this.width;
+ 	     	let h = this.height;
+ 	     	if (this.src.videoWidth) {
+ 	     		w = this.src.videoWidth;
+ 	     		h= this.src.videoHeight;
+ 	     	}
  	  if (!this.dynamic) {
+ 	   if(!this.oneShotDone) {
  	  	// non-dynamic textures only need to be copied-in once.
- 	     if (!this.oneShotDone) {
+ 
  	  	 	this.hs.device.queue.copyExternalImageToTexture(
     			{ source: this.src, flipY: true},
     			{ texture: this.tex },
-    			[this.src.width, this.src.height],
+    			[ w, h ],
   			);
   			this.oneShotDone = true;
 		 }
@@ -168,7 +175,7 @@ class HydraSourceWGSL {
     this.hs.device.queue.copyExternalImageToTexture(
     		{ source: this.src, flipY: true },
     		{ texture: this.tex },
-    		[this.src.videoWidth, this.src.videoHeight],
+    		[ w, h ],
   		);
     }
 

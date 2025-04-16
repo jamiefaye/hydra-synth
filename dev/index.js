@@ -1,25 +1,39 @@
-
 import Hydra from "./../src/hydra-synth.js";
+import {BGSynth, openBackgroundHydra} from './../src/BGSynth.js';
+import * as Comlink from "comlink";
 
 //const { fugitiveGeometry, exampleVideo, exampleResize, nonGlobalCanvas } = import('./examples.js')
 
 // console.log('HYDRA', Hydra)
 
 async function init () {
- 
-//   const canvas = document.createElement('canvas')
-//   canvas.style.backgroundColor = "#000"
-//   canvas.width = 800
-//   canvas.height = 200
-//   document.body.appendChild(canvas)
+
+  const canvas = document.createElement('canvas')
+  canvas.style.backgroundColor = "#000"
+  canvas.width = 720
+  canvas.height = 480
+  document.body.appendChild(canvas)
+
 //   // canvas.style.width = '100%'
 //   // canvas.style.height = '100%'
 // //  exampleCustomCanvas()
 
 console.log("Hydra loaded!");
 
-var hydra = new Hydra({detectAudio:true, makeGlobal: true, genWGSL: true}) // true false
-if (hydra.wgslPromise) await hydra.wgslPromise;
+//var hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: true, genWGSL: true}) // true false
+//if (hydra.wgslPromise) await hydra.wgslPromise;
+
+let hydra;
+if (true) { // true  false
+ hydra = new BGSynth(undefined, false);
+//await	hydra.openWorker();
+const offscreen = canvas.transferControlToOffscreen();
+await	hydra.openWorker(Comlink.transfer(offscreen, [offscreen]));
+} else {
+	 hydra = new BGSynth(canvas, false);
+await	hydra.openWorker();
+}
+
 
 
 
@@ -27,21 +41,53 @@ if (hydra.wgslPromise) await hydra.wgslPromise;
 // *******************************************
 // test code follows:
 
-
-/*
-s0.initCam()
-src(s0)
-.saturate(2)
-.contrast(1.3)
-.layer(src(o0).mask(shape(4,2).scale(0.5,0.7).scrollX(0.25)).scrollX(0.001))
-.modulate(o0,0.001)
+let testcode = 
+`
+ osc(10, 0.9, 300)
+.color(0.9, 0.7, 0.8)
+.diff(
+  osc(45, 0.3, 100)
+  .color(0.9, 0.9, 0.9)
+  .rotate(0.18)
+  .pixelate(12)
+  .kaleid()
+)
+.scrollX(10)
+.colorama()
+//.luma()
+.repeatX(4)
+.repeatY(4)
+.modulate(
+  osc(1, -0.9, 300)
+)
+.scale(2)
 .out()
 
-//noise(()=>time, ()=>time / 10.).out(o1);
-osc(()=>time).out(o2)
-render()
-*/
+//Glitch River
+//Flor de Fuego
+//https://flordefuego.github.io/
+voronoi(8,1)
+.mult(osc(10,0.1,()=>Math.sin(time)*3).saturate(3).kaleid(200))
+.modulate(o2,0.5)
+.add(o2,0.8)
+.scrollY(-0.01)
+.scale(0.99)
+.modulate(voronoi(8,1),0.008)
+.luma(0.3)
+.out(o2)
 
+noise(()=>time, ()=>time / 10.).out(o1);
+render()
+
+
+`
+
+
+hydra.setSketch(testcode, false);
+
+
+
+/*
 osc(10, 0.9, 300)
 .color(0.9, 0.7, 0.8)
 .diff(
@@ -108,7 +154,7 @@ a.setSmooth(0.96)
 //noise(()=>time, ()=>time / 10.).out();
 
 
-
+*/
 
 
 // *******************************************
