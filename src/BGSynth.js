@@ -103,10 +103,12 @@ class SourceProxy {
 	// Things really start happening after you call setSketch. Or you can call the async function openBackgroundHydra.
 	class BGSynth {
 
-	constructor(drawToCanvas, local = false) {
+	constructor(drawToCanvas, local = false, useWGSL = false, directToCanvas = false) {
 		this.local = local;
+		this.useWGSL = useWGSL;
 		this.frameTime = 25;
 		this.canvas = drawToCanvas;
+		this.directToCanvas = directToCanvas;
 		this.mouseData = {x: 0, y:0};
 		
 		this.trackMouse = this.trackMouse.bind(this);
@@ -126,7 +128,7 @@ class SourceProxy {
     this.mouseData.y = event.clientY;
 	}
 
-	async openWorker(onscreenTarget) {
+	async openWorker() {
 		if (this.local) {
 			this.bgWorker = new BGR();
 			await this.bgWorker.openHydra();
@@ -134,18 +136,20 @@ class SourceProxy {
     	await this.bgWorker.registerCallback("proxy", this.requestProxySource.bind(this));
 		} else {
 			let BGRWorker = Comlink.wrap(new Worker(new URL('./BGRworker.js', import.meta.url), { type: 'module'}));
-			this.bgWorker = await new BGRWorker();
-			await this.bgWorker.openHydra(onscreenTarget);
+			if (this.directToCanvas) {
+				  let offscreen = this.canvas;
+					this.bgWorker = await new BGRWorker(Comlink.transfer(offscreen, [offscreen]), this.useWGSL);
+				} else {
+					this.bgWorker = await new BGRWorker(null, this.useWGSL);
+				}
+			await this.bgWorker.openHydra();
     	await this.bgWorker.registerCallback("frame", Comlink.proxy(this.frameReadyFromWorker.bind(this)));
     	await this.bgWorker.registerCallback("proxy", Comlink.proxy(this.requestProxySource.bind(this)));
     }
-    if (!onscreenTarget) {
+    
+    if (!this.directToCanvas) {
 			this.bmr = this.canvas.getContext("bitmaprenderer");
-			this.renderMainViaOffscreen = false;
-  	} else {
-  		this.bmr = onscreenTarget;
-			this.renderMainViaOffscreen = true;
-  	}
+	  }
     //if (this.localHydra) this.localHydra[this.localSource].init({src: this.canvas, dynamic: true});
 
 		setTimeout ((dT)=>{
@@ -205,7 +209,7 @@ class SourceProxy {
 
 
 async function openBackgroundHydra(drawToCanvas, text, hush) {
-	let bgh = new BGSynth(drawToCanvas, false);
+	let bgh = new BGSynth(drawToCanvas, false, false);
 	await bgh.openWorker();
 	bgh.setSketch(text, hush);
 	return bgh;

@@ -36,7 +36,8 @@ class HydraRenderer {
     autoLoop = true,
     detectAudio = true,
     enableStreamCapture = true,
-    genWGSL = false, // **** JFF Hack!!
+    useWGSL = false,
+    webWorker = false,
     canvas,
     precision,
     extendTransforms = {} // add your own functions on init
@@ -51,7 +52,8 @@ class HydraRenderer {
     this.renderAll = false
     this.detectAudio = detectAudio
 
-    this.genWGSL = genWGSL;
+    this.useWGSL = useWGSL;
+    this.webWorker = webWorker
     this.wgslReady = false;
 
     this._initCanvas(canvas)
@@ -110,17 +112,18 @@ class HydraRenderer {
     this.generator = undefined
 
 		this.numOutputs = numOutputs
-		if (this.genWGSL) {
+		if (this.useWGSL) {
 			this.wgslHydra = new wgslHydra(this.canvas, 4);
-
-			this.wgslPromise = this.wgslHydra.setupHydra().then(()=>{
-				this._initOutputsWgsl(numOutputs);
-				this._initSourcesWgsl(numSources);
-				this._generateGlslTransforms();	
-				this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
-				if(autoLoop) this.looper = loop(this.tick.bind(this)).start();
-			});
-
+			this.wgslPromise = new Promise((resolve, reject)=> {
+			this.wgslHydra.setupHydra().then(()=>{
+					this._initOutputsWgsl(numOutputs);
+					this._initSourcesWgsl(numSources);
+					this._generateGlslTransforms();	
+					this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
+					if(autoLoop) this.looper = loop(this.tick.bind(this)).start();
+				  resolve(true);
+			})
+		});
 		} else {
 		// Run with regl
         this._initRegl()
@@ -145,7 +148,7 @@ class HydraRenderer {
     }
     if(detectAudio) this._initAudio()
 
-    if(this.genWGSL) return;
+    if(this.useWGSL) return;
     
      if (autoLoop) this.looper = loop(this.tick.bind(this)).start()
 
@@ -469,7 +472,7 @@ class HydraRenderer {
   _generateGlslTransforms () {
     var self = this
     this.generator = new Generator({
-    	genWGSL:  this.genWGSL,
+    	genWGSL:  this.useWGSL,
       defaultOutput: this.o[0],
       defaultUniforms: this.o[0].uniforms,
       extendTransforms: this.extendTransforms,
@@ -514,7 +517,7 @@ class HydraRenderer {
     this.sandbox.set('time', this.synth.time += dt * 0.001 * this.synth.speed)
     this.timeSinceLastUpdate += dt
     if(!this.synth.fps || this.timeSinceLastUpdate >= 1000/this.synth.fps) {
-        if (this.genWGSL) {
+        if (this.useWGSL) {
         		// Visit sources.
         		//  console.log(this.synth.speed, this.synth.time)
           	for (let i = 0; i < this.s.length; i++) {
