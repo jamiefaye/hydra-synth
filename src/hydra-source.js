@@ -76,7 +76,7 @@ class HydraSource {
   	
   	if (this.webWorker) 
   	{
-  			this.worker.openSourceProxy("video", this.chanNum, url, params);
+  			this.webWorker.openSourceProxy("video", this.chanNum, url, params);
   			return;
   	}
     // const self = this
@@ -88,7 +88,7 @@ class HydraSource {
     const onload = vid.addEventListener('loadeddata', () => {
       this.src = vid
       vid.play()
-      this.tex = this.regl.texture({ data: this.src, ...params})
+      self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
       this.dynamic = true
     })
     vid.src = url
@@ -97,7 +97,7 @@ class HydraSource {
   initImage (url = '', params) {
   	if (this.webWorker) 
   	{
-    	this.worker.openSourceProxy("image", this.chanNum, url, params); 	
+    	this.webWorker.openSourceProxy("image", this.chanNum, url, params); 	
   		return;
   	}
     const img = document.createElement('img')
@@ -107,7 +107,7 @@ class HydraSource {
     img.onload = () => {
       this.src = img
       this.dynamic = false
-      this.tex = this.regl.texture({ data: this.src, ...params})
+       self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
     }
   }
 
@@ -121,7 +121,7 @@ class HydraSource {
         if (nick === streamName) {
           self.src = video
           self.dynamic = true
-          self.tex = self.regl.texture({ data: self.src, ...params})
+          self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
         }
       })
     }
