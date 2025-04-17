@@ -523,7 +523,7 @@ class HydraRenderer {
           	for (let i = 0; i < this.s.length; i++) {
             	this.s[i].tick(this.synth.time)
           }
-        	this.wgslHydra.requestAnimationFrame(drawToCanvas);
+        	this.wgslHydra.animate(dt);
         } else 
         {
         //  console.log(1000/this.timeSinceLastUpdate)

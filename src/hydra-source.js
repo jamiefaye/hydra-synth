@@ -2,13 +2,18 @@ import {Webcam} from './lib/webcam.js'
 import Screen from './lib/screenmedia.js'
 
 class HydraSource {
-  constructor ({ regl, width, height, pb, label = ""}) {
+  constructor ({ regl, wgsl, proxy, width, height, pb, label = ""}) {
     this.label = label
     this.regl = regl
+    this.wgsl = wgsl;
+    this.proxy = proxy;
     this.src = null
     this.dynamic = true
     this.width = width
     this.height = height
+    
+    if (regl && wgsl) console.log("Both regl & wgsl provided");
+
     this.tex = this.regl.texture({
       //  shape: [width, height]
       shape: [ 1, 1 ]

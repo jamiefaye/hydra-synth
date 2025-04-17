@@ -307,7 +307,7 @@ class wgslHydra {
 		// ------------------------------------------------------------------------------
 		// animate function
 		//
-		async requestAnimationFrame() {
+		async animate(dT) {
 			if(oneShot) {
 				 if(fired) return;
 			   console.log("One Shot is set for requestAnimationFrame");
@@ -317,7 +317,7 @@ class wgslHydra {
     const commandEncoder = this.device.createCommandEncoder();
 
 		// Setup the universal uniforms
-		this.timeUniformValues[0] = this.time += 0.025;
+		this.timeUniformValues[0] = this.time += (dT / 1000.0);
    	this.device.queue.writeBuffer(this.timeUniformBuffer, 0, this.timeUniformValues);
 
 		this.resolutionUniformValues[0] = this.canvas.width;

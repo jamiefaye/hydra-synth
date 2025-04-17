@@ -1,14 +1,12 @@
 import * as Comlink from "comlink";
 import {Webcam} from './lib/webcam.js'
 import Screen from './lib/screenmedia.js'
-import {BGR} from "./BGR.js";
 
 class SourceProxy {
 // sourceX = 0-3 (or whatever), which BGHydraSource to send to.
-	constructor(kind, worker, local, sourceX, mediaAddr, params) {
+	constructor(kind, worker, sourceX, mediaAddr, params) {
 		this.kind = kind;
 		this.bgWorker = worker;
-		this.local = local;  // local = true if running in same thread as main, false if using a web worker.
 		this.sourceX = sourceX;
 		this.mediaAddr = mediaAddr;
 		this.params = params;
@@ -82,11 +80,7 @@ class SourceProxy {
 
 		this.offCTX.drawImage(this.src, 0, 0,  this.offCan.width, this.offCan.height);
 		let imgBM = this.offCan.transferToImageBitmap();
-		if (this.local) {
-			this.bgWorker.proxyFrameUpdate(this.sourceX, imgBM);
-		} else {
-			this.bgWorker.proxyFrameUpdate(this.sourceX, Comlink.transfer(imgBM, [imgBM]));
-		}
+		this.bgWorker.proxyFrameUpdate(this.sourceX, Comlink.transfer(imgBM, [imgBM]));
 		this.updates++;
 	}
 
@@ -103,8 +97,7 @@ class SourceProxy {
 	// Things really start happening after you call setSketch. Or you can call the async function openBackgroundHydra.
 	class BGSynth {
 
-	constructor(drawToCanvas, local = false, useWGSL = false, directToCanvas = false) {
-		this.local = local;
+	constructor(drawToCanvas, useWGSL = false, directToCanvas = false) {
 		this.useWGSL = useWGSL;
 		this.frameTime = 25;
 		this.canvas = drawToCanvas;
@@ -129,28 +122,22 @@ class SourceProxy {
 	}
 
 	async openWorker() {
-		if (this.local) {
-			this.bgWorker = new BGR();
-			await this.bgWorker.openHydra();
-    	await this.bgWorker.registerCallback("frame", this.frameReadyFromWorker.bind(this));
-    	await this.bgWorker.registerCallback("proxy", this.requestProxySource.bind(this));
+
+		let BGRWorker = Comlink.wrap(new Worker(new URL('./BGRworker.js', import.meta.url), { type: 'module'}));
+		if (this.directToCanvas) {
+				let offscreen = this.canvas;
+				this.bgWorker = await new BGRWorker(Comlink.transfer(offscreen, [offscreen]), this.useWGSL);
 		} else {
-			let BGRWorker = Comlink.wrap(new Worker(new URL('./BGRworker.js', import.meta.url), { type: 'module'}));
-			if (this.directToCanvas) {
-				  let offscreen = this.canvas;
-					this.bgWorker = await new BGRWorker(Comlink.transfer(offscreen, [offscreen]), this.useWGSL);
-				} else {
-					this.bgWorker = await new BGRWorker(null, this.useWGSL);
-				}
-			await this.bgWorker.openHydra();
-    	await this.bgWorker.registerCallback("frame", Comlink.proxy(this.frameReadyFromWorker.bind(this)));
-    	await this.bgWorker.registerCallback("proxy", Comlink.proxy(this.requestProxySource.bind(this)));
-    }
+				this.bgWorker = await new BGRWorker(null, this.useWGSL);
+		}
+		await this.bgWorker.openHydra();
+    await this.bgWorker.registerCallback("frame", Comlink.proxy(this.frameReadyFromWorker.bind(this)));
+    await this.bgWorker.registerCallback("proxy", Comlink.proxy(this.requestProxySource.bind(this)));
+
     
     if (!this.directToCanvas) {
 			this.bmr = this.canvas.getContext("bitmaprenderer");
 	  }
-    //if (this.localHydra) this.localHydra[this.localSource].init({src: this.canvas, dynamic: true});
 
 		setTimeout ((dT)=>{
 			this.bgWorker.tick(this.frameTime, this.mouseData);
@@ -196,7 +183,7 @@ class SourceProxy {
 	// called from worker when it requests an webcam, video, or image source
 	// that can only be provided by main.
 	requestProxySource(kind, sourceX, mediaAddr, params) {
-		let prx = new SourceProxy(kind, this.bgWorker, this.local, sourceX, mediaAddr, params);
+		let prx = new SourceProxy(kind, this.bgWorker, sourceX, mediaAddr, params);
   	this.activeSourceProxies.push(prx);
 	}
 
