@@ -15,6 +15,7 @@ class SourceProxy {
 		this.openSource();
 	}
 
+// Fortunately source proxies don't need glsl or wgsl, so things are simpler here.
 	openSource() {
 	  const self = this;
 
@@ -90,7 +91,7 @@ class SourceProxy {
 
 
 	// Represents the "Main Thread" side of a BGRworker instance.
-	// While BGSynths can cause other BGSynths to come into being, all of them must be children
+	// While BGSynths could cause other BGSynths to come into being, all of them must be children
 	// of a main thread BGSynth. We want to avoid forwarding from one worker to another worker and then to main.
 	// Protocol is to first create the BGSynth object synchronously and then call openWorker
 	// on that when ready to use.
@@ -103,7 +104,7 @@ class SourceProxy {
 		this.canvas = drawToCanvas;
 		this.directToCanvas = directToCanvas;
 		this.mouseData = {x: 0, y:0};
-		
+		this.deliverFrameCallback;
 		this.trackMouse = this.trackMouse.bind(this);
 		document.addEventListener('mousemove', this.trackMouse);
 
@@ -150,21 +151,30 @@ class SourceProxy {
 	}
 
 	// called from worker when a new frame is ready.
-	// If we are rending to an offscreen canvas, the frame is undefineed
+	// If we are rending to an onscreen canvs via an offscreen canvas, the frame is undefined
 	// but we still need to schedule the next cycle.
 	frameReadyFromWorker(frame) {
 		if (this.destroyed) return;
 
 		if (frame) {
-		if (!this.bmr) {
-			this.bmr = this.canvas.getContext("bitmaprenderer");
-		}
+
+		if (this.deliverFrameCallback) this.deliverFrameCallback(frame);
+		  else {
+		 if (!this.bmr) {
+				this.bmr = this.canvas.getContext("bitmaprenderer");
+			}
 			 this.bmr.transferFromImageBitmap(frame);
+			}
 		}
 		this.tickSourceProxies();
 		setTimeout ((dT)=>{
 			this.bgWorker.tick(this.frameTime, this.mouseData);
 		}, this.frameTime);
+	}
+
+	// Use this if you rendering to some offscreen context.
+	requestFrameCallbacks(f) {
+		this.deliverFrameCallback = f;
 	}
 
 	async hush() {
@@ -193,7 +203,6 @@ class SourceProxy {
 		}
 	}
 } // end BGSynth class.
-
 
 async function openBackgroundHydra(drawToCanvas, text, hush) {
 	let bgh = new BGSynth(drawToCanvas, false, false);

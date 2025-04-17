@@ -3,7 +3,6 @@ import Output from './output.js'
 import {OutputWgsl} from './outputWgsl.js';
 import {loop} from './raf-loop.js'
 import Source from './hydra-source.js'
-import {HydraSourceWGSL} from './hydra-sourceWGSL.js'
 import MouseTools from './lib/mouse.js'
 import Audio from './lib/audio.js'
 import VidRecorder from './lib/video-recorder.js'
@@ -37,7 +36,7 @@ class HydraRenderer {
     detectAudio = true,
     enableStreamCapture = true,
     useWGSL = false,
-    webWorker = false,
+    webWorker,
     canvas,
     precision,
     extendTransforms = {} // add your own functions on init
@@ -117,7 +116,7 @@ class HydraRenderer {
 			this.wgslPromise = new Promise((resolve, reject)=> {
 			this.wgslHydra.setupHydra().then(()=>{
 					this._initOutputsWgsl(numOutputs);
-					this._initSourcesWgsl(numSources);
+					this._initSources(numSources);
 					this._generateGlslTransforms();	
 					this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
 					if(autoLoop) this.looper = loop(this.tick.bind(this)).start();
@@ -130,7 +129,8 @@ class HydraRenderer {
         this._initOutputs(numOutputs)
         this._initSources(numSources)
         this._generateGlslTransforms()
-    
+				this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
+
         this.synth.screencap = () => {
           this.saveFrame = true
         }
@@ -448,7 +448,8 @@ class HydraRenderer {
   }
 
   createSource (i) {
-    let s = new Source({regl: this.regl, pb: this.pb, width: this.width, height: this.height, label: `s${i}`})
+    let s = new Source({regl: this.regl, hydraSynth: this, wgsl: this.wgslHydra, webWorker: this.webWorker,
+    		 pb: this.pb, width: this.width, height: this.height, chanNum: i, label: `s${i}`})
     this.synth['s' + this.s.length] = s
     this.s.push(s)
     return s
@@ -462,7 +463,7 @@ class HydraRenderer {
   }
 
   createSourceWgsl (i) {
-    let s = new HydraSourceWGSL({hs: this.wgslHydra, pb: this.pb, width: this.width, height: this.height, chanNum: i, label: `s${i}`})
+    let s = new HydraSourceWGSL({hydraSynth: this, wgsl: this.wgslHydra, pb: this.pb, width: this.width, height: this.height, chanNum: i, label: `s${i}`})
     this.synth['s' + this.s.length] = s
     this.s.push(s)
     return s

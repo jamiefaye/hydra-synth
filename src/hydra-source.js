@@ -2,45 +2,83 @@ import {Webcam} from './lib/webcam.js'
 import Screen from './lib/screenmedia.js'
 
 class HydraSource {
-  constructor ({ regl, wgsl, proxy, width, height, pb, label = ""}) {
-    this.label = label
-    this.regl = regl
+  constructor ({ regl, wgsl, hydraSynth, webWorker, proxy, width, height, chanNum, pb, label = ""}) {
+    this.label = label;
+    this.regl = regl;
     this.wgsl = wgsl;
-    this.proxy = proxy;
-    this.src = null
-    this.dynamic = true
-    this.width = width
-    this.height = height
-    
-    if (regl && wgsl) console.log("Both regl & wgsl provided");
+    this.hydraSynth = hydraSynth;
+    this.webWorker = webWorker;
+    this.proxy = webWorker !== undefined;
+    this.src = null;
+    this.dynamic = true;
+    this.width = width;
+    this.height = height;
+    this.chanNum = chanNum;
 
-    this.tex = this.regl.texture({
-      //  shape: [width, height]
-      shape: [ 1, 1 ]
-    })
     this.pb = pb
+    this.tex = this.makeTexture({width, height});
   }
 
-  init (opts, params) {
-    if ('src' in opts) {
-      this.src = opts.src
-      this.tex = this.regl.texture({ data: this.src, ...params })
-    }
-    if ('dynamic' in opts) this.dynamic = opts.dynamic
+  makeTexture(params) {
+  	let width = params.width;
+ 	  let height = params.height;
+  	if (!this.wgsl) {
+  		return this.regl.texture({
+      	shape: [ width, height ],
+      	...params
+    		});
+  	} else {
+ 	  let tex = this.wgsl.device.createTexture({
+    	size: [width, height, 1],
+    	format: this.wgsl.format, // was "rgba8unorm"
+    	usage:
+      		GPUTextureUsage.TEXTURE_BINDING |
+      		GPUTextureUsage.COPY_DST |
+      		GPUTextureUsage.RENDER_ATTACHMENT,
+  			});
+  		this.lastTexture = undefined; // flush view cache if needed.
+    	return tex;
+  	}
   }
+
+	activate(width, height) {
+		this.offscreencanvas = new OffscreenCanvas(width, height); 
+		this.bmr = this.offscreencanvas.getContext("bitmaprenderer");
+
+		if (!this.wgsl) {
+			 this.src = this.offscreencanvas;
+			 this.tex = this.makeTexture({ data: this.src, dynamic: true, width: width, height: height})
+		} else {
+			this.tex = this.makeTexture({width: width, height : height});
+		}
+		console.log("activate complete");
+	}
 
   initCam (index, params) {
+  	if (this.webWorker) 
+  		{
+  			this.webWorker.openSourceProxy("webcam", this.chanNum, index, params);
+  			return;
+  		}
     const self = this
     Webcam(index)
       .then(response => {
         self.src = response.video
         self.dynamic = true
-        self.tex = self.regl.texture({ data: self.src, ...params })
+        self.width = self.src.videoWidth;
+        self.height = self.src.videoHeight;
+        self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
       })
       .catch(err => console.log('could not get camera', err))
   }
 
   initVideo (url = '', params) {
+  	
+  	if (this.webWorker) 
+  	{
+  			this.worker.openSourceProxy("video", this.chanNum, url, params);
+  			return;
+  	}
     // const self = this
     const vid = document.createElement('video')
     vid.crossOrigin = 'anonymous'
@@ -57,9 +95,15 @@ class HydraSource {
   }
 
   initImage (url = '', params) {
+  	if (this.webWorker) 
+  	{
+    	this.worker.openSourceProxy("image", this.chanNum, url, params); 	
+  		return;
+  	}
     const img = document.createElement('img')
     img.crossOrigin = 'anonymous'
     img.src = url
+    this.oneShotDone = false;
     img.onload = () => {
       this.src = img
       this.dynamic = false
@@ -107,8 +151,20 @@ class HydraSource {
         this.src.srcObject.getTracks().forEach(track => track.stop())
       }
     }
+    this.offscreencanvas = undefined;
+		this.bmr = undefined;
     this.src = null
     this.tex = this.regl.texture({ shape: [ 1, 1 ] })
+  }
+
+  resizeTex(width, height) {
+  	if (!this.wgsl) {
+  		this.tex.resize(width, height)
+  	} else {
+			this.tex = this.makeTexture({width: width, height: height});
+  	}
+  		this.width = width;
+  		this.height = height;
   }
 
   tick (time) {
@@ -121,20 +177,98 @@ class HydraSource {
           this.tex.width,
           this.tex.height
         )
-        this.tex.resize(this.src.videoWidth, this.src.videoHeight)
+        this.resizeTex(this.src.videoWidth, this.src.videoHeight)
       }
 
-      if (this.src.width && this.src.width !== this.tex.width) {
-        this.tex.resize(this.src.width, this.src.height)
+      if (this.src.width && this.src.width !== this.width) {
+        this.resizeTex(this.src.width, this.src.height);
       }
 
-      this.tex.subimage(this.src)
+			if (!this.wgsl) {
+      	this.tex.subimage(this.src);
+      } else {
+      	this.updateTextureWGSL();
+      }
     }
   }
 
-  getTexture () {
-    return this.tex
+ updateTextureWGSL() {
+ 	  if (!this.src) return;
+ 	  // Probably redundant.
+ 	  let w = this.width;
+		let h = this.height;
+		if (this.src.videoWidth) {
+			w = this.src.videoWidth;
+			h= this.src.videoHeight;
+ 	  }
+
+ 	  if (!this.dynamic) {
+ 	   if(!this.oneShotDone) {
+ 	  	// non-dynamic textures only need to be copied-in once.
+ 	  	 	this.wgsl.device.queue.copyExternalImageToTexture(
+    			{ source: this.src, flipY: true},
+    			{ texture: this.tex },
+    			[ w, h ],
+  			);
+  			this.oneShotDone = true;
+		 }
+  		return;
+ 	  }
+    // pull in the next texture;
+    this.wgsl.device.queue.copyExternalImageToTexture(
+    		{ source: this.src, flipY: true },
+    		{ texture: this.tex },
+    		[ w, h ],
+  		);
+    }
+
+   getTexture () {
+   	  if (this.proxy) return this.getProxiedTexture();
+  		if (this.wgsl) return this.getTextureWGSL();
+    	return this.tex
+  	}
+
+	// WGSL wants a "texture view", rather than a texture
+	// To avoid creating a new view each frame, we do a simple cache.
+   getTextureWGSL () {
+  	if (!this.tex) return undefined;
+  	if (this.lastTexture !== this.tex || !this.lastTextureView) {
+  		// this.lastTexture = this.tex;
+  		 this.lastTextureView = this.tex.createView();
+  	}
+  	if (this.lastTextureView) return this.lastTextureView;
+    return undefined;
   }
+
+	getProxiedTexture() {
+		if (this.wgsl) {
+			  	if (!this.offscreencanvas) {
+			  		//this.activate(this.width, this.height);
+						return this.tex.createView()
+					}
+			 	 this.wgsl.device.queue.copyExternalImageToTexture(
+    			{ source: this.offscreencanvas, flipY: true},
+    			{ texture: this.tex },
+    			[ this.tex.width, this.tex.height ],
+  			);
+  			return this.getTextureWGSL();
+		} else {
+			//this.activate(img.width, img.height);
+			//this.bmr.transferFromImageBitmap(img);
+			return this.tex;
+		}
+	}
+
+  injectImage(img) {
+  	if (!this.offscreencanvas) {
+			this.activate(img.width, img.height);
+		}
+ 		let sizeWrong = (this.tex.width !== img.width) || (this.tex.height !== img.height);
+ 		if (sizeWrong) {
+ 				this.activate(img.width, img.height);
+ 		}
+		this.bmr.transferFromImageBitmap(img);
+	}
 }
 
 export default HydraSource

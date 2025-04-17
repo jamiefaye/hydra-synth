@@ -10,38 +10,64 @@ async function init () {
 
   const canvas = document.createElement('canvas')
   canvas.style.backgroundColor = "#000"
-  canvas.width = 720
-  canvas.height = 480
+  canvas.width = 360
+  canvas.height = 240
   document.body.appendChild(canvas)
 
 //   // canvas.style.width = '100%'
 //   // canvas.style.height = '100%'
 // //  exampleCustomCanvas()
 
-console.log("Hydra loaded!");
+
 
 //var hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: true, genWGSL: true}) // true false
 //if (hydra.wgslPromise) await hydra.wgslPromise;
 
 let hydra;
-if (true) { // true  false
- hydra = new BGSynth(undefined, false);
-//await	hydra.openWorker();
-const offscreen = canvas.transferControlToOffscreen();
-await	hydra.openWorker(Comlink.transfer(offscreen, [offscreen]));
+let wgsl = true;
+let runBG = true;
+let useOffscreen = false;
+
+if (runBG) {
+	if (useOffscreen) { // true  false
+ const offscreen = canvas.transferControlToOffscreen();
+ hydra = new BGSynth(offscreen, wgsl, true);
 } else {
-	 hydra = new BGSynth(canvas, false);
-await	hydra.openWorker();
+	 hydra = new BGSynth(canvas, wgsl, false);
 }
+	await	hydra.openWorker();
+} else {
+// Run in foreground 
+	 hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: true, useWGSL: wgsl}) // true false
+	 if (wgsl) await hydra.wgslPromise;
 
-
-
-
+}
 
 // *******************************************
 // test code follows:
 
-let testcode = 
+let testcode = `
+s0.initCam()
+src(s0).out()
+
+`;
+
+// *******************************************
+// current test code should be above
+
+
+if (runBG) {
+	hydra.setSketch(testcode, false);
+} else {
+  hydra.eval(testcode, false);
+}
+
+
+// *******************************************
+// Inactive code parked below.
+//
+
+/*
 `
  osc(10, 0.9, 300)
 .color(0.9, 0.7, 0.8)
@@ -80,11 +106,13 @@ noise(()=>time, ()=>time / 10.).out(o1);
 render()
 
 
-`
+//s3.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
+s3.initCam();
+//src(s3).scale(1.1).blend(src(o3).scale(1.1), 0.8).out(o3);
+src(s3).out(o3)
+render();
 
-
-hydra.setSketch(testcode, false);
-
+*/
 
 
 /*
