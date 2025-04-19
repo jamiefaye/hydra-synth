@@ -18,8 +18,7 @@ class OutputWgsl {
   //})
 }
 
-
- getCurrent() {
+getCurrent() {
 	let tex = this.wgslHydra.getCurrentTextureViewForChannel(this.chanNum);
 	return tex;
 }
@@ -37,12 +36,10 @@ init () {
 
 
 async render(passes) {
+
   let pass = passes[0]
   //console.log('pass', pass, this.pingPongIndex)
   var self = this
-  
-  
-	// Set up the specific uniforms for this channel
   var uniforms = Object.assign(pass.uniforms, { prevBuffer:  () =>  {
              //var index = this.pingPongIndex ? 0 : 1
           //   var index = self.pingPong[(passIndex+1)%2]
@@ -50,28 +47,14 @@ async render(passes) {
           return self.fbos[self.pingPongIndex]
        }
     })
- // Present the pass fragment to the wgsl-hydra instance for this channel.
- // Setup the tick handler
- 		this.hydraChan = await this.wgslHydra.setupHydraChain(this.chanNum, uniforms , pass);
- /*
- 	self.draw = self.regl({
-    	frag: pass.frag,
-    	vert: self.vert,
-    	attributes: self.attributes,
-    	uniforms: uniforms,
-    	count: 3,
-    	framebuffer: () => {
-      	self.pingPongIndex = self.pingPongIndex ? 0 : 1
-      	return self.fbos[self.pingPongIndex]
-    }
-  })
-  */
+
+ // Present the pass fragment to the wgslHydra renderer on behalf of this channel.
+ 		this.hydraChan = await this.wgslHydra.setupHydraChain(this.chanNum, uniforms, pass.frag);
 }
 
 
 	tick(props) {
-//  console.log(props)
-//  this.draw(props)
+		console.log("tick called on OutputWgsl");
 	}
 }
 

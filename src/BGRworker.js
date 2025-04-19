@@ -1,19 +1,17 @@
 import * as Comlink from "comlink";
 import HydraSynth from "./hydra-synth.js";
-
 import {Deglobalize} from './Deglobalize.js';
 
 const GeneratorFunction = function* () {}.constructor;
 
-
 class BGRWorker {
-  constructor(canvas, useWGSL=false) {
+  constructor(useWGSL=false) {
     if (!(typeof self !== "undefined" && self.constructor && self.constructor.name === "DedicatedWorkerGlobalScope")) {
     	this.isWebWorker = false;
 		} else {
     	this.isWebWorker = true;
 		}
-		this.can = canvas;
+		//this.can = canvas;
 		this.directToCanvas = this.can ? true : false;
 		this.useWGSL = useWGSL;
   } 
@@ -23,7 +21,7 @@ class BGRWorker {
 			this._h._destroy();
 		}
 	}
-		
+
 
   registerCallback(name, cb) {
 		if (name === 'frame') {
@@ -47,6 +45,9 @@ class BGRWorker {
     }
 	}
 
+	async setResolution(width, height) {
+		this.h.setResolution(width, height);
+	}
 
   async setSketch(inStr) {
   	if (!this.h) return;
@@ -180,5 +181,5 @@ class BGRWorker {
 		}
 	}
 }
+
 Comlink.expose(BGRWorker);
-export {BGRWorker}

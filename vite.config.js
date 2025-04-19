@@ -6,7 +6,16 @@ import fs from 'fs';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-
+   worker: {
+   rollupOptions: {
+      output: {
+        inlineDynamicImports : true,
+        entryFileNames: `assets/[name].js`,
+        chunkFileNames: `assets/[name].js`,
+        assetFileNames: `assets/[name].[ext]`
+      }
+    }
+  },
    build: {
   	minify: false,
   	terserOptions: {
@@ -21,7 +30,7 @@ export default defineConfig({
     }
   },
 
-//	  base: '/hyground/',
+  	  base: './',
 	    define: {
         // "process.env": process.env,
         // // By default, Vite doesn't include shims for NodeJS/
@@ -44,6 +53,19 @@ export default defineConfig({
     },
   },
 
+  plugins: [
+ {
+      name: "configure-response-headers",
+      configureServer: (server) => {
+        server.middlewares.use((_req, res, next) => {
+          res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+          res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+          next();
+        });
+      },
+    }
+  ],
+  
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))

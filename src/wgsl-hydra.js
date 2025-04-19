@@ -95,6 +95,42 @@ class wgslHydra {
 
 	}
 
+	// Changes the destination canvas size and the outputs too.
+	async resizeOutputsTo(width, height) {
+    this.canvas.width = Math.max(1, Math.min(width, this.device.limits.maxTextureDimension2D));
+    this.canvas.height = Math.max(1, Math.min(height, this.device.limits.maxTextureDimension2D));
+
+		this.createOutputTextures();
+
+// resize the renderers by making new ones.
+		 this.fboRenderer = new FBOToCanvas(this.canvas, this.device);
+		 this.fbo4Renderer = new FBO4ToCanvas(this.canvas, this.device);
+	   await this.fboRenderer.initializeFBOdrawing();
+	   await this.fbo4Renderer.initializeFBOdrawing();
+	}
+
+	async createOutputTextures() {
+    this.destTextureDescriptor = {
+        size: {
+            width: this.canvas.width,
+            height: this.canvas.height
+        },
+        mipLevelCount: 1,
+        format: this.format,
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
+    };
+		for (let chan = 0; chan < this.numChannels; ++chan) {
+			let rpe = this.renderPassInfo[chan];
+	  	rpe.destTexture = new Array(2);
+	  	rpe.destTextureView = new Array(2);
+	  	for (let i = 0; i < 2; ++i) {
+ 	 			rpe.destTexture[i] = this.device.createTexture(this.destTextureDescriptor);
+ 	 			rpe.destTextureView[i] = rpe.destTexture[i].createView();
+ 	 		}
+ 	 		rpe.channelTexInfo = {textures: rpe.destTexture, views: rpe.destTextureView};
+ 	 	}
+	 }
+
   flipPingPongForChannel(chan) {
  		let rpe = this.renderPassInfo[chan]
 		let x = rpe.pingPongs === 0 ? 1 : 0;
@@ -228,34 +264,17 @@ class wgslHydra {
      ],
 		});
 
-    this.destTextureDescriptor = {
-        size: {
-            width: this.canvas.width,
-            height: this.canvas.height
-        },
-        mipLevelCount: 1,
-        format: this.format,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
-    };
+
 
 		// ------------------------------------------------------------------------------
 		// Setup dest FBO and views for each channel:
 		//
 		
-		for (let chan = 0; chan < this.numChannels; ++chan) {
-			let rpe = this.renderPassInfo[chan];
-	  	rpe.destTexture = new Array(2);
-	  	rpe.destTextureView = new Array(2);
-	  	for (let i = 0; i < 2; ++i) {
- 	 			rpe.destTexture[i] = this.device.createTexture(this.destTextureDescriptor);
- 	 			rpe.destTextureView[i] = rpe.destTexture[i].createView();
- 	 		}
- 	 		rpe.channelTexInfo = {textures: rpe.destTexture, views: rpe.destTextureView};
-	 }
-	// create a vertex shader for all
-	 this.vertexShaderModule = this.device.createShaderModule({ label: "wgslvertex", code: vertexShaderCode });
+	 this.createOutputTextures();
 
-	// Setup the renderer that goes from an fbo to final screen.
+	 // create a vertex shader for all
+	 this.vertexShaderModule = this.device.createShaderModule({ label: "wgslvertex", code: vertexShaderCode });
+	 // Setup the renderer that goes from an fbo to final screen.
 	 await this.fboRenderer.initializeFBOdrawing();
 	 await this.fbo4Renderer.initializeFBOdrawing();
 	}
@@ -269,7 +288,7 @@ class wgslHydra {
 			rpe.reset();
   		rpe.uniformList = uniforms;
 			this.generateUniformDeclarations(chan); // bindGroupHeader[chan]
-			rpe.fragmentShaderSource = vertexPrefix + fragPrefix + rpe.bindGroupHeader +  shader.frag; //  + this.fragPrefix
+			rpe.fragmentShaderSource = vertexPrefix + fragPrefix + rpe.bindGroupHeader +  shader; //  + this.fragPrefix
 			
 			//console.log(this.fragmentShaderSource[chan]);
 

@@ -1,5 +1,5 @@
 import Hydra from "./../src/hydra-synth.js";
-import {BGSynth, openBackgroundHydra} from './../src/BGSynth.js';
+import {BGSynth} from './../src/BGSynth.js';
 import * as Comlink from "comlink";
 
 //const { fugitiveGeometry, exampleVideo, exampleResize, nonGlobalCanvas } = import('./examples.js')
@@ -10,12 +10,13 @@ async function init () {
 
   const canvas = document.createElement('canvas')
   canvas.style.backgroundColor = "#000"
-  canvas.width = 360
-  canvas.height = 240
+  document.body.appendChild(canvas);
+//  canvas.width = 720
+//  canvas.height = 480
   document.body.appendChild(canvas)
 
-//   // canvas.style.width = '100%'
-//   // canvas.style.height = '100%'
+	canvas.style.width = '100%'
+	canvas.style.height = '100%'
 // //  exampleCustomCanvas()
 
 
@@ -40,15 +41,63 @@ if (runBG) {
 // Run in foreground 
 	 hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: true, useWGSL: wgsl}) // true false
 	 if (wgsl) await hydra.wgslPromise;
-
 }
+
+
+function fitCanvas() {
+	 canvas.width = window.innerWidth;
+   canvas.height = window.innerHeight;
+   hydra.setResolution(canvas.width, canvas.height);
+}
+
+window.addEventListener('resize', fitCanvas, false);
 
 // *******************************************
 // test code follows:
 
 let testcode = `
-s0.initCam()
-src(s0).out()
+
+
+ osc(10, 0.9, 300)
+.color(0.9, 0.7, 0.8)
+.diff(
+  osc(45, 0.3, 100)
+  .color(0.9, 0.9, 0.9)
+  .rotate(0.18)
+  .pixelate(12)
+  .kaleid()
+)
+.scrollX(10)
+.colorama()
+//.luma()
+.repeatX(4)
+.repeatY(4)
+.modulate(
+  osc(1, -0.9, 300)
+)
+.scale(2)
+.out()
+
+//Glitch River
+//Flor de Fuego
+//https://flordefuego.github.io/
+voronoi(8,1)
+.mult(osc(10,0.1,()=>Math.sin(time)*3).saturate(3).kaleid(200))
+.modulate(o2,0.5)
+.add(o2,0.8)
+.scrollY(-0.01)
+.scale(0.99)
+.modulate(voronoi(8,1),0.008)
+.luma(0.3)
+.out(o2)
+
+noise(()=>time, ()=>time / 10.).out(o1);
+
+s3.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
+//s3.initCam();
+src(s3).scale(1.1).blend(src(o3).scale(1.1), 0.8).out(o3);
+//src(s3).out(o3)
+render();
 
 `;
 

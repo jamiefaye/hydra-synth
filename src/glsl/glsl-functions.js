@@ -267,7 +267,7 @@ wgsl:
 `   //  vec2 uv = gl_FragCoord.xy/vec2(1280., 720.);
    return texture2D(tex, fract(_st));`,
 
-// This variant should not be actually used as texture sampler stuff
+// This variant should not be actually used as the texture sampler stuff
 // is handled explicitly in generateGlsl.
   wgsl:
   `

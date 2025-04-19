@@ -222,8 +222,11 @@ class HydraRenderer {
     this.s.forEach((source) => {
       source.resize(width, height)
     })
-    this.regl._refresh()
-     console.log(this.canvas.width)
+    if (this.useWGSL) {
+    	this.wgslHydra.resizeOutputsTo(width, height);
+    } else {
+    	this.regl._refresh()
+    }
   }
 
   canvasToImage (callback) {
@@ -450,20 +453,6 @@ class HydraRenderer {
   createSource (i) {
     let s = new Source({regl: this.regl, hydraSynth: this, wgsl: this.wgslHydra, webWorker: this.webWorker,
     		 pb: this.pb, width: this.width, height: this.height, chanNum: i, label: `s${i}`})
-    this.synth['s' + this.s.length] = s
-    this.s.push(s)
-    return s
-  }
-
-  _initSourcesWgsl (numSources) {
-    this.s = []
-    for(var i = 0; i < numSources; i++) {
-      this.createSourceWgsl(i)
-    }
-  }
-
-  createSourceWgsl (i) {
-    let s = new HydraSourceWGSL({hydraSynth: this, wgsl: this.wgslHydra, pb: this.pb, width: this.width, height: this.height, chanNum: i, label: `s${i}`})
     this.synth['s' + this.s.length] = s
     this.s.push(s)
     return s

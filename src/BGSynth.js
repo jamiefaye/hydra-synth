@@ -88,7 +88,11 @@ class SourceProxy {
 } // end SourceProxy class
 
 
+let BGRWorker;
 
+function setBGWorkerClass(aClass) {
+	BGRWorker = aClass;
+}
 
 	// Represents the "Main Thread" side of a BGRworker instance.
 	// While BGSynths could cause other BGSynths to come into being, all of them must be children
@@ -114,7 +118,10 @@ class SourceProxy {
 	destroy() {
 		this.activeSourceProxies = [];
 		this.destroyed = true;
-		this.bgWorker.destroy();
+		if (this.bgWorker) {
+			this.bgWorker.destroy();
+			this.bgWorker = null;
+		}
 	}
 
 	trackMouse(event) {
@@ -123,19 +130,19 @@ class SourceProxy {
 	}
 
 	async openWorker() {
-
-		let BGRWorker = Comlink.wrap(new Worker(new URL('./BGRworker.js', import.meta.url), { type: 'module'}));
+		if (!BGRWorker) {
+			BGRWorker = Comlink.wrap(new Worker(new URL('./BGRworker.js', import.meta.url), { type: 'module'}));
+		}
 		if (this.directToCanvas) {
 				let offscreen = this.canvas;
 				this.bgWorker = await new BGRWorker(Comlink.transfer(offscreen, [offscreen]), this.useWGSL);
 		} else {
-				this.bgWorker = await new BGRWorker(null, this.useWGSL);
+			  this.bgWorker = await new BGRWorker();
 		}
 		await this.bgWorker.openHydra();
     await this.bgWorker.registerCallback("frame", Comlink.proxy(this.frameReadyFromWorker.bind(this)));
     await this.bgWorker.registerCallback("proxy", Comlink.proxy(this.requestProxySource.bind(this)));
 
-    
     if (!this.directToCanvas) {
 			this.bmr = this.canvas.getContext("bitmaprenderer");
 	  }
@@ -148,6 +155,11 @@ class SourceProxy {
 // Called when a resize of the localHydra stage causes the localHydra stage to be discarded and recreated.
 	changeDestinationCanvas(drawTo) {
 		this.canvas = drawTo;
+		this.setResolution(canvas.width, canvas.height);
+	}
+
+	setResolution(width, height) {
+		this.bgWorker.setResolution(width, height);
 	}
 
 	// called from worker when a new frame is ready.
@@ -211,4 +223,4 @@ async function openBackgroundHydra(drawToCanvas, text, hush) {
 	return bgh;
 }
 
-export {BGSynth, openBackgroundHydra}
+export {BGSynth, openBackgroundHydra, setBGWorkerClass}
