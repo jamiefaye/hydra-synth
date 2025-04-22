@@ -115,10 +115,10 @@ class HydraRenderer {
 
 		this.numOutputs = numOutputs
 		if (this.useWGSL) {
-			this.wgslHydra = new wgslHydra(this.canvas, 4);
+			this.wgslHydra = new wgslHydra(this, this.canvas, 4);
 			this.wgslPromise = new Promise((resolve, reject)=> {
+			this._initOutputsWgsl(numOutputs);
 			this.wgslHydra.setupHydra().then(()=>{
-					this._initOutputsWgsl(numOutputs);
 					this._initSources(numSources);
 					this._generateGlslTransforms();	
 					this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])

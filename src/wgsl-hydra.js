@@ -80,7 +80,8 @@ class RenderPassEntry {
 // wgslHydra manages a set of N "channels", each one driving a given output channel.
 // 
 class wgslHydra {
-	constructor (canvas, numChannels = 4) {
+	constructor (hydra, canvas, numChannels = 4) {
+		this.hydra = hydra;
 		this.canvas = canvas;
 	  this.context = this.canvas.getContext("webgpu");
 
@@ -90,7 +91,6 @@ class wgslHydra {
 
 		this.renderPassInfo = new Array(numChannels);
 		for (let i = 0; i < numChannels; ++i) this.renderPassInfo[i] = new RenderPassEntry(i);
-
 	  this.time = 0.0;
 	  this.mousePos = {x: 0, y: 0};
 	  this.showQuad = false;
@@ -116,7 +116,9 @@ class wgslHydra {
 	   await this.fbo4Renderer.initializeFBOdrawing();
 	}
 
-	async createOutputTextures() {
+ 
+	 createOutputTextures() {
+	  this.outputChannelObjects = this.hydra.o;
     this.destTextureDescriptor = {
         size: {
             width: this.canvas.width,
@@ -126,42 +128,12 @@ class wgslHydra {
         format: this.format,
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
     };
+
 		for (let chan = 0; chan < this.numChannels; ++chan) {
-			let rpe = this.renderPassInfo[chan];
-	  	rpe.destTexture = new Array(2);
-	  	rpe.destTextureView = new Array(2);
-	  	for (let i = 0; i < 2; ++i) {
- 	 			rpe.destTexture[i] = this.device.createTexture(this.destTextureDescriptor);
- 	 			rpe.destTextureView[i] = rpe.destTexture[i].createView();
- 	 		}
- 	 		rpe.channelTexInfo = {textures: rpe.destTexture, views: rpe.destTextureView};
+			let outp = this.outputChannelObjects[chan];
+			outp.createTexturesAndViews(this.device, this.destTextureDescriptor);
  	 	}
 	 }
-
-  flipPingPongForChannel(chan) {
- 		let rpe = this.renderPassInfo[chan]
-		let x = rpe.pingPongs === 0 ? 1 : 0;
-		rpe.pingPongs = x;
-  }
-
-	getCurrentTextureViewForChannel(chan) {
-		let rpe = this.renderPassInfo[chan];
-		let p = rpe.pingPongs;
-		return rpe.channelTexInfo.views[p];
-	}
-
-	getCurrentTextureForChannel(chan) {
-		let rpe = this.renderPassInfo[chan];
-		let p = rpe.pingPongs;
-		return rpe.channelTexInfo.textures[p];
-	}
-
-	getOppositeTextureViewForChannel(chan) {
-		let rpe = this.renderPassInfo[chan];
-		let p = rpe.pingPongs;
-		let x = p === 0 ? 1 : 0;
-		return rpe.channelTexInfo.views[x];
-	}
 
 	async setupHydra() {
 	      // Step 1: Check for WebGPU support
@@ -276,7 +248,7 @@ class wgslHydra {
 		// ------------------------------------------------------------------------------
 		// Setup dest FBO and views for each channel:
 		//
-		
+
 	 this.createOutputTextures();
 
 	 // create a vertex shader for all
@@ -293,6 +265,7 @@ class wgslHydra {
   async setupHydraChain(chan, uniforms, shader) {
 			const rpe = this.renderPassInfo[chan];
 			rpe.reset();
+			rpe.outputObject = this.outputChannelObjects[chan];
   		rpe.uniformList = uniforms;
 			this.generateUniformDeclarations(chan); // bindGroupHeader[chan]
 			rpe.fragmentShaderSource = vertexPrefix + fragPrefix + rpe.bindGroupHeader +  shader; //  + this.fragPrefix
@@ -359,12 +332,12 @@ class wgslHydra {
     for (let chan = 0; chan < this.numChannels; ++chan) {
  			const rpe = this.renderPassInfo[chan];
 			if (!rpe.pipeline) continue;
-		  this.flipPingPongForChannel(chan);
+		  rpe.outputObject.flipPingPong();
       const renderPassDescriptor = {
       	label: "renderPassDescriptor",
         colorAttachments: [{
           label: "canvas textureView attachment " + chan,
-          view: this.getCurrentTextureViewForChannel(chan),
+          view: rpe.outputObject.getCurrentTextureView(),
           clearValue: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
           loadOp: "clear",
           storeOp: "store",
@@ -387,17 +360,17 @@ class wgslHydra {
     this.device.queue.submit([commandEncoder.finish()]);
 
     await this.device.queue.onSubmittedWorkDone();
-    
+ 
     if (this.showQuad) {
 			await this.fbo4Renderer.refreshCanvases(
-				this.getCurrentTextureForChannel(0),
-		  	this.getCurrentTextureForChannel(1),			
-		  	this.getCurrentTextureForChannel(2),
-		  	this.getCurrentTextureForChannel(3)
+				this.outputChannelObjects[0].getCurrentTexture(),
+				this.outputChannelObjects[1].getCurrentTexture(),
+				this.outputChannelObjects[2].getCurrentTexture(),
+				this.outputChannelObjects[3].getCurrentTexture()
 			);
     	}
     else {
-    	await this.fboRenderer.refreshCanvas(this.getCurrentTextureForChannel(this.outChannel));
+    	await this.fboRenderer.refreshCanvas(this.outputChannelObjects[this.outChannel].getCurrentTexture());
 		}
 	}
 

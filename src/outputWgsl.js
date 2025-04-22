@@ -6,10 +6,11 @@ class OutputWgsl {
 	this.chanNum = chanNum
   this.label = label 
   this.draw = () => {}
-   
+
   this.init()
 	// if we have individual ping-pong, 
 }
+
 
  resize(width, height) {
   //this.fbos.forEach((fbo) => {
@@ -17,15 +18,19 @@ class OutputWgsl {
   //})
 }
 
+
+// Can simplify:
 getCurrent() {
-	let tex = this.wgslHydra.getCurrentTextureViewForChannel(this.chanNum);
+	let tex = this.getCurrentTextureView();
 	return tex;
 }
 
+
 getTexture() {
-   let tex = this.wgslHydra.getOppositeTextureViewForChannel(this.chanNum);
+   let tex = this.getOppositeTextureView();
    return tex;
 }
+
 
 init () {
 //  console.log('clearing')
@@ -43,7 +48,7 @@ async render(passes) {
              //var index = this.pingPongIndex ? 0 : 1
           //   var index = self.pingPong[(passIndex+1)%2]
           //  console.log('ping pong', self.pingPongIndex)
-          return self.fbos[self.pingPongIndex]
+          return self.getCurrentTextureView();
        }
     })
 
@@ -51,9 +56,43 @@ async render(passes) {
  		this.hydraChan = await this.wgslHydra.setupHydraChain(this.chanNum, uniforms, pass.frag);
 }
 
-
 	tick(props) {
-		console.log("tick called on OutputWgsl");
+		// console.log("tick called on OutputWgsl");
+	}
+
+  flipPingPong() {
+
+		let x = this.pingPongs === 0 ? 1 : 0;
+		this.pingPongs = x;
+  }
+
+  // This is called during setup and whenever canvas size changes
+	createTexturesAndViews(device, destTextureDescriptor) {
+		this.textures = new Array(2);
+	  this.views = new Array(2);
+	  for (let i = 0; i < 2; ++i) {
+ 	 			this.textures[i] = device.createTexture(destTextureDescriptor);
+ 	 			this.views[i] = this.textures[i].createView();
+ 	 	}
+	}
+
+
+	getCurrentTextureView() {
+		let p = this.pingPongs;
+		return this.views[p];
+	}
+
+
+	getCurrentTexture() {
+		let p = this.pingPongs;
+		return this.textures[p];
+	}
+
+
+	getOppositeTextureView() {
+		let p = this.pingPongs;
+		let x = p === 0 ? 1 : 0;
+		return this.views[x];
 	}
 }
 

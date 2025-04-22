@@ -148,6 +148,8 @@ class FBOToCanvas {
 		// Create binding for our source texture, which may well have changed.
 		if (tex) this.sourceTexture = tex;
 
+		if (!this.sourceTexture) return;
+
 		this.textureBindGroup = this.device.createBindGroup({
 			 label: "texture bind group",
   	   layout: this.textureBindGroupLayout,

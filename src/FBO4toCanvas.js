@@ -231,7 +231,7 @@ class FBO4ToCanvas {
 
 	refreshCanvases(tex0, tex1, tex2, tex3) {
 		// Create binding for our source texture, which may well have changed.
-
+		if (!tex0 || !tex1 || !tex2 || !tex3) return;
 
 		this.textureBindGroup = this.device.createBindGroup({
 			 label: "texture bind group",
