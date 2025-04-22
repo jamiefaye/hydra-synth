@@ -12,7 +12,8 @@ import Generator from './generator-factory.js'
 import regl from 'regl'
 // const window = global.window
 import {wgslHydra} from './wgsl-hydra.js';
-
+import {Deglobalize} from './Deglobalize.js';
+const GeneratorFunction = function* () {}.constructor;
 
 let Mouse;
 if (!(typeof self !== 'undefined' && self.constructor && self.constructor.name === 'DedicatedWorkerGlobalScope')) {
@@ -50,14 +51,15 @@ class HydraRenderer {
     this.height = height
     this.renderAll = false
     this.detectAudio = detectAudio
-
     this.useWGSL = useWGSL;
+    if (this.useWGSL) {
+    	console.log("Creating HydraRenderer with WGSL and WebGPU.");
+    }
     this.webWorker = webWorker
     this.wgslReady = false;
 
     this._initCanvas(canvas)
 
-    //global.window.test = 'hi'
     // object that contains all properties that will be made available on the global context and during local evaluation
     this.synth = {
       time: 0,
@@ -75,7 +77,7 @@ class HydraRenderer {
       setResolution: this.setResolution.bind(this),
       update: (dt) => {},// user defined update function
       hush: this.hush.bind(this),
-      tick: this.tick.bind(this)
+      tick: this.tick.bind(this),
     }
 
     if (makeGlobal) window.loadScript = this.loadScript
@@ -109,6 +111,7 @@ class HydraRenderer {
     this.captureStream = null
 
     this.generator = undefined
+    this.generatorTimer = 0;
 
 		this.numOutputs = numOutputs
 		if (this.useWGSL) {
@@ -148,6 +151,7 @@ class HydraRenderer {
     }
     if(detectAudio) this._initAudio()
 
+
     if(this.useWGSL) return;
     
      if (autoLoop) this.looper = loop(this.tick.bind(this)).start()
@@ -156,9 +160,75 @@ class HydraRenderer {
     this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
   }
 
-  eval(code) {
-    this.sandbox.eval(code)
-  }
+
+  async eval(codeIn) {
+    let code = Deglobalize(codeIn, '_h');
+    // convert all keys in h into strings
+    let h = this.synth;
+    let keys = Object.keys(h);
+    let values = [];
+
+    for (let i = 0; i < keys.length; ++i) values.push(h[keys[i]]);
+    keys.push("h");
+    values.push(h);
+    keys.push("_h"); // _h used for fixing-up primitive-valued 'global' references, like "time".
+    values.push(h);
+    try {
+    	let fn = new GeneratorFunction(...keys, code);
+    	this.done = false;
+    	this.generator = fn(...values);
+    } catch (err) {
+    	console.log("Error compiling generator function");
+    	console.log(err);
+    	this.generatorTimer = -1;
+    	return;
+    }
+    this.generatorTimer = -1;
+    try {
+    	let reply = this.generator.next();
+    	this.planNext(reply);
+    } catch (err) {
+    	console.log("Error calling initial generator function.next()");
+    	console.log(err);
+    	delete this.generator;
+    	return;
+    }
+}
+
+// Called from the general tick() function.
+ generatorTick() {
+	if (!this.generator || this.generatorTimer === -1) return;
+	if (this.synth.time < this.generatorTimer) return;
+	let f = this.generator;
+	if (!f) {
+			this.generatorTimer = -1;
+	} else
+	try {
+		let reply = f.next();
+		this.planNext(reply);
+	} catch (err) {
+    	console.log("Error calling generator function.next()");
+    	console.log(err);
+    	this.generatorTimer = -1;
+    	delete this.generator;
+	}
+}
+
+ planNext(reply) {
+	 if (!reply) return;
+
+   if (!reply.done) {
+    		let wT = reply.value;
+    		if (wT === undefined) {
+    			wT = 0.010;
+    		}
+    		this.generatorTimer = this.synth.time + wT;
+    } else {
+        this.done = true;
+    		delete this.generator;
+    }
+}
+
 
   getScreenImage(callback) {
     this.imageCallback = callback
@@ -499,13 +569,15 @@ class HydraRenderer {
   }
 
   // dt in ms
-  tick (dt, uniforms, drawToCanvas) {
+  tick (dt) {
     if(!this.sandbox) return;
     this.sandbox.tick()
+
     if(this.detectAudio === true) this.synth.a.tick()
   //  let updateInterval = 1000/this.synth.fps // ms
     this.sandbox.set('time', this.synth.time += dt * 0.001 * this.synth.speed)
     this.timeSinceLastUpdate += dt
+    this.generatorTick();
     if(!this.synth.fps || this.timeSinceLastUpdate >= 1000/this.synth.fps) {
         if (this.useWGSL) {
         		// Visit sources.
@@ -513,6 +585,7 @@ class HydraRenderer {
           	for (let i = 0; i < this.s.length; i++) {
             	this.s[i].tick(this.synth.time)
           }
+          this.wgslHydra.relayUniformInfo(this.synth.mouse);
         	this.wgslHydra.animate(dt);
         } else 
         {

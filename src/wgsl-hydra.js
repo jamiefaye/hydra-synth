@@ -1,5 +1,8 @@
 import {FBOToCanvas} from "./FBOToCanvas.js";
 import {FBO4ToCanvas} from "./FBO4ToCanvas.js";
+
+// Used to enable a single pass through the "animate" routine.
+// Used for testing to avoid a flood of console error messages.
 const oneShot = false;
 let fired = false;
 
@@ -93,6 +96,10 @@ class wgslHydra {
 	  this.showQuad = false;
 	  this.outChannel = 0;
 
+	}
+	
+	relayUniformInfo(mouse) {
+		this.mousePos = mouse;
 	}
 
 	// Changes the destination canvas size and the outputs too.

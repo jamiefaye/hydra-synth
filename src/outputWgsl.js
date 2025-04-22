@@ -4,8 +4,7 @@ class OutputWgsl {
   constructor ({wgslHydra, chanNum, label = "", width, height}) {
 	this.wgslHydra = wgslHydra;
 	this.chanNum = chanNum
-  this.label = label
-
+  this.label = label 
   this.draw = () => {}
    
   this.init()

@@ -103,7 +103,7 @@ function setBGWorkerClass(aClass) {
 	class BGSynth {
 
 	constructor(drawToCanvas, useWGSL = false, directToCanvas = false) {
-		this.useWGSL = useWGSL;
+		this.useWGSL = useWGSL ? true : false;
 		this.frameTime = 25;
 		this.canvas = drawToCanvas;
 		this.directToCanvas = directToCanvas;
@@ -133,11 +133,11 @@ function setBGWorkerClass(aClass) {
 		if (!BGRWorker) {
 			BGRWorker = Comlink.wrap(new Worker(new URL('./BGRworker.js', import.meta.url), { type: 'module'}));
 		}
+		
+		this.bgWorker = await new BGRWorker(this.useWGSL);
 		if (this.directToCanvas) {
 				let offscreen = this.canvas;
-				this.bgWorker = await new BGRWorker(Comlink.transfer(offscreen, [offscreen]), this.useWGSL);
-		} else {
-			  this.bgWorker = await new BGRWorker();
+				await this.bgWorker.setTransferCanvas(Comlink.transfer(offscreen, [offscreen]));
 		}
 		await this.bgWorker.openHydra();
     await this.bgWorker.registerCallback("frame", Comlink.proxy(this.frameReadyFromWorker.bind(this)));
@@ -180,6 +180,7 @@ function setBGWorkerClass(aClass) {
 		}
 		this.tickSourceProxies();
 		setTimeout ((dT)=>{
+			if (!this.bgWorker) return;
 			this.bgWorker.tick(this.frameTime, this.mouseData);
 		}, this.frameTime);
 	}

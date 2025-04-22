@@ -25,11 +25,24 @@ async function init () {
 //if (hydra.wgslPromise) await hydra.wgslPromise;
 
 let hydra;
-let wgsl = false;
+let wgsl = true;
+let runBG = false;
+let useOffscreen = true;
 
+if (runBG) {
+	if (useOffscreen) { // true  false
+ const offscreen = canvas.transferControlToOffscreen();
+ hydra = new BGSynth(offscreen, wgsl, true);
+} else {
+	 hydra = new BGSynth(canvas, wgsl, false);
+}
+	await	hydra.openWorker();
+} else {
 // Run in foreground 
-	 hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: false, useWGSL: wgsl}) // true false
+	 hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: true, useWGSL: wgsl}) // true false
 	 if (wgsl) await hydra.wgslPromise;
+}
+
 
 function fitCanvas() {
 	 canvas.width = window.innerWidth;
@@ -65,8 +78,6 @@ let testcode = `
 .scale(2)
 .out()
 
-
-
 //Glitch River
 //Flor de Fuego
 //https://flordefuego.github.io/
@@ -80,8 +91,7 @@ voronoi(8,1)
 .luma(0.3)
 .out(o2)
 
-
-
+noise(()=>time, ()=>time / 10.).out(o1);
 
 s3.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
 //s3.initCam();
@@ -89,28 +99,17 @@ src(s3).scale(1.1).blend(src(o3).scale(1.1), 0.8).out(o3);
 //src(s3).out(o3)
 render();
 
-
-noise(10).out(o1);
-yield 2.0;
-noise(()=>time / 2).out(o1);
-
-/*
-
-voronoi(5,-0.1,5)
-.add(osc(1,0,1)).kaleid(21)
-.scale(1,1,2).colorama().out(o1)
-src(o1).mult(src(s0).modulateRotate(o1,100), -0.5)
-  .out()
-
-*/
-
 `;
 
 // *******************************************
 // current test code should be above
 
-  hydra.eval(testcode, false);
 
+if (runBG) {
+	hydra.setSketch(testcode, false);
+} else {
+  hydra.eval(testcode, false);
+}
 
 
 // *******************************************

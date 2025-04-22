@@ -7,11 +7,13 @@ const watchList = new Set(watchListArray);
 
 // Function to convert all instances of global variables on the watchlist to be
 // preceeded by a prefix like "_h.", which converts from a global variable to a member expression
-// We do all this because the JS function creator captures primitive types as initial values rather than as changeable variables.
+// We do all this because the JS function creator captures primitive types as
+// initial values rather than as changeable variables.
 
-function Deglobalize(text, prefix) {
+function Deglobalize(textIn, prefix) {
 	
 	 const ignore = Function.prototype;
+	 let text = 'async function* f() {' + textIn + '}'; // Hack to get acorn to accept yield statement.
 	 let traveler = makeTraveler({
   	go: function(node, state) {
         if (node.type === 'Identifier') {
@@ -30,6 +32,8 @@ function Deglobalize(text, prefix) {
    let ast = Parser.parse(text, {
      			locations: false,
      			ecmaVersion: "latest",
+     			allowReserved: true,
+     			allowAwaitOutsideFunction: true,
           onComment: comments
         }
       );
@@ -41,7 +45,7 @@ function Deglobalize(text, prefix) {
     		traveler.go(ast, state);
  
     		// If none found, just return the input.
-    	 if (state.refTab.length === 0) return text;
+    	 if (state.refTab.length === 0) return textIn;
 
 			 for (let i = 0; i < state.refTab.length; ++i) {
 			 		let node = state.refTab[i];
@@ -60,8 +64,19 @@ function Deglobalize(text, prefix) {
         // Put the comments back.
         //attachComments(ast, comments);
         let regen = generate(ast);
-        return regen;
+        
+        return stripOutStuff(regen);
 }
+
+function stripOutStuff(inp) {
+	  // get rid of the async function at the front and that final '}'.
+	  let firstX = inp.indexOf('{');
+    let lastX = inp.lastIndexOf('}');
+    if (firstX === -1 || lastX === -1) return inp;
+    let outp = inp.substring(firstX + 1, lastX);
+    return outp;
+}
+
 
 function lookForAudioObjectUse(text) {
 	let audioFound = false;
@@ -81,6 +96,8 @@ function lookForAudioObjectUse(text) {
 
    let ast = Parser.parse(text, {
      			locations: false,
+     			allowReserved: true,
+     			allowAwaitOutsideFunction: true,
      			ecmaVersion: "latest",
         }
       );

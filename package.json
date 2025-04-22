@@ -2,13 +2,15 @@
   "name": "hydra-synth",
   "private": true,
   "version": "1.4.0",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "./dist/hydra-synth.umd.js",
-  "module":"./dist/hydra-synth.es.js",
+  "module": "./dist/hydra-synth.es.js",
   "exports": {
-   	".": {
-			"import": "./dist/hydra-synth.es.js",
+    ".": {
+      "import": "./dist/hydra-synth.es.js",
       "require": "./dist/hydra-synth.umd.js"
     }
   },
@@ -17,15 +19,16 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-   "dependencies": {
-   	"acorn": "^8.7.0",
+  "dependencies": {
+    "acorn": "^8.7.0",
+    "acorn-loose": "^8.5.0",
     "astravel": "^0.5.0",
     "astring": "^1.4.0",
-    "meyda": "^5.6.3",
+    "comlink": "^4.4.2",
     "events": "^1.0.2",
     "inherits": "^2.0.1",
+    "meyda": "^5.6.3",
     "regl": "^2.1.1",
-    "comlink": "^4.4.2",
     "webgpu-utils": "^1.10.1"
   },
   "devDependencies": {

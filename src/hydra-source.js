@@ -14,6 +14,7 @@ class HydraSource {
     this.width = width;
     this.height = height;
     this.chanNum = chanNum;
+    this.indirect = false;
 
     this.pb = pb
     this.tex = this.makeTexture({width, height});
@@ -41,7 +42,7 @@ class HydraSource {
   	}
   }
 
-	activate(width, height) {
+	activate (width, height) {
 		this.offscreencanvas = new OffscreenCanvas(width, height); 
 		this.bmr = this.offscreencanvas.getContext("bitmaprenderer");
 
@@ -53,6 +54,22 @@ class HydraSource {
 		}
 		console.log("activate complete");
 	}
+
+
+  init (opts, params) {
+    if ('src' in opts) {
+      this.src = opts.src
+      if (!this.wgsl) {
+      	this.tex = this.regl.texture({ data: this.src, ...params })
+      } else {
+      	this.indirect = true;
+      	this.tex = opts.src.tex;
+      }
+    }
+    if ('dynamic' in opts) this.dynamic = opts.dynamic
+  }
+
+
 
   initCam (index, params) {
   	if (this.webWorker) 
@@ -87,8 +104,10 @@ class HydraSource {
     vid.muted = true // mute in order to load without user interaction
     const onload = vid.addEventListener('loadeddata', () => {
       this.src = vid
+      this.width = vid.videoWidth;
+      this.height = vid.videoHeight;
       vid.play()
-      self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
+      self.tex = this.makeTexture({ width: this.width, height: this.height, data: this.src, ...params })
       this.dynamic = true
     })
     vid.src = url
