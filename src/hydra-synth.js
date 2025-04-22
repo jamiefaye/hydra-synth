@@ -110,8 +110,8 @@ class HydraRenderer {
     // if stream capture is enabled, this object contains the capture stream
     this.captureStream = null
 
-    this.generator = undefined
-    this.generatorTimer = 0;
+    this.generatorFunction = undefined
+    this.generatorFunctionTimer = 0;
 
 		this.numOutputs = numOutputs
 		if (this.useWGSL) {
@@ -176,32 +176,32 @@ class HydraRenderer {
     try {
     	let fn = new GeneratorFunction(...keys, code);
     	this.done = false;
-    	this.generator = fn(...values);
+    	this.generatorFunction = fn(...values);
     } catch (err) {
     	console.log("Error compiling generator function");
     	console.log(err);
-    	this.generatorTimer = -1;
+    	this.generatorFunctionTimer = -1;
     	return;
     }
-    this.generatorTimer = -1;
+    this.generatorFunctionTimer = -1;
     try {
-    	let reply = this.generator.next();
+    	let reply = this.generatorFunction.next();
     	this.planNext(reply);
     } catch (err) {
     	console.log("Error calling initial generator function.next()");
     	console.log(err);
-    	delete this.generator;
+    	delete this.generatorFunction;
     	return;
     }
 }
 
 // Called from the general tick() function.
  generatorTick() {
-	if (!this.generator || this.generatorTimer === -1) return;
-	if (this.synth.time < this.generatorTimer) return;
-	let f = this.generator;
+	if (!this.generatorFunction || this.generatorFunctionTimer === -1) return;
+	if (this.synth.time < this.generatorFunctionTimer) return;
+	let f = this.generatorFunction;
 	if (!f) {
-			this.generatorTimer = -1;
+			this.generatorFunctionTimer = -1;
 	} else
 	try {
 		let reply = f.next();
@@ -209,8 +209,8 @@ class HydraRenderer {
 	} catch (err) {
     	console.log("Error calling generator function.next()");
     	console.log(err);
-    	this.generatorTimer = -1;
-    	delete this.generator;
+    	this.generatorFunctionTimer = -1;
+    	delete this.generatorFunction;
 	}
 }
 
@@ -222,10 +222,10 @@ class HydraRenderer {
     		if (wT === undefined) {
     			wT = 0.010;
     		}
-    		this.generatorTimer = this.synth.time + wT;
+    		this.generatorFunctionTimer = this.synth.time + wT;
     } else {
         this.done = true;
-    		delete this.generator;
+    		delete this.generatorFunction;
     }
 }
 
