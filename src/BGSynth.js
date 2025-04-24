@@ -2,6 +2,8 @@ import * as Comlink from "comlink";
 import {Webcam} from './lib/webcam.js'
 import Screen from './lib/screenmedia.js'
 
+let BGRWorker;
+
 class SourceProxy {
 // sourceX = 0-3 (or whatever), which BGHydraSource to send to.
 	constructor(kind, worker, sourceX, mediaAddr, params) {
@@ -88,11 +90,6 @@ class SourceProxy {
 } // end SourceProxy class
 
 
-let BGRWorker;
-
-function setBGWorkerClass(aClass) {
-	BGRWorker = aClass;
-}
 
 	// Represents the "Main Thread" side of a BGRworker instance.
 	// While BGSynths could cause other BGSynths to come into being, all of them must be children
@@ -104,7 +101,7 @@ function setBGWorkerClass(aClass) {
 
 	constructor(drawToCanvas, useWGSL = false, directToCanvas = false) {
 		this.useWGSL = useWGSL ? true : false;
-		this.frameTime = 25;
+		this.frameTime = 16;
 		this.canvas = drawToCanvas;
 		this.directToCanvas = directToCanvas;
 		this.mouseData = {x: 0, y:0};
@@ -133,7 +130,7 @@ function setBGWorkerClass(aClass) {
 		if (!BGRWorker) {
 			BGRWorker = Comlink.wrap(new Worker(new URL('./BGRworker.js', import.meta.url), { type: 'module'}));
 		}
-		
+
 		this.bgWorker = await new BGRWorker(this.useWGSL);
 		if (this.directToCanvas) {
 				let offscreen = this.canvas;
@@ -202,6 +199,9 @@ function setBGWorkerClass(aClass) {
 		this.bgWorker.setSketch(text);
 	}
 
+	eval(text) {
+		return this.setSketch(text, false);
+	}
 
 	// called from worker when it requests an webcam, video, or image source
 	// that can only be provided by main.
@@ -224,4 +224,4 @@ async function openBackgroundHydra(drawToCanvas, text, hush) {
 	return bgh;
 }
 
-export {BGSynth, openBackgroundHydra, setBGWorkerClass}
+export {BGSynth, openBackgroundHydra}

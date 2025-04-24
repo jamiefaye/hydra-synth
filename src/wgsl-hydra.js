@@ -6,6 +6,8 @@ import {FBO4ToCanvas} from "./FBO4ToCanvas.js";
 const oneShot = false;
 let fired = false;
 
+const trace = false;
+
 // ------------------------------------------------------------------------------
 // standard prefix strings for all shaders
 //
@@ -136,6 +138,7 @@ class wgslHydra {
 	 }
 
 	async setupHydra() {
+			if (trace) console.timeStamp("setupHydra");
 	      // Step 1: Check for WebGPU support
       if (!navigator.gpu) {
         console.error("WebGPU is not supported on this browser.");
@@ -256,6 +259,9 @@ class wgslHydra {
 	 // Setup the renderer that goes from an fbo to final screen.
 	 await this.fboRenderer.initializeFBOdrawing();
 	 await this.fbo4Renderer.initializeFBOdrawing();
+
+	 if (trace) console.timeStamp("setup", "setupHydra", undefined, "wgsl-hydra", "hydra", "primary");
+
 	}
 
 
@@ -263,6 +269,7 @@ class wgslHydra {
 		// set up a output render chain for a given channel number, uniforms list, and fragment shader string
 		//
   async setupHydraChain(chan, uniforms, shader) {
+  		if (trace) console.timeStamp("setupHydraChain");
 			const rpe = this.renderPassInfo[chan];
 			rpe.reset();
 			rpe.outputObject = this.outputChannelObjects[chan];
@@ -301,12 +308,15 @@ class wgslHydra {
       });
 
 			this.createSamplerOrBuffersForChan(chan);
-	}
+
+	    if (trace) console.timeStamp("hydraChain", "setupHydraChain", undefined, "wgsl-hydra", "hydra", "secondary-light");
+   }
 
 		// ------------------------------------------------------------------------------
 		// animate function
 		//
 		async animate(dT) {
+			if (trace) console.timeStamp("animate");
 			if(oneShot) {
 				 if(fired) return;
 			   console.log("One Shot is set for requestAnimationFrame");
@@ -349,12 +359,15 @@ class wgslHydra {
 			let ubgData = await this.fillBindGroup(chan);
 		  let ubg = await this.device.createBindGroup(ubgData);
 
+			if (trace) console.timeStamp("pass");
       const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
       passEncoder.setPipeline(rpe.pipeline);
   		passEncoder.setBindGroup(0, this.sharedBindGroup);
   		passEncoder.setBindGroup(1, ubg);
       passEncoder.draw(6);  // call our vertex shader 6 times to make a box.
       passEncoder.end();
+      
+	    if (trace) console.timeStamp("draw pass", "pass", undefined, "wgsl-hydra", "hydra", "tertiary");
    } // end "chan" loop.
    // Do all the channels now.
     this.device.queue.submit([commandEncoder.finish()]);
@@ -372,6 +385,9 @@ class wgslHydra {
     else {
     	await this.fboRenderer.refreshCanvas(this.outputChannelObjects[this.outChannel].getCurrentTexture());
 		}
+    //await this.device.queue.onSubmittedWorkDone();
+		if (trace) console.timeStamp("animation", "animate", undefined, "wgsl-hydra", "hydra", "secondary");
+
 	}
 
 	generateUniformDeclarations(chan) {
@@ -594,5 +610,6 @@ class uniformValueListEntry {
 		rpe.valueStructView[this.index] = this.cbValue;
   }
 }
+
 
 export {wgslHydra}

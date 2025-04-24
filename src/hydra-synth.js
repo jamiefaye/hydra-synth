@@ -57,7 +57,7 @@ class HydraRenderer {
     }
     this.webWorker = webWorker
     this.wgslReady = false;
-
+		this.useRAF = false;
     this._initCanvas(canvas)
 
     // object that contains all properties that will be made available on the global context and during local evaluation
@@ -122,7 +122,15 @@ class HydraRenderer {
 					this._initSources(numSources);
 					this._generateGlslTransforms();	
 					this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
-					if(autoLoop) this.looper = loop(this.tick.bind(this)).start();
+					if(autoLoop) {
+//						 if (!requestAnimationFrame) {
+						 	  this.useRAF = false;
+						 		this.looper = loop(this.tick.bind(this)).start();
+//						 } else {
+//						 	  this.useRAF = true;
+//						 	  requestAnimationFrame(this.tick.bind(this));
+//						}
+					}
 				  resolve(true);
 			})
 		});
@@ -154,7 +162,15 @@ class HydraRenderer {
 
     if(this.useWGSL) return;
     
-     if (autoLoop) this.looper = loop(this.tick.bind(this)).start()
+		if(autoLoop) {
+//					if (!requestAnimationFrame) {
+//						 this.useRAF = false;
+						 this.looper = loop(this.tick.bind(this)).start();
+//					} else {
+//						 	this.useRAF = true;
+//						 	requestAnimationFrame(this.tick.bind(this));
+//					}
+				}
 
     // final argument is properties that the user can set, all others are treated as read-only
     this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
@@ -246,6 +262,9 @@ class HydraRenderer {
  			this.regl.destroy();
  			delete this.regl;
  		}
+// 		if (cancelAnimationFrame) {
+// 			cancelAnimationFrame();
+// 		}
  }
 
   hush() {
@@ -570,6 +589,9 @@ class HydraRenderer {
 
   // dt in ms
   tick (dt) {
+//  	if (this.useRAF) {
+// 		requestAnimationFrame(this.tick.bind(this))
+//  	}
     if(!this.sandbox) return;
     this.sandbox.tick()
 
