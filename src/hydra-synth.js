@@ -82,7 +82,9 @@ class HydraRenderer {
 
     if (makeGlobal) window.loadScript = this.loadScript
 
-
+		// The modCounter is used to determine when source and sketch changes take place.
+		// It just increments every time a change happens.
+		this.modCounter = 0;
     this.timeSinceLastUpdate = 0
     this._time = 0 // for internal use, only to use for deciding when to render frames
 
@@ -113,7 +115,9 @@ class HydraRenderer {
     this.generatorFunction = undefined
     this.generatorFunctionTimer = 0;
 
-		this.numOutputs = numOutputs
+		this.numOutputs = numOutputs;
+		this.regenInfo = new Array(numOutputs);
+
 		if (this.useWGSL) {
 			this.wgslHydra = new wgslHydra(this, this.canvas, 4);
 			this.wgslPromise = new Promise((resolve, reject)=> {
@@ -268,6 +272,7 @@ class HydraRenderer {
  }
 
   hush() {
+  	this.regenInfo = [];
     this.s.forEach((source) => {
       source.clear()
     })
@@ -295,6 +300,35 @@ class HydraRenderer {
    });
    return p;
  }
+
+ noteRegenString(outIndex, regenStr) {
+ 	this.modCounter++;
+ 	this.regenInfo[outIndex] = {str: regenStr, count: this.modCounter} ;
+}
+
+ // Return the regenerated strings from at or before a given time.
+ // Used to prepend "stuff still in progress" for InAct.
+ activeFromBefore(maxCount) {
+ 		let os = [];
+ 		for (let j = 0; j < this.s.length; ++j) {
+ 			let src = this.s[j];
+ 			if (src && src.active && src.modCounter <= maxCount) {
+ 				os.push(src.setupString());
+ 				os.push('\n');
+ 			}
+ 		}
+
+ 		for (let i = 0; i < this.regenInfo.length; ++i) {
+ 			let ent  = this.regenInfo[i];
+ 			if (ent) {
+ 			 if (ent.count <= maxCount) {
+ 				 os.push(ent.str);
+ 				 os.push('\n');
+ 				}
+ 			}
+ 		}
+ 		return os.join('');
+	}
 
   setResolution(width, height) {
   //  console.log(width, height)
@@ -497,6 +531,8 @@ class HydraRenderer {
     this.o = (Array(numOutputs)).fill().map((el, index) => {
       var o = new Output({
         regl: this.regl,
+        chanNum: index,
+        hydraSynth: this,
         width: this.width,
         height: this.height,
         precision: this.precision,
@@ -517,6 +553,7 @@ class HydraRenderer {
     this.o = (Array(numOutputs)).fill().map((el, index) => {
       var o = new OutputWgsl({
       	wgslHydra: this.wgslHydra,
+      	hydraSynth: this,
         width: this.width,
         height: this.height,
         chanNum: index,

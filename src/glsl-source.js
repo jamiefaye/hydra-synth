@@ -1,4 +1,5 @@
 import generateGlsl from './generate-glsl.js'
+import {regenerate} from './regen-hydra.js'
 // const formatArguments = require('./glsl-utils.js').formatArguments
 
 // const glslTransforms = require('./glsl/composable-glsl-functions.js')
@@ -29,6 +30,8 @@ GlslSource.prototype.out = function (_output) {
   } catch (error) {
     console.log('shader could not compile', error)
   }
+  
+  regenerate(this, output);
 }
 
 GlslSource.prototype.glsl = function () {

@@ -15,14 +15,19 @@ class HydraSource {
     this.height = height;
     this.chanNum = chanNum;
     this.indirect = false;
-
+		this.active = false;
     this.pb = pb
     this.tex = this.makeTexture({width, height});
   }
 
+	bumpMod() {
+		this.modCounter = this.hydraSynth.modCounter++;
+	}
+
   makeTexture(params) {
   	let width = params.width;
  	  let height = params.height;
+
   	if (!this.wgsl) {
   		return this.regl.texture({
       	shape: [ width, height ],
@@ -57,6 +62,8 @@ class HydraSource {
 
 
   init (opts, params) {
+  	this.what = 'init';
+		this.hydraSynth.modCounter++;
     if ('src' in opts) {
       this.src = opts.src
       if (!this.wgsl) {
@@ -67,17 +74,41 @@ class HydraSource {
       }
     }
     if ('dynamic' in opts) this.dynamic = opts.dynamic
+		this.active = true;
   }
 
-
+	setupString() {
+		let outs = [];
+		let w = this.what;
+		outs.push(this.label);
+		outs.push(".");
+		outs.push(w);
+		outs.push("(");
+		if (w === 'initVideo' || w === 'initImage') {
+			outs.push('"');
+			outs.push(this.url);
+			outs.push('"');		
+		} else if (w === 'initStream') {
+			outs.push('"');
+			outs.push(this.streamName);
+			outs.push('"');			
+		} else if (w === 'initCam' || w === 'initScreen') {
+			if (this.index !== undefined) outs.push(String.valueOf(this.index));
+		}
+		outs.push(")");
+		return outs.join('');
+	}
 
   initCam (index, params) {
+  	this.what = 'initCam';
+  	this.bumpMod();
   	if (this.webWorker) 
   		{
   			this.webWorker.openSourceProxy("webcam", this.chanNum, index, params);
   			return;
   		}
     const self = this
+		self.index = index;
     Webcam(index)
       .then(response => {
         self.src = response.video
@@ -85,12 +116,15 @@ class HydraSource {
         self.width = self.src.videoWidth;
         self.height = self.src.videoHeight;
         self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
+		    self.active = true;
       })
       .catch(err => console.log('could not get camera', err))
   }
 
   initVideo (url = '', params) {
-  	
+    this.what = 'initVideo';
+    this.url = url;
+		this.bumpMod();
   	if (this.webWorker) 
   	{
   			this.webWorker.openSourceProxy("video", this.chanNum, url, params);
@@ -102,6 +136,7 @@ class HydraSource {
     vid.autoplay = true
     vid.loop = true
     vid.muted = true // mute in order to load without user interaction
+
     const onload = vid.addEventListener('loadeddata', () => {
       this.src = vid
       this.width = vid.videoWidth;
@@ -109,11 +144,15 @@ class HydraSource {
       vid.play()
       self.tex = this.makeTexture({ width: this.width, height: this.height, data: this.src, ...params })
       this.dynamic = true
+      this.active = true;
     })
     vid.src = url
   }
 
   initImage (url = '', params) {
+  	this.what = 'initImage';
+  	this.url = url;
+	  this.bumpMod();
   	if (this.webWorker) 
   	{
     	this.webWorker.openSourceProxy("image", this.chanNum, url, params); 	
@@ -126,6 +165,7 @@ class HydraSource {
     img.onload = () => {
       this.src = img
       this.dynamic = false
+			this.active = true;
        self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
     }
   }
@@ -133,6 +173,9 @@ class HydraSource {
   initStream (streamName, params) {
     //  console.log("initing stream!", streamName)
     let self = this
+    self.what = 'initStream';
+    this.bumpMod();
+    self.steamName = streamName;
     if (streamName && this.pb) {
       this.pb.initSource(streamName)
 
@@ -140,7 +183,9 @@ class HydraSource {
         if (nick === streamName) {
           self.src = video
           self.dynamic = true
+          self.active = true;
           self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
+
         }
       })
     }
@@ -148,11 +193,15 @@ class HydraSource {
 
   // index only relevant in atom-hydra + desktop apps
   initScreen (index = 0, params) {
-    const self = this
+    const self = this;
+    self.what = 'initScreen';
+    self.index = index;
+    self.bumpMod();
     Screen()
       .then(function (response) {
         self.src = response.video
         self.tex = self.regl.texture({ data: self.src, ...params})
+        this.active = true;
         self.dynamic = true
         //  console.log("received screen input")
       })
@@ -173,7 +222,13 @@ class HydraSource {
     this.offscreencanvas = undefined;
 		this.bmr = undefined;
     this.src = null
-    this.tex = this.regl.texture({ shape: [ 1, 1 ] })
+    this.active = false;
+    this.what = '';
+    if (!this.wgsl) {
+    	this.tex = this.regl.texture({ shape: [ 1, 1 ] })
+    } else {
+    	this.tex = this.makeTexture({width: 1, height : 1});
+    }
   }
 
   resizeTex(width, height) {

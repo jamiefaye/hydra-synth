@@ -1,8 +1,9 @@
 //const transforms = require('./glsl-transforms.js')
 
 class OutputWgsl {
-  constructor ({wgslHydra, chanNum, label = "", width, height}) {
+  constructor ({wgslHydra, hydraSynth, chanNum, label = "", width, height}) {
 	this.wgslHydra = wgslHydra;
+	this.hydraSynth = hydraSynth;
 	this.chanNum = chanNum
   this.label = label 
   this.draw = () => {}
