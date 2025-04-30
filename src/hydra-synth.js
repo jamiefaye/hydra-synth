@@ -40,6 +40,7 @@ class HydraRenderer {
     webWorker,
     canvas,
     precision,
+    regen = false,
     extendTransforms = {} // add your own functions on init
   } = {}) {
 
@@ -82,9 +83,7 @@ class HydraRenderer {
 
     if (makeGlobal) window.loadScript = this.loadScript
 
-		// The modCounter is used to determine when source and sketch changes take place.
-		// It just increments every time a change happens.
-		this.modCounter = 0;
+
     this.timeSinceLastUpdate = 0
     this._time = 0 // for internal use, only to use for deciding when to render frames
 
@@ -116,6 +115,8 @@ class HydraRenderer {
     this.generatorFunctionTimer = 0;
 
 		this.numOutputs = numOutputs;
+		
+		this.regen = regen;
 		this.regenInfo = new Array(numOutputs);
 
 		if (this.useWGSL) {
@@ -302,17 +303,19 @@ class HydraRenderer {
  }
 
  noteRegenString(outIndex, regenStr) {
- 	this.modCounter++;
- 	this.regenInfo[outIndex] = {str: regenStr, count: this.modCounter} ;
+
+ 	this.regenInfo[outIndex] = {str: regenStr, modTime: performance.now()} ;
 }
 
  // Return the regenerated strings from at or before a given time.
- // Used to prepend "stuff still in progress" for InAct.
- activeFromBefore(maxCount) {
+ // time unit "highTime" is performance.now() + performance.timeOrigin
+ activeFromBefore(highTime) {
+ 	  let timeBase = performance.timeOrigin;
+ 	  
  		let os = [];
  		for (let j = 0; j < this.s.length; ++j) {
  			let src = this.s[j];
- 			if (src && src.active && src.modCounter <= maxCount) {
+ 			if (src && src.active && ((src.modTime + timeBase) <= highTime)) {
  				os.push(src.setupString());
  				os.push('\n');
  			}
@@ -321,8 +324,9 @@ class HydraRenderer {
  		for (let i = 0; i < this.regenInfo.length; ++i) {
  			let ent  = this.regenInfo[i];
  			if (ent) {
- 			 if (ent.count <= maxCount) {
- 				 os.push(ent.str);
+ 			 if ((ent.modTime + timeBase) <= highTime) {
+ 			 	let filtered = ent.str.replaceAll("_h.","");
+ 				 os.push(filtered);
  				 os.push('\n');
  				}
  			}

@@ -16,12 +16,12 @@ class HydraSource {
     this.chanNum = chanNum;
     this.indirect = false;
 		this.active = false;
-    this.pb = pb
+    this.pb = pb;
     this.tex = this.makeTexture({width, height});
   }
 
-	bumpMod() {
-		this.modCounter = this.hydraSynth.modCounter++;
+	noteTime() {
+		this.modTime = performance.now();
 	}
 
   makeTexture(params) {
@@ -63,7 +63,7 @@ class HydraSource {
 
   init (opts, params) {
   	this.what = 'init';
-		this.hydraSynth.modCounter++;
+		this.noteTime();
     if ('src' in opts) {
       this.src = opts.src
       if (!this.wgsl) {
@@ -101,7 +101,7 @@ class HydraSource {
 
   initCam (index, params) {
   	this.what = 'initCam';
-  	this.bumpMod();
+  	this.noteTime();
   	if (this.webWorker) 
   		{
   			this.webWorker.openSourceProxy("webcam", this.chanNum, index, params);
@@ -124,7 +124,7 @@ class HydraSource {
   initVideo (url = '', params) {
     this.what = 'initVideo';
     this.url = url;
-		this.bumpMod();
+		this.noteTime();
   	if (this.webWorker) 
   	{
   			this.webWorker.openSourceProxy("video", this.chanNum, url, params);
@@ -152,7 +152,7 @@ class HydraSource {
   initImage (url = '', params) {
   	this.what = 'initImage';
   	this.url = url;
-	  this.bumpMod();
+	  this.noteTime();
   	if (this.webWorker) 
   	{
     	this.webWorker.openSourceProxy("image", this.chanNum, url, params); 	
@@ -174,7 +174,7 @@ class HydraSource {
     //  console.log("initing stream!", streamName)
     let self = this
     self.what = 'initStream';
-    this.bumpMod();
+    this.noteTime();
     self.steamName = streamName;
     if (streamName && this.pb) {
       this.pb.initSource(streamName)
@@ -196,7 +196,7 @@ class HydraSource {
     const self = this;
     self.what = 'initScreen';
     self.index = index;
-    self.bumpMod();
+    self.noteTime();
     Screen()
       .then(function (response) {
         self.src = response.video

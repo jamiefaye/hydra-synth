@@ -96,9 +96,14 @@ class RegenHydra {
 function regenerate(glslSource, output) {
 
 	let hydra = output.hydraSynth
-	let regen = new RegenHydra(glslSource, output, hydra);
-	let genStr = regen.generate();
-	hydra.noteRegenString(regen.output.chanNum, genStr);
-	console.log(genStr);
+	if (!hydra.regen) return;
+	try {
+		let regen = new RegenHydra(glslSource, output, hydra);
+		let genStr = regen.generate();
+		hydra.noteRegenString(regen.output.chanNum, genStr);
+	} catch (err) {
+		console.log(err);
+	}
+	//console.log(genStr);
 }
 export {RegenHydra, regenerate}
