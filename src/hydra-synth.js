@@ -13,6 +13,8 @@ import regl from 'regl'
 // const window = global.window
 import {wgslHydra} from './wgsl-hydra.js';
 import {Deglobalize} from './Deglobalize.js';
+import {RemoteAudio} from './RemoteAudio.js';
+
 const GeneratorFunction = function* () {}.constructor;
 
 let Mouse;
@@ -166,7 +168,7 @@ class HydraRenderer {
 
 
     if(this.useWGSL) return;
-    
+
 		if(autoLoop) {
 //					if (!requestAnimationFrame) {
 //						 this.useRAF = false;
@@ -382,6 +384,10 @@ class HydraRenderer {
 
   _initAudio () {
     const that = this
+
+    if (this.webWorker) {
+    	this.synth.a = new RemoteAudio(this.webWorker);
+    } else {
     this.synth.a = new Audio({
       numBins: 4,
       parentEl: this.canvas.parentNode
@@ -397,9 +403,9 @@ class HydraRenderer {
       //     })
       //   }
       // }
-    })
-  }
-
+    	})
+  	}
+	}
   // create main output canvas and add to screen
   _initCanvas (canvas) {
     if (canvas) {
@@ -636,7 +642,8 @@ class HydraRenderer {
     if(!this.sandbox) return;
     this.sandbox.tick()
 
-    if(this.detectAudio === true) this.synth.a.tick()
+    if(this.detectAudio &&
+      this.synth && this.synth.a) this.synth.a.tick();
   //  let updateInterval = 1000/this.synth.fps // ms
     this.sandbox.set('time', this.synth.time += dt * 0.001 * this.synth.speed)
     this.timeSinceLastUpdate += dt

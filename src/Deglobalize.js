@@ -2,7 +2,7 @@ import {Parser} from "acorn";
 import {generate}  from "astring";
 import { defaultTraveler, attachComments, makeTraveler } from 'astravel';
 
-const watchListArray = ["time", "fps"];
+const watchListArray = ["time", "fps", "a"];
 const watchList = new Set(watchListArray);
 
 // Function to convert all instances of global variables on the watchlist to be

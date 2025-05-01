@@ -1,6 +1,7 @@
 import * as Comlink from "comlink";
 import {Webcam} from './lib/webcam.js'
 import Screen from './lib/screenmedia.js'
+import Audio from './lib/audio.js'
 
 let BGRWorker;
 
@@ -99,13 +100,14 @@ class SourceProxy {
 	// Things really start happening after you call setSketch. Or you can call the async function openBackgroundHydra.
 	class BGSynth {
 
-	constructor(drawToCanvas, useWGSL = false, directToCanvas = false) {
+	constructor(drawToCanvas, useWGSL = false, directToCanvas = false, useAudio = false) {
 		this.useWGSL = useWGSL ? true : false;
 		this.frameTime = 16;
 		this.canvas = drawToCanvas;
 		this.directToCanvas = directToCanvas;
 		this.mouseData = {x: 0, y:0};
 		this.deliverFrameCallback;
+		this.useAudio = useAudio;
 		this.trackMouse = this.trackMouse.bind(this);
 		document.addEventListener('mousemove', this.trackMouse);
 
@@ -114,6 +116,7 @@ class SourceProxy {
 
 	destroy() {
 		this.activeSourceProxies = [];
+		this.audioProxy = undefined;
 		this.destroyed = true;
 		if (this.bgWorker) {
 			this.bgWorker.destroy();
@@ -131,7 +134,7 @@ class SourceProxy {
 			BGRWorker = Comlink.wrap(new Worker(new URL('./BGRworker.js', import.meta.url), { type: 'module'}));
 		}
 
-		this.bgWorker = await new BGRWorker(this.useWGSL);
+		this.bgWorker = await new BGRWorker(this.useWGSL, this.useAudio);
 		if (this.directToCanvas) {
 				let offscreen = this.canvas;
 				await this.bgWorker.setTransferCanvas(Comlink.transfer(offscreen, [offscreen]));
@@ -139,6 +142,7 @@ class SourceProxy {
 		await this.bgWorker.openHydra();
     await this.bgWorker.registerCallback("frame", Comlink.proxy(this.frameReadyFromWorker.bind(this)));
     await this.bgWorker.registerCallback("proxy", Comlink.proxy(this.requestProxySource.bind(this)));
+    await this.bgWorker.registerCallback("setaudio", Comlink.proxy(this.setAudio.bind(this)));
 
     if (!this.directToCanvas) {
 			this.bmr = this.canvas.getContext("bitmaprenderer");
@@ -178,7 +182,13 @@ class SourceProxy {
 		this.tickSourceProxies();
 		setTimeout ((dT)=>{
 			if (!this.bgWorker) return;
-			this.bgWorker.tick(this.frameTime, this.mouseData);
+
+			if (this.audioProxy) {
+				this.fftData = this.audioProxy.a.fft;
+			} else {
+				this.fftData = [];
+			}
+			this.bgWorker.tick(this.frameTime, this.mouseData, this.fftData);
 		}, this.frameTime);
 	}
 
@@ -203,22 +213,73 @@ class SourceProxy {
 		return this.setSketch(text, false);
 	}
 
-	// called from worker when it requests an webcam, video, or image source
+	// called from worker when it requests an webcam, video, image, or audio source
 	// that can only be provided by main.
 	requestProxySource(kind, sourceX, mediaAddr, params) {
-		let prx = new SourceProxy(kind, this.bgWorker, sourceX, mediaAddr, params);
-  	this.activeSourceProxies.push(prx);
+		if (kind = 'audio') {
+			this.audioProxy = new AudioProxy(this.bgWorker, this.canvas);
+		} else {
+			let prx = new SourceProxy(kind, this.bgWorker, sourceX, mediaAddr, params);
+  		this.activeSourceProxies.push(prx);
+  	}
 	}
 
 	tickSourceProxies() {
 		for (let i = 0; i < this.activeSourceProxies.length; ++i) {
 			this.activeSourceProxies[i].sendFrame();
 		}
+		if (this.audioProxy) {
+			this.audioProxy.tick();
+		}
+	}
+
+	setAudio(what, toValue) {
+		if (!this.audioProxy) return;
+		this.audioProxy.setValue(what, toValue);
 	}
 } // end BGSynth class.
 
+
+class AudioProxy {
+	constructor (worker, canvas) {
+		this.bgWorker = worker;
+		this.canvas = canvas;
+		this.a = new Audio({
+      numBins: 4,
+      parentEl: this.canvas.parentNode
+    })
+	}
+
+	tick() {
+		this.a.tick();
+	}
+
+	setValue(what, toValue) {
+		if (what === 'setBins') {
+			this.a.setBins(toValue);
+		} else
+		if (what === 'setCutoff') {
+			this.a.setCutoff(toValue);	
+		} else	
+		if (what === 'setScale') {
+			this.a.setScale(toValue);
+		} else	
+		if (what === 'setSmooth') {
+			this.a.setSmooth(toValue);
+		} else
+		if (what === 'hide') {
+			this.a.hide();
+		} else
+		if (what === 'show') {
+			this.a.show();
+		} else {
+			console.log("Undefined audio proxy request: " + what);
+		}
+	}
+};
+
 async function openBackgroundHydra(drawToCanvas, text, hush) {
-	let bgh = new BGSynth(drawToCanvas, false, false);
+	let bgh = new BGSynth(drawToCanvas, false, false, true);
 	await bgh.openWorker();
 	bgh.setSketch(text, hush);
 	return bgh;
