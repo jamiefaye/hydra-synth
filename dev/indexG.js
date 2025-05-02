@@ -6,8 +6,6 @@ import * as Comlink from "comlink";
 
 // console.log('HYDRA', Hydra)
 
-
-
 async function init () {
 
   const canvas = document.createElement('canvas')
@@ -27,20 +25,13 @@ async function init () {
 //if (hydra.wgslPromise) await hydra.wgslPromise;
 
 let hydra;
-let fground = false;
+let hydra2;
 
-let wgsl = true;
+let wgsl = false;
 
-if (fground) {
 // Run in foreground 
-	 hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: false, useWGSL: wgsl}) // true false
+	 hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: true, useWGSL: wgsl}) // true false
 	 if (wgsl) await hydra.wgslPromise;
-} else {
-	  hydra = await new BGSynth(canvas, wgsl, false, true);
-    await hydra.openWorker();
-}
-
-
 
 function fitCanvas() {
 	 canvas.width = window.innerWidth;
@@ -55,30 +46,41 @@ window.addEventListener('resize', fitCanvas, false);
 
 
 
-let testcode1 = `
-
-a.setBins(4);
-// Fun to mutate:
-shape(2,0.01)
-.repeat(2,4)
-.modulateScale(osc(10,0.1),-0.5)
-.rotate(()=>a.fft[0]*2.5)
-.kaleid(1)
-.scale(0.8)
-.modulateScale(osc(5,0.5),-0.5)
-.scrollY(0,-0.3)
-.add(o0,0.8)
-.mult(osc(10,0.8,0.5).color(1,0,1).brightness(0.5).rotate(11).modulateScale(osc(5,0.3),-0.5),0.5)
+ osc(10, 0.9, 300)
+.color(0.9, 0.7, 0.8)
+.diff(
+  osc(45, 0.3, 100)
+  .color(0.9, 0.9, 0.9)
+  .rotate(0.18)
+  .pixelate(12)
+  .kaleid()
+)
+.scrollX(10)
+.colorama()
+//.luma()
+.repeatX(4)
+.repeatY(4)
+.modulate(
+  osc(1, -0.9, 300)
+)
+.scale(2)
 .out()
 
+s1.initCam();
+src(s1).out(o1);
+render()
 
-`;
+noise(()=>time, ()=>time / 10.).out(o2);
 
-// *******************************************
-// current test code should be above
 
-  hydra.eval(testcode1, false);
-  hydra.aName = 'hydra1';
+s3.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
+//s3.initCam();
+src(s1).scale(1.1).blend(src(o3).scale(1.1), 0.8).out(o3);
+//src(s3).out(o3)
+render();
+
+
+
 
 	//hydra2.s[1].init({src: hydra.s[0].tex, dynamic: true});
 // *******************************************

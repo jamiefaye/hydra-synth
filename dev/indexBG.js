@@ -57,19 +57,11 @@ window.addEventListener('resize', fitCanvas, false);
 
 let testcode1 = `
 
-a.setBins(4);
-// Fun to mutate:
-shape(2,0.01)
-.repeat(2,4)
-.modulateScale(osc(10,0.1),-0.5)
-.rotate(()=>a.fft[0]*2.5)
-.kaleid(1)
-.scale(0.8)
-.modulateScale(osc(5,0.5),-0.5)
-.scrollY(0,-0.3)
-.add(o0,0.8)
-.mult(osc(10,0.8,0.5).color(1,0,1).brightness(0.5).rotate(11).modulateScale(osc(5,0.3),-0.5),0.5)
-.out()
+
+noise(10).out();
+yield 2.0;
+noise(()=>time / 2).out();
+
 
 
 `;

@@ -6,8 +6,6 @@ import * as Comlink from "comlink";
 
 // console.log('HYDRA', Hydra)
 
-
-
 async function init () {
 
   const canvas = document.createElement('canvas')
@@ -27,18 +25,18 @@ async function init () {
 //if (hydra.wgslPromise) await hydra.wgslPromise;
 
 let hydra;
-let fground = false;
+let hydra2;
 
 let wgsl = true;
 
-if (fground) {
 // Run in foreground 
 	 hydra = new Hydra({canvas: canvas, detectAudio:true, makeGlobal: false, useWGSL: wgsl}) // true false
 	 if (wgsl) await hydra.wgslPromise;
-} else {
-	  hydra = await new BGSynth(canvas, wgsl, false, true);
-    await hydra.openWorker();
-}
+
+let offscreen = new OffscreenCanvas(1280, 720);
+// Create a second Hydra to send stuff to the first one.
+	 hydra2 = new Hydra({canvas: offscreen, detectAudio:false, makeGlobal: false, useWGSL: wgsl, enableStreamCapture: false}) // true false
+	 if (wgsl) await hydra2.wgslPromise;
 
 
 
@@ -54,23 +52,68 @@ window.addEventListener('resize', fitCanvas, false);
 // test code follows:
 
 
+let testcode2 = `
+ osc(10, 0.9, 300)
+.color(0.9, 0.7, 0.8)
+.diff(
+  osc(45, 0.3, 100)
+  .color(0.9, 0.9, 0.9)
+  .rotate(0.18)
+  .pixelate(12)
+  .kaleid()
+)
+.scrollX(10)
+.colorama()
+//.luma()
+.repeatX(4)
+.repeatY(4)
+.modulate(
+  osc(1, -0.9, 300)
+)
+.scale(2)
+.out()
+
+s1.initCam();
+src(s1).out(o1);
+render()
+
+noise(()=>time, ()=>time / 10.).out(o2);
+
+
+src(s1).scale(1.1).blend(src(o3).scale(1.1), 0.8).out(o3);
+`;
+
 
 let testcode1 = `
 
-a.setBins(4);
-// Fun to mutate:
-shape(2,0.01)
-.repeat(2,4)
-.modulateScale(osc(10,0.1),-0.5)
-.rotate(()=>a.fft[0]*2.5)
-.kaleid(1)
-.scale(0.8)
-.modulateScale(osc(5,0.5),-0.5)
-.scrollY(0,-0.3)
-.add(o0,0.8)
-.mult(osc(10,0.8,0.5).color(1,0,1).brightness(0.5).rotate(11).modulateScale(osc(5,0.3),-0.5),0.5)
-.out()
 
+//Glitch River
+//Flor de Fuego
+//https://flordefuego.github.io/
+voronoi(8,1)
+.mult(osc(10,0.1,()=>Math.sin(time)*3).saturate(3).kaleid(200))
+.modulate(o2,0.5)
+.add(o2,0.8)
+.scrollY(-0.01)
+.scale(0.99)
+.modulate(voronoi(8,1),0.008)
+.luma(0.3)
+.out(o2)
+
+
+
+
+s3.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
+//s3.initCam();
+src(s3).scale(1.1).blend(src(o3).scale(1.1), 0.8).out(o3);
+//src(s3).out(o3)
+render();
+
+noise(10).out(o1);
+yield 2.0;
+noise(()=>time / 2).out(o1);
+
+src(s0).out(); // need to make sure data flows out.
 
 `;
 
@@ -80,6 +123,10 @@ shape(2,0.01)
   hydra.eval(testcode1, false);
   hydra.aName = 'hydra1';
 
+	hydra2.eval(testcode2, false);
+	hydra.aName = 'hydra2';
+	
+	hydra.s[0].init({src: offscreen, dynamic: true});
 	//hydra2.s[1].init({src: hydra.s[0].tex, dynamic: true});
 // *******************************************
 // Inactive code parked below.

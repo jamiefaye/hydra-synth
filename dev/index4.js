@@ -1,5 +1,5 @@
 import Hydra from "./../src/hydra-synth.js";
-import {BGSynth} from './../src/BGSynth.js';
+import {BGSynth} from './../src/workers/BGSynth.js';
 import * as Comlink from "comlink";
 
 //const { fugitiveGeometry, exampleVideo, exampleResize, nonGlobalCanvas } = import('./examples.js')
@@ -32,9 +32,9 @@ let useOffscreen = true;
 if (runBG) {
 	if (useOffscreen) { // true  false
  const offscreen = canvas.transferControlToOffscreen();
- hydra = new BGSynth(offscreen, wgsl, true);
+ hydra = new BGSynth(offscreen, wgsl, true, true);
 } else {
-	 hydra = new BGSynth(canvas, wgsl, false);
+	 hydra = new BGSynth(canvas, wgsl, false, true);
 }
 	await	hydra.openWorker();
 } else {
