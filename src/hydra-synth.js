@@ -1,6 +1,6 @@
 
 import Output from './output.js'
-import {OutputWgsl} from './outputWgsl.js';
+import {OutputWgsl} from './wgsl/outputWgsl.js';
 import {loop} from './raf-loop.js'
 import Source from './hydra-source.js'
 import MouseTools from './lib/mouse.js'
@@ -11,9 +11,9 @@ import Sandbox from './eval-sandbox.js'
 import Generator from './generator-factory.js'
 import regl from 'regl'
 // const window = global.window
-import {wgslHydra} from './wgsl-hydra.js';
+import {wgslHydra} from './wgsl/wgsl-hydra.js';
 import {Deglobalize} from './Deglobalize.js';
-import {RemoteAudio} from './RemoteAudio.js';
+import {RemoteAudio} from './workers/RemoteAudio.js';
 
 const GeneratorFunction = function* () {}.constructor;
 
@@ -643,7 +643,7 @@ class HydraRenderer {
     this.sandbox.tick()
 
     if(this.detectAudio &&
-      this.synth && this.synth.a) this.synth.a.tick();
+      this.synth && this.synth.a && this.synth.a.tick) this.synth.a.tick();
   //  let updateInterval = 1000/this.synth.fps // ms
     this.sandbox.set('time', this.synth.time += dt * 0.001 * this.synth.speed)
     this.timeSinceLastUpdate += dt

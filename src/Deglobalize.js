@@ -2,7 +2,7 @@ import {Parser} from "acorn";
 import {generate}  from "astring";
 import { defaultTraveler, attachComments, makeTraveler } from 'astravel';
 
-const watchListArray = ["time", "fps", "a"];
+const watchListArray = ["time", "fps"];
 const watchList = new Set(watchListArray);
 
 // Function to convert all instances of global variables on the watchlist to be
@@ -11,9 +11,8 @@ const watchList = new Set(watchListArray);
 // initial values rather than as changeable variables.
 
 function Deglobalize(textIn, prefix) {
-	
 	 const ignore = Function.prototype;
-	 let text = 'async function* f() {' + textIn + '}'; // Hack to get acorn to accept yield statement.
+	 let text = 'async function* f() {\n' + textIn + '\n}'; // Hack to get acorn to accept yield statement.
 	 let traveler = makeTraveler({
   	go: function(node, state) {
         if (node.type === 'Identifier') {
@@ -78,34 +77,4 @@ function stripOutStuff(inp) {
 }
 
 
-function lookForAudioObjectUse(text) {
-	let audioFound = false;
-	
-	 let audioTraveler = makeTraveler({
-  	go: function(node, state) {
-        if (node.type === 'Identifier') {
-        	if (node.name === 'a') {
-        		audioFound = true;
-        	}
-      }
-        // Call the parent's `go` method
-        this.super.go.call(this, node, state);
-      }
-     //MemberExpression: ignore
-    });
-
-   let ast = Parser.parse(text, {
-     			locations: false,
-     			allowReserved: true,
-     			allowAwaitOutsideFunction: true,
-     			ecmaVersion: "latest",
-        }
-      );
-        
-		// find the places to change.
-    audioTraveler.go(ast, {});
-    
-    return audioFound;
-  }
-	
-export {Deglobalize, lookForAudioObjectUse}
+export {Deglobalize}

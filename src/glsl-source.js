@@ -4,7 +4,7 @@ import {regenerate} from './regen-hydra.js'
 
 // const glslTransforms = require('./glsl/composable-glsl-functions.js')
 import utilityGlsl from './glsl/utility-functions.js'
-import utilityWgsl from './glsl/utility-functions-wgsl.js'
+import utilityWgsl from './wgsl/utility-functions-wgsl.js'
 var GlslSource = function (obj) {
   this.transforms = []
   this.transforms.push(obj)

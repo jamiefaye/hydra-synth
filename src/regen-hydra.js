@@ -1,7 +1,7 @@
 import HydraSource from "./hydra-source.js"
 import GlslSource from "./glsl-source.js"
 import Output from "./output.js"
-import {OutputWgsl} from "./outputWgsl.js"
+import {OutputWgsl} from "./wgsl/outputWgsl.js"
 
 function isObject (item) {
   return (typeof item === "object" && !Array.isArray(item) && item !== null);
