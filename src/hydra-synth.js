@@ -114,7 +114,7 @@ class HydraRenderer {
     this.captureStream = null
 
     this.generatorFunction = undefined
-    this.generatorFunctionTimer = 0;
+    this.generatorFunctionTimer = -1;
 
 		this.numOutputs = numOutputs;
 		
@@ -268,6 +268,9 @@ class HydraRenderer {
  		if (this.regl) {
  			this.regl.destroy();
  			delete this.regl;
+ 		}
+ 		if(this.synth && this.synth.a) {
+ 			 this.synth.a.destroy();
  		}
 // 		if (cancelAnimationFrame) {
 // 			cancelAnimationFrame();

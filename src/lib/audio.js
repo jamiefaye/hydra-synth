@@ -70,6 +70,16 @@ class Audio {
     }
   }
 
+  destroy() {
+   if (this.context) {
+    this.context.close();
+    this.context = undefined;
+    if (this.meyda) {
+      this.meyda = undefined;
+    }
+  }
+}
+
   detectBeat (level) {
     //console.log(level,   this.beat._cutoff)
     if (level > this.beat._cutoff && level > this.beat.threshold) {

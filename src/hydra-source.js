@@ -149,6 +149,7 @@ class HydraSource {
     vid.src = url
   }
 
+
   initImage (url = '', params) {
   	this.what = 'initImage';
   	this.url = url;
@@ -156,19 +157,21 @@ class HydraSource {
   	if (this.webWorker) 
   	{
     	this.webWorker.openSourceProxy("image", this.chanNum, url, params); 	
-  		return;
-  	}
+        return;
+    }
     const img = document.createElement('img')
     img.crossOrigin = 'anonymous'
     img.src = url
     this.oneShotDone = false;
+    let self = this;
     img.onload = () => {
-      this.src = img
-      this.dynamic = false
-			this.active = true;
-       self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
+      self.src = img
+      self.dynamic = false
+      self.active = true;
+      self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
     }
   }
+
 
   initStream (streamName, params) {
     //  console.log("initing stream!", streamName)

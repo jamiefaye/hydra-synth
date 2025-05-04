@@ -12,7 +12,9 @@ const watchList = new Set(watchListArray);
 
 function Deglobalize(textIn, prefix) {
 	 const ignore = Function.prototype;
-	 let text = 'async function* f() {\n' + textIn + '\n}'; // Hack to get acorn to accept yield statement.
+	 // filter-out "zero length space" characters.
+	 let textCleaned = textIn.replace(/[\u200B-\u200D\uFEFF]/g, '');
+	 let text = 'async function* f() {\n' + textCleaned + '\n}'; // Hack to get acorn to accept yield statement.
 	 let traveler = makeTraveler({
   	go: function(node, state) {
         if (node.type === 'Identifier') {
@@ -28,7 +30,9 @@ function Deglobalize(textIn, prefix) {
 
         // Parse to AST
    var comments = [];
-   let ast = Parser.parse(text, {
+   let ast;
+   try {
+     ast = Parser.parse(text, {
      			locations: false,
      			ecmaVersion: "latest",
      			allowReserved: true,
@@ -36,7 +40,11 @@ function Deglobalize(textIn, prefix) {
           onComment: comments
         }
       );
-        
+   } catch (err) {
+    console.log("Deglobalize err: " + err);
+    console.log(textCleaned);
+    return textCleaned;
+  }
 		let state = {
     	refTab: []
 		}
@@ -44,7 +52,7 @@ function Deglobalize(textIn, prefix) {
     		traveler.go(ast, state);
  
     		// If none found, just return the input.
-    	 if (state.refTab.length === 0) return textIn;
+    	 if (state.refTab.length === 0) return textCleaned;
 
 			 for (let i = 0; i < state.refTab.length; ++i) {
 			 		let node = state.refTab[i];
