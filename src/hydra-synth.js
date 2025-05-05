@@ -43,6 +43,7 @@ class HydraRenderer {
     canvas,
     precision,
     regen = false,
+    resetOut = true,
     extendTransforms = {} // add your own functions on init
   } = {}) {
 
@@ -120,6 +121,8 @@ class HydraRenderer {
 		
 		this.regen = regen;
 		this.regenInfo = new Array(numOutputs);
+		
+		this.resetOut = resetOut;
 
 		if (this.useWGSL) {
 			this.wgslHydra = new wgslHydra(this, this.canvas, 4);
@@ -185,6 +188,9 @@ class HydraRenderer {
 
 
   async eval(codeIn) {
+  	
+  	if (this.resetOut) this.synth.render(this.o[0])
+  	// Reset 
     let code = Deglobalize(codeIn, '_h');
     // convert all keys in h into strings
     let h = this.synth;
