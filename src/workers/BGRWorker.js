@@ -138,9 +138,9 @@ class BGRWorker {
 	}
 
 
-	async setAudioValue(what, toValue) {
+	async setAudioValue(what, toVal) {
 		if (this.audioCB) {
-			this.audioCB(what, toValue);
+			this.audioCB(what, toVal);
 		} else {
 			console.log("No audio proxy callback registered.");
 		}

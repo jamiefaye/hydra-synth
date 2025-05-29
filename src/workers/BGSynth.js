@@ -233,9 +233,9 @@ class SourceProxy {
 		}
 	}
 
-	setAudio(what, toValue) {
+	setAudio(what, toVal) {
 		if (!this.audioProxy) return;
-		this.audioProxy.setValue(what, toValue);
+		this.audioProxy.setValue(what, toVal);
 	}
 } // end BGSynth class.
 
@@ -254,18 +254,18 @@ class AudioProxy {
 		this.a.tick();
 	}
 
-	setValue(what, toValue) {
+	setValue(what, toVal) {
 		if (what === 'setBins') {
-			this.a.setBins(toValue);
+			this.a.setBins(toVal);
 		} else
 		if (what === 'setCutoff') {
-			this.a.setCutoff(toValue);	
+			this.a.setCutoff(toVal);	
 		} else	
 		if (what === 'setScale') {
-			this.a.setScale(toValue);
+			this.a.setScale(toVal);
 		} else	
 		if (what === 'setSmooth') {
-			this.a.setSmooth(toValue);
+			this.a.setSmooth(toVal);
 		} else
 		if (what === 'hide') {
 			this.a.hide();
