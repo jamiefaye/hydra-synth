@@ -67,7 +67,7 @@ class SourceProxy {
     Screen()
       .then(function (response) {
         self.src = response.video
-      	self.offCan = new OffscreenCanvas(vid.videoWidth, vid.videoHeight);
+      	self.offCan = new OffscreenCanvas(self.src.videoWidth, self.src.videoHeight);
         self.offCTX = self.offCan.getContext('2d');
         self.dynamic = true;
         self.open = true;

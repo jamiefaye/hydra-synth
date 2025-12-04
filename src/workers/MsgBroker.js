@@ -29,7 +29,7 @@ class MsgBrokerClass {
 		let list = await this.broker.listForKind(this.otherKind);
 		if (list.length > 0) {
 			this.targetView = list[list.length - 1];
-			console.log("Target found: " + targetView);
+			console.log("Target found: " + this.targetView);
 		} else {
 				console.log("Target not found");
 		}
