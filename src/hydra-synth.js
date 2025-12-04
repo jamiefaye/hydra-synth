@@ -13,7 +13,6 @@ import regl from 'regl'
 // const window = global.window
 import {wgslHydra} from './wgsl/wgsl-hydra.js';
 import {Deglobalize} from './Deglobalize.js';
-import {RemoteAudio} from './workers/RemoteAudio.js';
 
 const GeneratorFunction = function* () {}.constructor;
 
@@ -39,7 +38,6 @@ class HydraRenderer {
     detectAudio = true,
     enableStreamCapture = true,
     useWGSL = false,
-    webWorker,
     canvas,
     precision,
     regen = false,
@@ -60,7 +58,6 @@ class HydraRenderer {
     if (this.useWGSL) {
     	console.log("Creating HydraRenderer with WGSL and WebGPU.");
     }
-    this.webWorker = webWorker
     this.wgslReady = false;
 		this.useRAF = false;
 		this.gpuDevice = gpuDevice;  // Store for passing to wgslHydra
@@ -394,29 +391,11 @@ class HydraRenderer {
   }
 
   _initAudio () {
-    const that = this
-
-    if (this.webWorker) {
-    	this.synth.a = new RemoteAudio(this.webWorker);
-    } else {
     this.synth.a = new Audio({
       numBins: 4,
       parentEl: this.canvas.parentNode
-      // changeListener: ({audio}) => {
-      //   that.a = audio.bins.map((_, index) =>
-      //     (scale = 1, offset = 0) => () => (audio.fft[index] * scale + offset)
-      //   )
-      //
-      //   if (that.makeGlobal) {
-      //     that.a.forEach((a, index) => {
-      //       const aname = `a${index}`
-      //       window[aname] = a
-      //     })
-      //   }
-      // }
-    	})
-  	}
-	}
+    })
+  }
   // create main output canvas and add to screen
   _initCanvas (canvas) {
     if (canvas) {
@@ -598,7 +577,7 @@ class HydraRenderer {
   }
 
   createSource (i) {
-    let s = new Source({regl: this.regl, hydraSynth: this, wgsl: this.wgslHydra, webWorker: this.webWorker,
+    let s = new Source({regl: this.regl, hydraSynth: this, wgsl: this.wgslHydra,
     		 pb: this.pb, width: this.width, height: this.height, chanNum: i, label: `s${i}`})
     this.synth['s' + this.s.length] = s
     this.s.push(s)

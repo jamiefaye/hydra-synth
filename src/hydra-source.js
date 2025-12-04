@@ -2,13 +2,11 @@ import {Webcam} from './lib/webcam.js'
 import Screen from './lib/screenmedia.js'
 
 class HydraSource {
-  constructor ({ regl, wgsl, hydraSynth, webWorker, proxy, width, height, chanNum, pb, label = ""}) {
+  constructor ({ regl, wgsl, hydraSynth, width, height, chanNum, pb, label = ""}) {
     this.label = label;
     this.regl = regl;
     this.wgsl = wgsl;
     this.hydraSynth = hydraSynth;
-    this.webWorker = webWorker;
-    this.proxy = webWorker !== undefined;
     this.src = null;
     this.dynamic = true;
     this.width = width;
@@ -124,11 +122,6 @@ class HydraSource {
   initCam (index, params) {
   	this.what = 'initCam';
   	this.noteTime();
-  	if (this.webWorker) 
-  		{
-  			this.webWorker.openSourceProxy("webcam", this.chanNum, index, params);
-  			return;
-  		}
     const self = this
 		self.index = index;
     Webcam(index)
@@ -147,12 +140,6 @@ class HydraSource {
     this.what = 'initVideo';
     this.url = url;
 		this.noteTime();
-  	if (this.webWorker) 
-  	{
-  			this.webWorker.openSourceProxy("video", this.chanNum, url, params);
-  			return;
-  	}
-    // const self = this
     const vid = document.createElement('video')
     vid.crossOrigin = 'anonymous'
     vid.autoplay = true
@@ -176,11 +163,6 @@ class HydraSource {
   	this.what = 'initImage';
   	this.url = url;
 	  this.noteTime();
-  	if (this.webWorker) 
-  	{
-    	this.webWorker.openSourceProxy("image", this.chanNum, url, params); 	
-        return;
-    }
     const img = document.createElement('img')
     img.crossOrigin = 'anonymous'
     img.src = url
@@ -322,7 +304,6 @@ class HydraSource {
     }
 
    getTexture () {
-   	  if (this.proxy) return this.getProxiedTexture();
   		if (this.wgsl) return this.getTextureWGSL();
     	return this.tex
   	}
@@ -343,25 +324,6 @@ class HydraSource {
   	if (this.lastTextureView) return this.lastTextureView;
     return undefined;
   }
-
-	getProxiedTexture() {
-		if (this.wgsl) {
-			  	if (!this.offscreencanvas) {
-			  		//this.activate(this.width, this.height);
-						return this.tex.createView()
-					}
-			 	 this.wgsl.device.queue.copyExternalImageToTexture(
-    			{ source: this.offscreencanvas, flipY: true},
-    			{ texture: this.tex },
-    			[ this.tex.width, this.tex.height ],
-  			);
-  			return this.getTextureWGSL();
-		} else {
-			//this.activate(img.width, img.height);
-			//this.bmr.transferFromImageBitmap(img);
-			return this.tex;
-		}
-	}
 
   injectImage(img) {
   	if (!this.offscreencanvas) {
