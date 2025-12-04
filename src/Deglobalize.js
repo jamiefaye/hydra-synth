@@ -2,7 +2,7 @@ import {Parser} from "acorn";
 import {generate}  from "astring";
 import { defaultTraveler, attachComments, makeTraveler } from 'astravel';
 
-const watchListArray = ["time", "fps"];
+const watchListArray = ["time", "fps", "speed", "bpm"];
 const watchList = new Set(watchListArray);
 
 // Function to convert all instances of global variables on the watchlist to be
@@ -57,15 +57,13 @@ function Deglobalize(textIn, prefix) {
 			 for (let i = 0; i < state.refTab.length; ++i) {
 			 		let node = state.refTab[i];
 			 		let vn = node.name;
-			 		node.name = prefix + '.' + vn; // can you say hack!
-			 		/*
+			 		// Transform Identifier node into MemberExpression node
 			 		node.type = "MemberExpression";
 			 		delete node.name;
-			 		node.object = {"type": "identifier", "name": prefix};
-			 		node.property = {"type": "identifier", "name": vn};
+			 		node.object = {type: "Identifier", name: prefix};
+			 		node.property = {type: "Identifier", name: vn};
 			 		node.computed = false;
 			 		node.optional = false;
-			 		*/
 			 }
 
         // Put the comments back.
