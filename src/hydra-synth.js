@@ -44,7 +44,8 @@ class HydraRenderer {
     precision,
     regen = false,
     resetOut = true,
-    extendTransforms = {} // add your own functions on init
+    extendTransforms = {}, // add your own functions on init
+    gpuDevice = null  // Optional shared GPUDevice for zero-copy texture sharing
   } = {}) {
 
     ArrayUtils.init()
@@ -62,6 +63,7 @@ class HydraRenderer {
     this.webWorker = webWorker
     this.wgslReady = false;
 		this.useRAF = false;
+		this.gpuDevice = gpuDevice;  // Store for passing to wgslHydra
     this._initCanvas(canvas)
 
     // object that contains all properties that will be made available on the global context and during local evaluation
@@ -125,7 +127,7 @@ class HydraRenderer {
 		this.resetOut = resetOut;
 
 		if (this.useWGSL) {
-			this.wgslHydra = new wgslHydra(this, this.canvas, 4);
+			this.wgslHydra = new wgslHydra(this, this.canvas, 4, this.gpuDevice);
 			this.wgslPromise = new Promise((resolve, reject)=> {
 			this._initOutputsWgsl(numOutputs);
 			this.wgslHydra.setupHydra().then(()=>{

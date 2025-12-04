@@ -82,10 +82,12 @@ class RenderPassEntry {
 // wgslHydra manages a set of N "channels", each one driving a given output channel.
 // 
 class wgslHydra {
-	constructor (hydra, canvas, numChannels = 4) {
+	// externalDevice: optional GPUDevice for sharing textures between Hydra instances
+	constructor (hydra, canvas, numChannels = 4, externalDevice = null) {
 		this.hydra = hydra;
 		this.canvas = canvas;
 	  this.context = this.canvas.getContext("webgpu");
+	  this.externalDevice = externalDevice;  // If provided, use shared device
 
 	  this.aspect = this.canvas.width / this.canvas.height;
 
@@ -145,17 +147,22 @@ class wgslHydra {
         return;
       }
 
-      // Step 2: Request GPU adapter and device
-      const adapter = await navigator.gpu.requestAdapter();
-      if (!adapter) {
-        console.error("Failed to get GPU adapter.");
-        return;
-      }
+      // Step 2: Use external device if provided, otherwise create our own
+      if (this.externalDevice) {
+        this.device = this.externalDevice;
+        console.log("wgslHydra: Using shared external GPUDevice");
+      } else {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+          console.error("Failed to get GPU adapter.");
+          return;
+        }
 
-      const hasBGRA8unormStorage = adapter.features.has('bgra8unorm-storage');
-			this.device = await adapter.requestDevice({
-    		requiredFeatures: hasBGRA8unormStorage ? ['bgra8unorm-storage'] : [],
-  		});
+        const hasBGRA8unormStorage = adapter.features.has('bgra8unorm-storage');
+        this.device = await adapter.requestDevice({
+          requiredFeatures: hasBGRA8unormStorage ? ['bgra8unorm-storage'] : [],
+        });
+      }
 
 			// The fboRenderer is used to copy the results of our efforts to the final display canvas.
 			this.fboRenderer = new FBOToCanvas(this.canvas, this.device);

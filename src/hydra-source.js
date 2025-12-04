@@ -77,6 +77,28 @@ class HydraSource {
 		this.active = true;
   }
 
+  // Initialize from another Hydra's output (for shared GPUDevice zero-copy)
+  // outputWgsl: an OutputWgsl from another Hydra instance on the same GPUDevice
+  initFromOutput(outputWgsl) {
+    this.what = 'initFromOutput';
+    this.noteTime();
+    this.externalOutput = outputWgsl;  // Keep reference to get current texture
+    this.indirect = true;
+    this.dynamic = true;
+    this.active = true;
+    // Note: tex will be fetched dynamically in getTextureWGSL via externalOutput
+  }
+
+  // Initialize directly from a GPUTexture (for shared GPUDevice zero-copy)
+  initFromTexture(gpuTexture) {
+    this.what = 'initFromTexture';
+    this.noteTime();
+    this.tex = gpuTexture;
+    this.indirect = true;
+    this.dynamic = false;  // Static texture reference
+    this.active = true;
+  }
+
 	setupString() {
 		let outs = [];
 		let w = this.what;
@@ -308,6 +330,11 @@ class HydraSource {
 	// WGSL wants a "texture view", rather than a texture
 	// To avoid creating a new view each frame, we do a simple cache.
    getTextureWGSL () {
+    // For external outputs (cross-Hydra sharing), get texture from the source output
+    if (this.externalOutput) {
+      // Get the current texture from the external output (ping-pong aware)
+      return this.externalOutput.getTexture();  // Returns view from opposite buffer
+    }
   	if (!this.tex) return undefined;
   	if (this.lastTexture !== this.tex || !this.lastTextureView) {
   		// this.lastTexture = this.tex;
@@ -345,6 +372,19 @@ class HydraSource {
  				this.activate(img.width, img.height);
  		}
 		this.bmr.transferFromImageBitmap(img);
+
+		// For WGSL/WebGPU, also copy from offscreencanvas to GPU texture
+		if (this.wgsl && this.wgsl.device && this.tex) {
+			try {
+				this.wgsl.device.queue.copyExternalImageToTexture(
+					{ source: this.offscreencanvas, flipY: true },
+					{ texture: this.tex },
+					[ img.width, img.height ]
+				);
+			} catch (err) {
+				console.error('injectImage WebGPU copy failed:', err);
+			}
+		}
 	}
 }
 
