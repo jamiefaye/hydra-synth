@@ -22,13 +22,14 @@ GlslSource.prototype.addTransform = function (obj)  {
 
 GlslSource.prototype.out = function (_output) {
   var output = _output || this.defaultOutput
-  var glsl = this.glsl(output)
-  this.synth.currentFunctions = []
+ 
  // output.renderPasses(glsl)
   if(output) try{
+     var glsl = this.glsl(output)
+    this.synth.currentFunctions = []
     output.render(glsl)
   } catch (error) {
-    console.log('shader could not compile', error)
+    console.warn('shader could not compile', error)
   }
   
   regenerate(this, output);
@@ -129,9 +130,10 @@ GlslSource.prototype.compile = function (transforms) {
   }).join('')}
 
   void main () {
-    vec4 c = vec4(1, 0, 0, 1);
     vec2 st = gl_FragCoord.xy/resolution.xy;
-    gl_FragColor = ${shaderInfo.fragColor};
+
+    ${shaderInfo.fragColor}
+    gl_FragColor = c;
   }
   `
  }

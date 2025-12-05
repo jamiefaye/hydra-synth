@@ -1,17 +1,21 @@
 {
   "name": "hydra-synth",
-  "private": true,
   "version": "1.4.0",
-  "files": [
-    "dist"
-  ],
+  "description": "base synth for hydra-editor",
   "type": "module",
   "main": "./dist/hydra-synth.umd.js",
   "module": "./dist/hydra-synth.es.js",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "import": "./dist/hydra-synth.es.js",
       "require": "./dist/hydra-synth.umd.js"
+    },
+    "./src/glsl/glsl-functions.js": {
+      "import": "./src/glsl/glsl-functions.js",
+      "require": "./src/glsl/glsl-functions.js"
     }
   },
   "scripts": {
@@ -20,14 +24,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.5.13",
     "acorn": "^8.7.0",
     "acorn-loose": "^8.5.0",
     "astravel": "^0.5.0",
     "astring": "^1.4.0",
-    "comlink": "^4.4.2",
-    "events": "^1.0.2",
-    "inherits": "^2.0.1",
     "meyda": "^5.6.3",
     "regl": "^2.1.1",
     "webgpu-utils": "^1.10.1"
