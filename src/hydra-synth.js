@@ -403,7 +403,6 @@ class HydraRenderer {
       this.width = canvas.width
       this.height = canvas.height
     } else {
-    	/*
       this.canvas = document.createElement('canvas')
       this.canvas.width = this.width
       this.canvas.height = this.height
@@ -411,7 +410,6 @@ class HydraRenderer {
       this.canvas.style.height = '100%'
       this.canvas.style.imageRendering = 'pixelated'
       document.body.appendChild(this.canvas)
-      */
     }
   }
 
