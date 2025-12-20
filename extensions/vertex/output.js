@@ -629,35 +629,31 @@ Output.prototype._renderSprites = function (props) {
   // Check if any sprite uses 3D (needs depth clearing)
   const needs3D = Array.from(this.sprites.values()).some(s => s.has3D)
 
-  // If no level 0, copy previous frame for persistence/trails
-  if (!hasLevel0) {
-    // Blit previous buffer to target (preserves content)
+  // Always copy previous frame first (for persistence/trails)
+  // Level 0 with opaque solid() will naturally cover it
+  this.regl.clear({
+    color: [0, 0, 0, 0],
+    depth: needs3D ? 1 : undefined,
+    framebuffer: targetFbo
+  })
+  if (this.copyCommand) {
+    targetFbo.use(() => {
+      this.copyCommand({ source: prevFbo })
+    })
+  }
+
+  // Clear depth only for level 0 with 3D (not color - let solid() handle that)
+  if (hasLevel0 && needs3D) {
     this.regl.clear({
-      color: [0, 0, 0, 0],
-      depth: needs3D ? 1 : undefined,
+      depth: 1,
       framebuffer: targetFbo
     })
-    // Draw previous frame content to target
-    if (this.copyCommand) {
-      targetFbo.use(() => {
-        this.copyCommand({ source: prevFbo })
-      })
-    }
   }
 
   // Render each sprite level
   for (let i = 0; i < levels.length; i++) {
     const level = levels[i]
     const sprite = this.sprites.get(level)
-
-    // Level 0 clears the framebuffer (and depth if 3D)
-    if (level === 0) {
-      this.regl.clear({
-        color: [0, 0, 0, 1],
-        depth: needs3D ? 1 : undefined,
-        framebuffer: targetFbo
-      })
-    }
 
     // Update animation buffers if this sprite is animated
     if (sprite.animation) {

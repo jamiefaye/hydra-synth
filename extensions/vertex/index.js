@@ -202,17 +202,32 @@ function patchOutput(hydra) {
  * Patch hush() to clear all sprites before resetting
  */
 function patchHush(hydra) {
-  const originalHush = hydra.hush.bind(hydra)
-
   hydra.hush = function() {
-    // Clear all sprite levels before the original hush
+    // Clear sources
+    hydra.s.forEach((source) => {
+      source.clear()
+    })
+    // Clear all sprite levels and reset to blank
     hydra.o.forEach((output) => {
       if (output.clearSprites) {
         output.clearSprites()
       }
+      // Clear the framebuffers directly instead of registering a sprite
+      if (output.fbos) {
+        output.fbos.forEach(fbo => {
+          output.regl.clear({
+            color: [0, 0, 0, 1],
+            depth: 1,
+            framebuffer: fbo
+          })
+        })
+      }
     })
-    // Call original hush
-    originalHush()
+    hydra.synth.render(hydra.o[0])
+    if (hydra.sandbox) {
+      hydra.sandbox.set('update', (dt) => {})
+      hydra.sandbox.set('afterUpdate', (dt) => {})
+    }
   }
 
   // Also update the sandbox reference
