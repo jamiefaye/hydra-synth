@@ -67,6 +67,9 @@ export function install(hydra, options = {}) {
   // Replace Output prototype methods with vertex-shader branch versions
   patchOutput(hydra)
 
+  // Patch hush() to clear sprites
+  patchHush(hydra)
+
   console.log('[hydra-vertex] Extension installed successfully')
   return true
 }
@@ -193,6 +196,31 @@ function patchOutput(hydra) {
   }
 
   console.log('[hydra-vertex] Output patched')
+}
+
+/**
+ * Patch hush() to clear all sprites before resetting
+ */
+function patchHush(hydra) {
+  const originalHush = hydra.hush.bind(hydra)
+
+  hydra.hush = function() {
+    // Clear all sprite levels before the original hush
+    hydra.o.forEach((output) => {
+      if (output.clearSprites) {
+        output.clearSprites()
+      }
+    })
+    // Call original hush
+    originalHush()
+  }
+
+  // Also update the sandbox reference
+  if (hydra.sandbox) {
+    hydra.sandbox.set('hush', hydra.hush)
+  }
+
+  console.log('[hydra-vertex] hush() patched')
 }
 
 /**
