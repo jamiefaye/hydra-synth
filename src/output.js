@@ -1,9 +1,11 @@
 //const transforms = require('./glsl-transforms.js')
 
-var Output = function ({ regl, precision, label = "", width, height}) {
+var Output = function ({ regl, precision, label = "", chanNum, hydraSynth, width, height}) {
   this.regl = regl
   this.precision = precision
   this.label = label
+  this.chanNum = chanNum
+  this.hydraSynth = hydraSynth;
   this.positionBuffer = this.regl.buffer([
     [-2, 0],
     [0, -2],
