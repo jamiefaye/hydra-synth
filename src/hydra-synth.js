@@ -131,7 +131,7 @@ class HydraRenderer {
 			this._initOutputsWgsl(numOutputs);
 			this.wgslHydra.setupHydra().then(()=>{
 					this._initSources(numSources);
-					this._generateGlslTransforms();	
+					this._generateGlslTransforms();
 					this.sandbox = new Sandbox(this.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
 					if(autoLoop) {
 //						 if (!requestAnimationFrame) {
@@ -142,9 +142,12 @@ class HydraRenderer {
 //						 	  requestAnimationFrame(this.tick.bind(this));
 //						}
 					}
-				  resolve(true);
+					if(detectAudio) this._initAudio()
+				  resolve(this);  // Resolve with `this` so await returns the Hydra instance
 			})
 		});
+		// Return promise from constructor so `await new Hydra(...)` works
+		return this.wgslPromise;
 		} else {
 		// Run with regl
         this._initRegl()
@@ -169,9 +172,6 @@ class HydraRenderer {
         }
     }
     if(detectAudio) this._initAudio()
-
-
-    if(this.useWGSL) return;
 
 		if(autoLoop) {
 //					if (!requestAnimationFrame) {

@@ -8,14 +8,10 @@ import Hydra from './../src/hydra-synth.js'
 const useWebGPU = true
 
 async function init() {
-  window.hydra = new Hydra({detectAudio: false, makeGlobal: true, useWGSL: useWebGPU})
+  // Constructor returns a promise in WGSL mode, so await works for both backends
+  window.hydra = await new Hydra({detectAudio: false, makeGlobal: true, useWGSL: useWebGPU})
 
-  if (useWebGPU) {
-    await hydra.wgslPromise
-    console.log('WebGPU mode active')
-  } else {
-    console.log('WebGL mode active')
-  }
+  console.log(useWebGPU ? 'WebGPU mode active' : 'WebGL mode active')
 
   // Multiple outputs test
   osc(10).out(o0)
