@@ -1,8 +1,5 @@
-
-const Hydra = require('./../')
-// import Hydra from './../src/index.js'
-const loop = require('raf-loop')
-const { fugitiveGeometry, exampleVideo, exampleResize, nonGlobalCanvas } = require('./examples.js')
+import Hydra from './../src/hydra-synth.js'
+// import { fugitiveGeometry, exampleVideo, exampleResize, nonGlobalCanvas } from './examples.js'
 
 // console.log('HYDRA', Hydra)
 // const HydraShaders = require('./../shader-generator.js')
