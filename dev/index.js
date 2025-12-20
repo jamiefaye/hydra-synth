@@ -4,42 +4,24 @@ import Hydra from './../src/hydra-synth.js'
 // console.log('HYDRA', Hydra)
 // const HydraShaders = require('./../shader-generator.js')
 
-function init () {
-
-//   const canvas = document.createElement('canvas')
-//   canvas.style.backgroundColor = "#000"
-//   canvas.width = 800
-//   canvas.height = 200
-//   document.body.appendChild(canvas)
-//   // canvas.style.width = '100%'
-//   // canvas.style.height = '100%'
-// //  exampleCustomCanvas()
-
-
-
 // Toggle this to test WebGL vs WebGPU
-const useWebGPU = false
+const useWebGPU = true
 
-if (useWebGPU) {
-  window.hydra = new Hydra({detectAudio: false, makeGlobal: true, useWGSL: true})
-  hydra.wgslPromise.then(() => {
-    osc(10, 0.1, 1.5).out()
+async function init() {
+  window.hydra = new Hydra({detectAudio: false, makeGlobal: true, useWGSL: useWebGPU})
+
+  if (useWebGPU) {
+    await hydra.wgslPromise
     console.log('WebGPU mode active')
-  })
-} else {
-  window.hydra = new Hydra({detectAudio: false, makeGlobal: true})
-  osc(10, 0.1, 1.5).out()
-  console.log('WebGL mode active')
-}
-// console.log(hydra)
-// window.hydra = hydra
-// // //osc().out()
-// exampleVideo()
-// exampleResize()
-//nonGlobalCanvas()
+  } else {
+    console.log('WebGL mode active')
+  }
 
-//s0.initVideo("https://media.giphy.com/media/26ufplp8yheSKUE00/giphy.mp4", {})
-//src(s0).repeat().out()
+  // Multiple outputs test
+  osc(10).out(o0)
+  noise(5).out(o1)
+  src(o0).blend(src(o1)).out(o2)
+  render()
 }
 
 window.onload = init
