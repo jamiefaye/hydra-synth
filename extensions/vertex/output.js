@@ -242,7 +242,7 @@ function normalizeVertexOption(value, defaultValue) {
 // spriteLevel 0 clears the buffer before drawing
 // spriteLevel 1+ composites over previous content
 Output.prototype.registerSprite = function (spriteLevel, config) {
-  const { passes, vertexData, blendMode = 'normal', vertexOptions = null, primitive = 'triangles', sprite = null } = config
+  const { passes, vertexData, blendMode = 'normal', vertexOptions = null, primitive = 'triangles', sprite = null, enabled = true } = config
   const pass = passes[0]
   const self = this
 
@@ -477,39 +477,50 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
       // Custom geometry without transforms: simple passthrough
       const uvAttrDecl = hasExplicitUVs ? 'attribute vec2 texcoord;' : ''
       const faceIdAttrDecl = hasFaceIds ? 'attribute float faceId;' : ''
+      const normalAttrDecl = hasNormals ? 'attribute vec3 normal;' : ''
       const uvCode = hasExplicitUVs
         ? 'uv = texcoord;'
         : 'uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);'
       const faceIdCode = hasFaceIds ? 'v_faceId = faceId;' : 'v_faceId = 0.0;'
+      const normalCode = hasNormals ? 'v_normal = normalize(normal);' : 'v_normal = vec3(0.0, 0.0, 1.0);'
+      const positionCode = has3D ? 'v_position = position;' : 'v_position = vec3(position.xy, 0.0);'
+      const glPositionCode = has3D
+        ? `float aspect = resolution.x / resolution.y;
+        gl_Position = vec4(position.x / aspect, position.y, position.z * 0.1, 1.0);`
+        : 'gl_Position = vec4(position.xy, 0.0, 1.0);'
       vert = `
       precision ${this.precision} float;
       attribute vec3 position;
       ${uvAttrDecl}
       ${faceIdAttrDecl}
+      ${normalAttrDecl}
       varying vec2 uv;
       varying float v_faceId;
 
       // Vertex data for fragment shader
       varying vec3 v_position;
       varying vec3 v_normal;
+      varying vec3 v_worldNormal;
       varying vec3 v_viewDir;
       varying float v_depth;
 
       uniform vec2 u_boundsMin;
       uniform vec2 u_boundsMax;
+      uniform vec2 resolution;
 
       void main () {
         // UV ${hasExplicitUVs ? 'from explicit attribute' : 'normalized to shape bounds'}
         ${uvCode}
         ${faceIdCode}
 
-        // Default vertex data for 2D geometry
-        v_position = vec3(position.xy, 0.0);
-        v_normal = vec3(0.0, 0.0, 1.0);
+        // Vertex data
+        ${positionCode}
+        ${normalCode}
+        v_worldNormal = v_normal;
         v_viewDir = vec3(0.0, 0.0, 1.0);
         v_depth = 1.0;
 
-        gl_Position = vec4(position.xy, 0.0, 1.0);
+        ${glPositionCode}
       }`
     }
   } else {
@@ -558,7 +569,8 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     positionBuffer,
     normalBuffer,
     blendMode,
-    has3D
+    has3D,
+    enabled
   }
 
   // Store animation data if present
@@ -593,6 +605,28 @@ Output.prototype.clearSprites = function () {
   this.sprites.clear()
 }
 
+// Remove a specific sprite level
+Output.prototype.removeSprite = function (level) {
+  if (this.sprites.has(level)) {
+    const sprite = this.sprites.get(level)
+    if (sprite.positionBuffer !== this.defaultPositionBuffer) {
+      sprite.positionBuffer.destroy()
+    }
+    this.sprites.delete(level)
+  }
+}
+
+// Enable/disable a sprite level (keeps it registered but skips rendering)
+Output.prototype.enableSprite = function (level, enabled = true) {
+  if (this.sprites.has(level)) {
+    this.sprites.get(level).enabled = enabled
+  }
+}
+
+Output.prototype.disableSprite = function (level) {
+  this.enableSprite(level, false)
+}
+
 // Legacy render method - registers at sprite level 0
 Output.prototype.render = function (passes) {
   // Clear existing sprite at level 0 and register new one
@@ -623,29 +657,31 @@ Output.prototype._renderSprites = function (props) {
   const targetFbo = this.fbos[this.pingPongIndex]
   const prevFbo = this.fbos[this.pingPongIndex ? 0 : 1]
 
-  // Check if we have a level 0 (which clears)
-  const hasLevel0 = levels.length > 0 && levels[0] === 0
+  // Check if we have an enabled level 0 (which clears)
+  const level0Sprite = this.sprites.get(0)
+  const hasLevel0 = levels.includes(0) && level0Sprite && level0Sprite.enabled !== false
 
   // Check if any sprite uses 3D (needs depth clearing)
   const needs3D = Array.from(this.sprites.values()).some(s => s.has3D)
 
-  // Always copy previous frame first (for persistence/trails)
-  // Level 0 with opaque solid() will naturally cover it
-  this.regl.clear({
-    color: [0, 0, 0, 0],
-    depth: needs3D ? 1 : undefined,
-    framebuffer: targetFbo
-  })
-  if (this.copyCommand) {
-    targetFbo.use(() => {
-      this.copyCommand({ source: prevFbo })
-    })
-  }
-
-  // Clear depth only for level 0 with 3D (not color - let solid() handle that)
-  if (hasLevel0 && needs3D) {
+  // If no level 0, copy previous frame for persistence/trails
+  // If level 0 exists, clear to start fresh
+  if (!hasLevel0) {
     this.regl.clear({
-      depth: 1,
+      color: [0, 0, 0, 0],
+      depth: needs3D ? 1 : undefined,
+      framebuffer: targetFbo
+    })
+    if (this.copyCommand) {
+      targetFbo.use(() => {
+        this.copyCommand({ source: prevFbo })
+      })
+    }
+  } else {
+    // Level 0 clears the framebuffer
+    this.regl.clear({
+      color: [0, 0, 0, 1],
+      depth: needs3D ? 1 : undefined,
       framebuffer: targetFbo
     })
   }
@@ -654,6 +690,9 @@ Output.prototype._renderSprites = function (props) {
   for (let i = 0; i < levels.length; i++) {
     const level = levels[i]
     const sprite = this.sprites.get(level)
+
+    // Skip disabled sprites
+    if (sprite.enabled === false) continue
 
     // Update animation buffers if this sprite is animated
     if (sprite.animation) {

@@ -124,6 +124,9 @@ function patchOutput(hydra) {
   OutputProto.enableDepthBuffer = Output.prototype.enableDepthBuffer
   OutputProto._renderSprites = Output.prototype._renderSprites
   OutputProto.clearSprites = Output.prototype.clearSprites
+  OutputProto.removeSprite = Output.prototype.removeSprite
+  OutputProto.enableSprite = Output.prototype.enableSprite
+  OutputProto.disableSprite = Output.prototype.disableSprite
   OutputProto.tick = Output.prototype.tick
   OutputProto.render = Output.prototype.render
 

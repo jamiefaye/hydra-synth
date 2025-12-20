@@ -45,7 +45,7 @@ function isConfig(arg) {
   if (Array.isArray(arg)) return false
   if (arg.vertices) return false  // VertexSource
   // Check for config keys
-  return 'level' in arg || 'blend' in arg || 'primitive' in arg || 'sprite' in arg
+  return 'level' in arg || 'blend' in arg || 'primitive' in arg || 'sprite' in arg || 'enabled' in arg
 }
 
 function isOutput(arg) {
@@ -102,6 +102,7 @@ GlslSource.prototype.out = function (arg1, arg2, arg3, arg4) {
   const blend = config.blend || 'normal'
   const primitive = config.primitive || 'triangles'
   const sprite = config.sprite || null
+  const enabled = config.enabled !== undefined ? config.enabled : true
 
   if(output) try {
     var glsl = this.glsl(output)
@@ -121,7 +122,8 @@ GlslSource.prototype.out = function (arg1, arg2, arg3, arg4) {
       vertexData: geometry,
       blendMode: blend,
       primitive: primitive,
-      sprite: sprite
+      sprite: sprite,
+      enabled: enabled
     })
   } catch (error) {
     console.warn('shader could not compile', error)
