@@ -429,6 +429,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
           v_depth = 1.0;
 
           gl_Position = vec4(position.xy, 0.0, 1.0);
+          gl_PointSize = 2.0;
         }
       `,
       uniforms: {}
@@ -639,10 +640,12 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
         pos.y * f,
         (pos.z * (near + far) + 2.0 * near * far) * rangeInv,
         w
-      );` : `
+      );
+      gl_PointSize = 2.0;` : `
       // Simple projection - just use z for depth, no perspective divide
       float aspect = resolution.x / resolution.y;
-      gl_Position = vec4(pos.x / aspect, pos.y, pos.z * 0.1, 1.0);`
+      gl_Position = vec4(pos.x / aspect, pos.y, pos.z * 0.1, 1.0);
+      gl_PointSize = 2.0;`
 
     // Model space normal (raw from vertex buffer)
     const normalInit = useNormals ? `vec3 nrm = normalize(normal);` : `vec3 nrm = vec3(0.0, 0.0, 1.0);`
@@ -776,6 +779,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       v_depth = 1.0;
 
       gl_Position = vec4(pos, 0.0, 1.0);
+      gl_PointSize = 2.0;
     }
   `
   }

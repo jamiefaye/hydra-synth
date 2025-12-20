@@ -472,6 +472,7 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         v_depth = 1.0;
 
         gl_Position = vec4(pos, 0.0, 1.0);
+        gl_PointSize = 2.0;
       }`
     } else {
       // Custom geometry without transforms: simple passthrough
@@ -521,6 +522,7 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         v_depth = 1.0;
 
         ${glPositionCode}
+        gl_PointSize = 2.0;
       }`
     }
   } else {

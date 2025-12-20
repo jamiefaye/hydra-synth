@@ -32,6 +32,9 @@ import { v } from './varying-proxy.js'
 import GlslSource from './glsl-source.js'
 import Output from './output.js'
 
+// Import lighting functions
+import lightingFunctions from './lighting-functions.js'
+
 // Extension version
 export const VERSION = '0.1.0'
 
@@ -54,6 +57,9 @@ export function install(hydra, options = {}) {
 
   // Register geometry functions as globals
   registerGeometryFunctions(synth)
+
+  // Register lighting functions
+  registerLightingFunctions(synth)
 
   // Register varying proxy
   synth.v = v
@@ -91,6 +97,16 @@ function registerGeometryFunctions(synth) {
     }
   }
   console.log('[hydra-vertex] Registered geometry functions')
+}
+
+/**
+ * Register lighting functions (diffuse, specular, fresnel, etc.)
+ */
+function registerLightingFunctions(synth) {
+  for (const fn of lightingFunctions) {
+    synth.setFunction(fn)
+  }
+  console.log('[hydra-vertex] Registered lighting functions')
 }
 
 /**
