@@ -132,7 +132,8 @@ GlslSource.prototype.compile = function (transforms) {
   void main () {
     vec2 st = gl_FragCoord.xy/resolution.xy;
 
-    gl_FragColor = ${shaderInfo.fragColor};
+    ${shaderInfo.fragColor}
+    gl_FragColor = c;
   }
   `
  }
