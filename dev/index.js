@@ -17,9 +17,20 @@ function init () {
 
 
 
-window.hydra = new Hydra({detectAudio:false, makeGlobal: true})
+// Toggle this to test WebGL vs WebGPU
+const useWebGPU = false
 
-osc().out()
+if (useWebGPU) {
+  window.hydra = new Hydra({detectAudio: false, makeGlobal: true, useWGSL: true})
+  hydra.wgslPromise.then(() => {
+    osc(10, 0.1, 1.5).out()
+    console.log('WebGPU mode active')
+  })
+} else {
+  window.hydra = new Hydra({detectAudio: false, makeGlobal: true})
+  osc(10, 0.1, 1.5).out()
+  console.log('WebGL mode active')
+}
 // console.log(hydra)
 // window.hydra = hydra
 // // //osc().out()
