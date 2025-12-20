@@ -71,3 +71,11 @@ pnpm-lock.yaml
 
 # Build output
 dist/
+
+# Dev assets (loaded from external repo)
+dev/assets/
+dev/*.obj
+dev/*.glb
+dev/*.png
+certs/
+docs/
