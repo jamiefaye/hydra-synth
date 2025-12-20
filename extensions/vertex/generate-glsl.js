@@ -1,7 +1,7 @@
 import formatArguments from './format-arguments.js'
 
 // Add extra functionality to Array.prototype for generating sequences in time
-import arrayUtils from '../../src/lib/array-utils.js'
+import arrayUtils from './array-utils.js'
 import { isVaryingRef, getVaryingString } from './varying-proxy.js'
 
 

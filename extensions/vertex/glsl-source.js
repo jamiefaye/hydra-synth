@@ -1,5 +1,5 @@
 import generateGlsl from './generate-glsl.js'
-import utilityGlsl from '../../src/glsl/utility-functions.js'
+import utilityGlsl from './utility-functions.js'
 
 var GlslSource = function (obj) {
   this.transforms = []

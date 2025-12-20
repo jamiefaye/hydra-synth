@@ -1,4 +1,4 @@
-import arrayUtils from '../../src/lib/array-utils.js'
+import arrayUtils from './array-utils.js'
 import { isVaryingRef } from './varying-proxy.js'
 
 // [WIP] how to treat different dimensions (?)
