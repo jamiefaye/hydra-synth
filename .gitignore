@@ -68,3 +68,6 @@ typings/
 
 # pnpm lock file
 pnpm-lock.yaml
+
+# Build output
+dist/
