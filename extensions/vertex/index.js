@@ -76,8 +76,38 @@ export function install(hydra, options = {}) {
   // Patch hush() to clear sprites
   patchHush(hydra)
 
+  // Add ResizeObserver to handle canvas resize automatically
+  setupResizeObserver(hydra)
+
   console.log('[hydra-vertex] Extension installed successfully')
   return true
+}
+
+/**
+ * Setup ResizeObserver to automatically update resolution when canvas resizes
+ */
+function setupResizeObserver(hydra) {
+  const canvas = hydra.canvas
+  if (!canvas || typeof ResizeObserver === 'undefined') return
+
+  const observer = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      // Get the new display size
+      const width = Math.round(entry.contentRect.width * (window.devicePixelRatio || 1))
+      const height = Math.round(entry.contentRect.height * (window.devicePixelRatio || 1))
+
+      // Only update if size actually changed
+      if (canvas.width !== width || canvas.height !== height) {
+        console.log(`[hydra-vertex] Canvas resized: ${width}x${height}`)
+        hydra.setResolution(width, height)
+      }
+    }
+  })
+
+  observer.observe(canvas)
+
+  // Store observer for potential cleanup
+  hydra._vertexResizeObserver = observer
 }
 
 /**
