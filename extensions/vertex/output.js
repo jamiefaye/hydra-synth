@@ -354,9 +354,10 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
   )
   const hasVertexTransforms = hasChainedTransforms || hasVertexOptions
 
-  // Build uniforms with prevBuffer
+  // Build uniforms with prevBuffer and resolution (for aspect ratio correction)
   const uniforms = Object.assign({}, pass.uniforms, {
-    prevBuffer: () => self.fbos[self.pingPongIndex]
+    prevBuffer: () => self.fbos[self.pingPongIndex],
+    resolution: this.regl.prop('resolution')
   })
 
   // Add sprite UV uniform (default = full texture)
