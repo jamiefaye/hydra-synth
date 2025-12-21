@@ -68,3 +68,4 @@ typings/
 
 # pnpm lock file
 pnpm-lock.yaml
+dist/
