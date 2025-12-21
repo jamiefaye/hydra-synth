@@ -1,7 +1,7 @@
 {
   "name": "hydra-vertex",
-  "description": "3D vertex shader extension - adds geometry primitives (cube, sphere, torus), vertex transforms (rotate, scale), lighting (diffuse, specular, fresnel), model loading (GLB/OBJ), skeletal animation, and sprite sheets",
-  "documentation": "https://github.com/hydra-synth/hydra-synth/tree/main/extensions/vertex",
+  "description": "3D vertex shader extension - adds geometry primitives (cube, sphere, torus), vertex transforms (rotate, scale), lighting (diffuse, specular, fresnel), model loading (GLB/OBJ), and WebGPU support",
+  "documentation": "https://github.com/jamiefaye/hydra-synth/tree/extensions/extensions/vertex",
   "author": "Jamie Faye Fenton",
   "thumbnail": "vertex-icon.svg",
   "load": "await import('https://www.fentonia.com/hydra-extensions/vertex/index.js').then(m => m.install(window.hydraSynth))",
