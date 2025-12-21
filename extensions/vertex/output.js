@@ -83,6 +83,11 @@ var Output = function ({ regl, precision, label = "", chanNum, hydraSynth, width
 }
 
 Output.prototype.resize = function(width, height) {
+  // Guard against invalid dimensions
+  if (!width || !height || width <= 0 || height <= 0) {
+    console.warn(`[Output] resize called with invalid dimensions: ${width}x${height}`)
+    return
+  }
   this.fbos.forEach((fbo) => {
     fbo.resize(width, height)
   })
@@ -566,11 +571,15 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     depth: { enable: has3D, func: 'less' }
   })
 
-  // Store sprite config
+  // Store sprite config with all buffer references for cleanup
   const spriteConfig = {
     drawCommand,
     positionBuffer,
+    uvBuffer,
+    faceIdBuffer,
     normalBuffer,
+    tangentBuffer,
+    colorBuffer,
     blendMode,
     has3D,
     enabled
@@ -599,10 +608,25 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
 
 // Clear all sprites (called by hush)
 Output.prototype.clearSprites = function () {
-  // Clean up any custom position buffers
+  // Clean up all GPU buffers for each sprite
   for (const [level, sprite] of this.sprites) {
-    if (sprite.positionBuffer !== this.defaultPositionBuffer) {
+    if (sprite.positionBuffer && sprite.positionBuffer !== this.defaultPositionBuffer) {
       sprite.positionBuffer.destroy()
+    }
+    if (sprite.uvBuffer) {
+      sprite.uvBuffer.destroy()
+    }
+    if (sprite.faceIdBuffer) {
+      sprite.faceIdBuffer.destroy()
+    }
+    if (sprite.normalBuffer) {
+      sprite.normalBuffer.destroy()
+    }
+    if (sprite.tangentBuffer) {
+      sprite.tangentBuffer.destroy()
+    }
+    if (sprite.colorBuffer) {
+      sprite.colorBuffer.destroy()
     }
   }
   this.sprites.clear()
@@ -612,8 +636,24 @@ Output.prototype.clearSprites = function () {
 Output.prototype.removeSprite = function (level) {
   if (this.sprites.has(level)) {
     const sprite = this.sprites.get(level)
-    if (sprite.positionBuffer !== this.defaultPositionBuffer) {
+    // Clean up all GPU buffers
+    if (sprite.positionBuffer && sprite.positionBuffer !== this.defaultPositionBuffer) {
       sprite.positionBuffer.destroy()
+    }
+    if (sprite.uvBuffer) {
+      sprite.uvBuffer.destroy()
+    }
+    if (sprite.faceIdBuffer) {
+      sprite.faceIdBuffer.destroy()
+    }
+    if (sprite.normalBuffer) {
+      sprite.normalBuffer.destroy()
+    }
+    if (sprite.tangentBuffer) {
+      sprite.tangentBuffer.destroy()
+    }
+    if (sprite.colorBuffer) {
+      sprite.colorBuffer.destroy()
     }
     this.sprites.delete(level)
   }
@@ -635,8 +675,24 @@ Output.prototype.render = function (passes) {
   // Clear existing sprite at level 0 and register new one
   if (this.sprites.has(0)) {
     const oldSprite = this.sprites.get(0)
-    if (oldSprite.positionBuffer !== this.defaultPositionBuffer) {
+    // Clean up all GPU buffers from old sprite
+    if (oldSprite.positionBuffer && oldSprite.positionBuffer !== this.defaultPositionBuffer) {
       oldSprite.positionBuffer.destroy()
+    }
+    if (oldSprite.uvBuffer) {
+      oldSprite.uvBuffer.destroy()
+    }
+    if (oldSprite.faceIdBuffer) {
+      oldSprite.faceIdBuffer.destroy()
+    }
+    if (oldSprite.normalBuffer) {
+      oldSprite.normalBuffer.destroy()
+    }
+    if (oldSprite.tangentBuffer) {
+      oldSprite.tangentBuffer.destroy()
+    }
+    if (oldSprite.colorBuffer) {
+      oldSprite.colorBuffer.destroy()
     }
   }
   this.registerSprite(0, { passes, vertexData: null, blendMode: 'normal' })
