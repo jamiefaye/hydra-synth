@@ -706,7 +706,17 @@ Output.prototype.render = function (passes) {
 
 // Internal method to render all sprites in order
 Output.prototype._renderSprites = function (props) {
-  if (this.sprites.size === 0) return
+  if (this.sprites.size === 0) {
+    // No sprites - clear framebuffer (for hush())
+    this.pingPongIndex = this.pingPongIndex ? 0 : 1
+    const targetFbo = this.fbos[this.pingPongIndex]
+    this.regl.clear({
+      color: [0, 0, 0, 1],
+      depth: 1,
+      framebuffer: targetFbo
+    })
+    return
+  }
 
   // Sort sprite levels ascending
   const levels = Array.from(this.sprites.keys()).sort((a, b) => a - b)

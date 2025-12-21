@@ -122,6 +122,10 @@ class SpritePassEntry {
 
 		// Blend mode
 		this.blendMode = 'normal';
+
+		// Per-sprite bind group (replaces shared bind group with sprite-specific spriteGrid)
+		this.spriteGridBuffer = undefined;
+		this.spriteBindGroup = undefined;
 	}
 }
 
@@ -703,7 +707,42 @@ class wgslHydra {
 		// Create samplers/buffers for fragment uniforms
 		this.createSamplerOrBuffersForSprite(spe);
 
+		// Create per-sprite bind group with sprite-specific spriteGrid values
+		this.createSpriteBindGroup(spe);
+
 		if (trace) console.timeStamp("spriteChain", "setupSpriteChain", undefined, "wgsl-hydra", "hydra", "secondary-light");
+	}
+
+	// Create per-sprite bind group with sprite-specific spriteGrid
+	createSpriteBindGroup(spe) {
+		// Determine spriteGrid values for this sprite
+		let cols = 1, rows = 1;
+		if (spe.sprite && spe.sprite.cols && spe.sprite.rows) {
+			cols = spe.sprite.cols;
+			rows = spe.sprite.rows;
+		}
+
+		// Create per-sprite spriteGrid buffer
+		spe.spriteGridBuffer = this.device.createBuffer({
+			label: `spriteGrid_c${spe.chan}_s${spe.level}`,
+			size: 8, // 2 x 32-bit float
+			usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+		});
+		const gridValues = new Float32Array([cols, rows]);
+		this.device.queue.writeBuffer(spe.spriteGridBuffer, 0, gridValues);
+
+		// Create per-sprite bind group (same layout as shared, but with sprite-specific spriteGrid)
+		spe.spriteBindGroup = this.device.createBindGroup({
+			label: `spriteBindGroup_c${spe.chan}_s${spe.level}`,
+			layout: this.sharedBindGroupLayout,
+			entries: [
+				{ binding: 0, resource: { buffer: this.timeUniformBuffer } },
+				{ binding: 1, resource: { buffer: this.resolutionUniformBuffer } },
+				{ binding: 2, resource: { buffer: this.mouseUniformBuffer } },
+				{ binding: 3, resource: { buffer: this.spriteUVUniformBuffer } },
+				{ binding: 4, resource: { buffer: spe.spriteGridBuffer } },  // Per-sprite!
+			],
+		});
 	}
 
 	// Clear all sprite chains for a channel
@@ -731,6 +770,9 @@ class wgslHydra {
 				}
 				if (spe.vertexUniformBuffer) {
 					spe.vertexUniformBuffer.destroy();
+				}
+				if (spe.spriteGridBuffer) {
+					spe.spriteGridBuffer.destroy();
 				}
 			}
 			rpe.sprites.clear();
@@ -994,9 +1036,8 @@ class wgslHydra {
 		this.mouseUniformValues[1] = this.mousePos.y;
 		this.device.queue.writeBuffer(this.mouseUniformBuffer, 0, this.mouseUniformValues);
 
-		// Write sprite uniforms (defaults - could be updated per-sprite later)
+		// Write sprite UV uniforms (spriteGrid is now per-sprite)
 		this.device.queue.writeBuffer(this.spriteUVUniformBuffer, 0, this.spriteUVUniformValues);
-		this.device.queue.writeBuffer(this.spriteGridUniformBuffer, 0, this.spriteGridUniformValues);
 
 		// For each active channel...
     for (let chan = 0; chan < this.numChannels; ++chan) {
@@ -1006,7 +1047,25 @@ class wgslHydra {
 			const hasSprites = rpe.sprites && rpe.sprites.size > 0;
 			const hasLegacyPipeline = rpe.pipeline;
 
-			if (!hasSprites && !hasLegacyPipeline) continue;
+			if (!hasSprites && !hasLegacyPipeline) {
+				// No sprites and no legacy pipeline - clear the framebuffer (for hush())
+				// Only clear if the output has been used before (has textures)
+				if (rpe.outputObject && rpe.outputObject.views) {
+					rpe.outputObject.flipPingPong();
+					const clearPassDescriptor = {
+						label: `clearPass_c${chan}`,
+						colorAttachments: [{
+							view: rpe.outputObject.getCurrentTextureView(),
+							clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+							loadOp: "clear",
+							storeOp: "store",
+						}],
+					};
+					const clearPass = commandEncoder.beginRenderPass(clearPassDescriptor);
+					clearPass.end();
+				}
+				continue;
+			}
 
 		  rpe.outputObject.flipPingPong();
 
@@ -1019,8 +1078,8 @@ class wgslHydra {
 					const level = levels[i];
 					const spe = rpe.sprites.get(level);
 
-					// Level 0 clears, others load
-					const loadOp = level === 0 ? "clear" : "load";
+					// Level 0 clears; level 1+ loads previous frame (enables feedback/accumulation)
+					const loadOp = (level === 0) ? "clear" : "load";
 
 					const renderPassDescriptor = {
 						label: `renderPass_c${chan}_s${level}`,
@@ -1055,20 +1114,11 @@ class wgslHydra {
 						this.updateVertexUniforms(spe);
 					}
 
-					// Update spriteGrid uniform for this sprite
-					if (spe.sprite && spe.sprite.cols && spe.sprite.rows) {
-						this.spriteGridUniformValues[0] = spe.sprite.cols;
-						this.spriteGridUniformValues[1] = spe.sprite.rows;
-					} else {
-						this.spriteGridUniformValues[0] = 1;
-						this.spriteGridUniformValues[1] = 1;
-					}
-					this.device.queue.writeBuffer(this.spriteGridUniformBuffer, 0, this.spriteGridUniformValues);
-
 					if (trace) console.timeStamp("spritepass");
 					const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
 					passEncoder.setPipeline(spe.pipeline);
-					passEncoder.setBindGroup(0, this.sharedBindGroup);
+					// Use per-sprite bind group (has sprite-specific spriteGrid)
+					passEncoder.setBindGroup(0, spe.spriteBindGroup || this.sharedBindGroup);
 					passEncoder.setBindGroup(1, ubg);
 
 					// Set vertex bind group if we have vertex uniforms

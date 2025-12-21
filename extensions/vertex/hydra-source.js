@@ -172,7 +172,10 @@ class HydraSource {
       self.src = img
       self.dynamic = false
       self.active = true;
-      self.tex = this.makeTexture({ width: self.width, height: self.height, data: self.src, ...params })
+      // Use actual image dimensions, not canvas dimensions
+      self.width = img.width;
+      self.height = img.height;
+      self.tex = this.makeTexture({ width: img.width, height: img.height, data: self.src, ...params })
     }
   }
 
@@ -296,6 +299,9 @@ class HydraSource {
       } else {
       	this.updateTextureWGSL();
       }
+    } else if (this.src && this.wgsl && !this.oneShotDone) {
+      // Static images in WGSL mode: upload once
+      this.updateTextureWGSL();
     }
   }
 
@@ -313,7 +319,7 @@ class HydraSource {
  	   if(!this.oneShotDone) {
  	  	// non-dynamic textures only need to be copied-in once.
  	  	 	this.wgsl.device.queue.copyExternalImageToTexture(
-    			{ source: this.src, flipY: true},
+    			{ source: this.src, flipY: false},
     			{ texture: this.tex },
     			[ w, h ],
   			);
@@ -323,7 +329,7 @@ class HydraSource {
  	  }
     // pull in the next texture;
     this.wgsl.device.queue.copyExternalImageToTexture(
-    		{ source: this.src, flipY: true },
+    		{ source: this.src, flipY: false },
     		{ texture: this.tex },
     		[ w, h ],
   		);
