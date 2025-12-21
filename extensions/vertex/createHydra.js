@@ -212,9 +212,13 @@ export async function createHydra({
       if (output.clearSprites) output.clearSprites()
     })
     hydra.synth.render(hydra.o[0])
+    // Reset user callbacks (matches fork behavior)
+    hydra.synth.update = (dt) => {}
+    hydra.synth.afterUpdate = (dt) => {}
   }.bind(hydra)
 
   hydra.synth.update = (dt) => {}
+  hydra.synth.afterUpdate = (dt) => {}
   hydra.synth.tick = hydra.tick = createTick(hydra)
 
   // Initialize based on mode
