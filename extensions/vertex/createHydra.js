@@ -9,16 +9,21 @@
 import { wgslHydra } from './wgsl/wgsl-hydra.js'
 import { OutputWgsl } from './wgsl/outputWgsl.js'
 
+// Extension-specific imports
+import { Deglobalize } from './Deglobalize.js'
+
 // We need these from hydra-synth for initialization
 import Output from '../../src/output.js'
-import Source from '../../src/hydra-source.js'
+import Source from './hydra-source.js'  // Extended version with WGSL support
 import MouseTools from '../../src/lib/mouse.js'
 import Audio from '../../src/lib/audio.js'
 import VidRecorder from '../../src/lib/video-recorder.js'
 import ArrayUtils from '../../src/lib/array-utils.js'
-import Sandbox from '../../src/eval-sandbox.js'
 import Generator from '../../src/generator-factory.js'
 import regl from 'regl'
+
+// GeneratorFunction constructor for yield support in sketches
+const GeneratorFunction = Object.getPrototypeOf(async function*(){}).constructor
 
 // RAF loop - use a simple implementation
 function createLoop(fn) {
@@ -127,6 +132,13 @@ export async function createHydra({
   // Initialize canvas
   if (canvas) {
     hydra.canvas = canvas
+    // Update dimensions from canvas if not explicitly provided or if canvas has different size
+    if (canvas.width && canvas.height) {
+      hydra.width = canvas.width
+      hydra.height = canvas.height
+      hydra.synth.width = canvas.width
+      hydra.synth.height = canvas.height
+    }
   } else if (typeof document !== 'undefined') {
     // Ensure body fills viewport
     document.body.style.margin = '0'
@@ -177,6 +189,11 @@ export async function createHydra({
   }.bind(hydra)
 
   hydra.synth.setResolution = hydra.setResolution = function(w, h) {
+    // Guard against invalid dimensions
+    if (!w || !h || w <= 0 || h <= 0) {
+      console.warn(`[hydra] setResolution called with invalid dimensions: ${w}x${h}`)
+      return
+    }
     hydra.canvas.width = w
     hydra.canvas.height = h
     hydra.width = w
@@ -236,7 +253,10 @@ export async function createHydra({
       changeListener: ({ type, method, synth }) => {
         if (type === 'add') {
           hydra.synth[method] = synth.generators[method]
-          if (hydra.sandbox) hydra.sandbox.add(method)
+          // Expose new methods on window if makeGlobal
+          if (makeGlobal && typeof window !== 'undefined') {
+            window[method] = synth.generators[method]
+          }
         }
       }
     })
@@ -283,7 +303,10 @@ export async function createHydra({
       changeListener: ({ type, method, synth }) => {
         if (type === 'add') {
           hydra.synth[method] = synth.generators[method]
-          if (hydra.sandbox) hydra.sandbox.add(method)
+          // Expose new methods on window if makeGlobal
+          if (makeGlobal && typeof window !== 'undefined') {
+            window[method] = synth.generators[method]
+          }
         }
       }
     })
@@ -372,14 +395,144 @@ export async function createHydra({
     })
   }
 
-  // Create sandbox
-  hydra.sandbox = new Sandbox(hydra.synth, makeGlobal, ['speed', 'update', 'bpm', 'fps'])
+  // Generator function state for yield support
+  hydra.generatorFunction = null
+  hydra.generatorFunctionTimer = -1
+  hydra.makeGlobal = makeGlobal
+
+  // If makeGlobal is true, also expose synth properties on window for legacy compatibility
+  if (makeGlobal && typeof window !== 'undefined') {
+    const exposeGlobals = () => {
+      Object.keys(hydra.synth).forEach(key => {
+        window[key] = hydra.synth[key]
+      })
+    }
+    exposeGlobals()
+    // Re-expose after generator is set up (to catch osc, shape, etc.)
+    hydra._exposeGlobals = exposeGlobals
+  }
+
+  /**
+   * Evaluate sketch code with local bindings (no global pollution).
+   * Uses Deglobalize to transform primitive refs like `time` to `_h.time`,
+   * then creates a GeneratorFunction with all synth properties as local params.
+   * Supports yield for timed sequencing.
+   *
+   * When makeGlobal is true, also updates window globals for legacy compatibility.
+   */
+  hydra.eval = async function(codeIn) {
+    // Reset render target
+    hydra.synth.render(hydra.o[0])
+
+    // Transform primitive global refs to member expressions
+    let code
+    try {
+      code = Deglobalize(codeIn, '_h')
+    } catch (err) {
+      console.warn('[hydra] Deglobalize error:', err)
+      code = codeIn
+    }
+
+    // Build local bindings from synth object
+    const h = hydra.synth
+    const keys = Object.keys(h)
+    const values = keys.map(k => h[k])
+
+    // Add synth reference as 'h' and '_h' for deglobalized primitives
+    keys.push('h')
+    values.push(h)
+    keys.push('_h')
+    values.push(h)
+
+    try {
+      const fn = new GeneratorFunction(...keys, code)
+      hydra.generatorFunction = fn(...values)
+    } catch (err) {
+      console.error('[hydra] Error compiling generator function:', err)
+      hydra.generatorFunctionTimer = -1
+      throw err
+    }
+
+    hydra.generatorFunctionTimer = -1
+
+    try {
+      const reply = hydra.generatorFunction.next()
+      hydra._planNext(reply)
+    } catch (err) {
+      console.error('[hydra] Error calling initial generator function.next():', err)
+      delete hydra.generatorFunction
+      throw err
+    }
+  }
+
+  /**
+   * Called from tick() to step the generator if a yield timer has elapsed.
+   */
+  hydra.generatorTick = function() {
+    if (!hydra.generatorFunction || hydra.generatorFunctionTimer === -1) return
+    if (hydra.synth.time < hydra.generatorFunctionTimer) return
+
+    const f = hydra.generatorFunction
+    if (!f) {
+      hydra.generatorFunctionTimer = -1
+    } else {
+      try {
+        const reply = f.next()
+        hydra._planNext(reply)
+      } catch (err) {
+        console.error('[hydra] Error calling generator function.next():', err)
+        hydra.generatorFunctionTimer = -1
+        delete hydra.generatorFunction
+      }
+    }
+  }
+
+  /**
+   * Plan the next generator step based on yield value (wait time in seconds).
+   */
+  hydra._planNext = function(reply) {
+    if (!reply) return
+
+    if (!reply.done) {
+      let waitTime = reply.value
+      if (waitTime === undefined) {
+        waitTime = 0.010
+      }
+      hydra.generatorFunctionTimer = hydra.synth.time + waitTime
+    } else {
+      delete hydra.generatorFunction
+    }
+  }
+
+  /**
+   * Teardown this hydra instance, stopping periodic activity and reclaiming memory.
+   */
+  hydra._destroy = function() {
+    hydra.hush()
+    if (hydra.looper) {
+      hydra.looper.stop()
+      delete hydra.looper
+    }
+    if (hydra.regl) {
+      hydra.regl.destroy()
+      delete hydra.regl
+    }
+    if (hydra.synth && hydra.synth.a && hydra.synth.a.destroy) {
+      hydra.synth.a.destroy()
+    }
+    delete hydra.generatorFunction
+    hydra.generatorFunctionTimer = -1
+  }
 
   // Audio detection
   if (detectAudio) {
     try {
       hydra.audio = new Audio({ numBins: 4 })
       hydra.synth.a = hydra.audio
+      // Expose audio 'a' on window if makeGlobal
+      if (makeGlobal && typeof window !== 'undefined') {
+        window.a = hydra.audio
+      }
     } catch (e) {
       console.warn('[hydra] Audio detection not available')
     }
@@ -397,16 +550,10 @@ export async function createHydra({
 }
 
 function initSources(hydra, numSources) {
-  // Sources require regl - skip in WebGPU mode for now
-  // TODO: Create WebGPU-compatible source class
-  if (!hydra.regl) {
-    console.warn('[hydra] Sources (s0, s1, etc.) not available in WebGPU mode')
-    return
-  }
-
   for (let i = 0; i < numSources; i++) {
     const s = new Source({
-      regl: hydra.regl,
+      regl: hydra.regl,  // undefined in WebGPU mode
+      wgsl: hydra.wgslHydra,  // undefined in WebGL mode
       hydraSynth: hydra,
       pb: hydra.pb,
       width: hydra.width,
@@ -423,6 +570,9 @@ function createTick(hydra) {
   return function tick(dt) {
     hydra.synth.time += dt * 0.001 * hydra.synth.speed
     hydra.synth.stats.fps = Math.round(1000 / dt)
+
+    // Step generator function if yield timer elapsed
+    if (hydra.generatorTick) hydra.generatorTick()
 
     if (hydra.synth.update) hydra.synth.update(dt)
 

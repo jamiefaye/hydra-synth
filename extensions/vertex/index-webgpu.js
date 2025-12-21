@@ -48,6 +48,9 @@ import Output from './output.js'
 // Import lighting functions
 import lightingFunctions from './lighting-functions.js'
 
+// Import WebGPU utilities
+import { getSharedDevice, hasSharedDevice, releaseSharedDevice } from './wgsl/gpu-device-factory.js'
+
 // Extension version
 export const VERSION = '0.2.0-webgpu'
 
@@ -106,12 +109,17 @@ export function install(hydra, options = {}) {
  */
 function setupResizeObserver(hydra) {
   const canvas = hydra.canvas
+  // Skip if no canvas, no ResizeObserver, or canvas is OffscreenCanvas (not a DOM Element)
   if (!canvas || typeof ResizeObserver === 'undefined') return
+  if (!(canvas instanceof Element)) return  // OffscreenCanvas can't be observed
 
   const observer = new ResizeObserver((entries) => {
     for (const entry of entries) {
-      const width = Math.round(entry.contentRect.width * (window.devicePixelRatio || 1))
-      const height = Math.round(entry.contentRect.height * (window.devicePixelRatio || 1))
+      const width = Math.round(entry.contentRect.width)
+      const height = Math.round(entry.contentRect.height)
+
+      // Skip invalid dimensions (can happen before layout is ready)
+      if (width <= 0 || height <= 0) continue
 
       if (canvas.width !== width || canvas.height !== height) {
         console.log(`[hydra-vertex-webgpu] Canvas resized: ${width}x${height}`)
@@ -330,5 +338,7 @@ export {
   cube, sphere, plane, torus, cylinder, cone,
   parseObj, loadObj, parseGlb, loadGlb,
   VertexSource, v,
-  generateVertexGlsl, generateVertexWgsl, getPassthroughVertexWgsl
+  generateVertexGlsl, generateVertexWgsl, getPassthroughVertexWgsl,
+  // WebGPU utilities
+  getSharedDevice, hasSharedDevice, releaseSharedDevice
 }

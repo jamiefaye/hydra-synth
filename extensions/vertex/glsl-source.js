@@ -30,8 +30,12 @@ function wrapWgslFunction(transform) {
   if (!t) return transform.transform.wgsl || ''
 
   // Get inputs from the original transform definition
+  // Note: generator-factory.js already prepends type args to inputs and slices the first,
+  // so originalInputs already contains _c0/_c1 for combine/combineCoord types.
+  // We only need to add the FIRST type arg (_st or _c0) to avoid duplicates.
   const originalInputs = transform.transform.inputs || []
-  const allArgs = [...t.args, ...originalInputs.map(inp => ({
+  const firstTypeArg = t.args[0]  // _st for src/coord/combineCoord, _c0 for color/combine
+  const allArgs = [firstTypeArg, ...originalInputs.map(inp => ({
     type: toWgslType(inp.type),
     name: inp.name
   }))]
