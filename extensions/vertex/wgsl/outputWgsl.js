@@ -154,6 +154,25 @@ class OutputWgsl {
       }
     }
 
+    // Build animation data if present
+    let animation = null
+    if (vertexSource && vertexSource._animTimeFunc) {
+      animation = {
+        skeleton: vertexSource._skeleton,
+        animations: vertexSource._animations,
+        clipName: vertexSource._animClip,
+        timeFunc: vertexSource._animTimeFunc,
+        originalVerts: vertexSource._originalVerts || vertexSource.vertices,
+        originalNormals: vertexSource._originalNormals || vertexSource.normals,
+        joints: vertexSource.joints,
+        weights: vertexSource.weights,
+        gltf: vertexSource._gltf,
+        normCenter: vertexSource._normCenter,
+        normScale: vertexSource._normScale,
+        is3D: has3D
+      }
+    }
+
     // Store sprite config
     this.sprites.set(spriteLevel, {
       passes,
@@ -171,7 +190,8 @@ class OutputWgsl {
       hasNormals,
       hasTangents,
       hasColors,
-      sprite
+      sprite,
+      animation
     })
 
     // Setup the pipeline in wgslHydra
@@ -194,7 +214,8 @@ class OutputWgsl {
       normals: vertexSource?.normals,
       tangents: vertexSource?.tangents,
       colors: vertexSource?.colors,
-      sprite
+      sprite,
+      animation
     })
   }
 

@@ -1,6 +1,7 @@
 import {FBOToCanvas} from "./FBOToCanvas.js";
 import {FBO4ToCanvas} from "./FBO4ToCanvas.js";
 import {BLEND_MODES} from "./outputWgsl.js";
+import { computeSkinningMatrices, applySkinning } from '../geometry.js';
 
 // Used to enable a single pass through the "animate" routine.
 // Used for testing to avoid a flood of console error messages.
@@ -126,6 +127,9 @@ class SpritePassEntry {
 		// Per-sprite bind group (replaces shared bind group with sprite-specific spriteGrid)
 		this.spriteGridBuffer = undefined;
 		this.spriteBindGroup = undefined;
+
+		// Animation data
+		this.animation = null;
 	}
 }
 
@@ -466,7 +470,7 @@ class wgslHydra {
 	async setupSpriteChain(chan, spriteLevel, config) {
 		if (trace) console.timeStamp("setupSpriteChain");
 		const { uniforms, fragShader, vertexWgsl, vertexUniforms, rawVerts, blendMode, primitive, has3D,
-			hasExplicitUVs, hasFaceIds, hasNormals, hasTangents, hasColors, uvs, faceIds, normals, tangents, colors, sprite } = config;
+			hasExplicitUVs, hasFaceIds, hasNormals, hasTangents, hasColors, uvs, faceIds, normals, tangents, colors, sprite, animation } = config;
 
 		const rpe = this.renderPassInfo[chan];
 		rpe.outputObject = this.outputChannelObjects[chan];
@@ -489,6 +493,7 @@ class wgslHydra {
 		spe.hasTangents = hasTangents || false;
 		spe.hasColors = hasColors || false;
 		spe.sprite = sprite || null;
+		spe.animation = animation || null;
 
 		// Generate uniform declarations for fragment shader
 		this.generateSpriteUniformDeclarations(spe);
@@ -1077,6 +1082,45 @@ class wgslHydra {
 				for (let i = 0; i < levels.length; i++) {
 					const level = levels[i];
 					const spe = rpe.sprites.get(level);
+
+					// Update animation buffers if this sprite is animated
+					if (spe.animation) {
+						const anim = spe.animation;
+						const time = typeof anim.timeFunc === 'function' ? anim.timeFunc() : 0;
+
+						// Support dynamic clip name (function or string)
+						const clipName = typeof anim.clipName === 'function' ? anim.clipName() : anim.clipName;
+
+						// Find clip and compute looped time
+						const clip = anim.animations.find(a => a.name === clipName) || anim.animations[0];
+						const loopedTime = clip ? (time % clip.duration) : time;
+
+						// Compute skinning matrices
+						const skinningMatrices = computeSkinningMatrices(
+							anim.skeleton, anim.animations, clipName, loopedTime, anim.gltf,
+							anim.normCenter, anim.normScale
+						);
+
+						if (skinningMatrices) {
+							// Apply skinning to vertices
+							const skinned = applySkinning(
+								anim.originalVerts, anim.originalNormals,
+								anim.joints, anim.weights, skinningMatrices
+							);
+
+							// Update position buffer with skinned vertices
+							if (spe.vertexBuffer && skinned.vertices) {
+								const skinnedFloat32 = new Float32Array(skinned.vertices);
+								this.device.queue.writeBuffer(spe.vertexBuffer, 0, skinnedFloat32);
+							}
+
+							// Update normal buffer if present
+							if (spe.normalBuffer && skinned.normals) {
+								const skinnedNormals = new Float32Array(skinned.normals);
+								this.device.queue.writeBuffer(spe.normalBuffer, 0, skinnedNormals);
+							}
+						}
+					}
 
 					// Level 0 clears; level 1+ loads previous frame (enables feedback/accumulation)
 					const loadOp = (level === 0) ? "clear" : "load";
