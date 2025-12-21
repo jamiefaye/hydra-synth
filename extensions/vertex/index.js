@@ -35,6 +35,9 @@ import Output from './output.js'
 // Import lighting functions
 import lightingFunctions from './lighting-functions.js'
 
+// Import WebGPU utilities
+import { getSharedDevice, hasSharedDevice, releaseSharedDevice } from './wgsl/gpu-device-factory.js'
+
 // Extension version
 export const VERSION = '0.1.0'
 
@@ -347,5 +350,7 @@ export {
   tri, quad, poly, circle, line, ring,
   cube, sphere, plane, torus, cylinder, cone,
   parseObj, loadObj, parseGlb, loadGlb,
-  VertexSource, v
+  VertexSource, v,
+  // WebGPU utilities
+  getSharedDevice, hasSharedDevice, releaseSharedDevice
 }

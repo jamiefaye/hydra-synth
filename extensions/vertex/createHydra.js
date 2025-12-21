@@ -404,6 +404,91 @@ export async function createHydra({
   hydra.generatorFunctionTimer = -1
   hydra.makeGlobal = makeGlobal
 
+  /**
+   * Refresh regl to clear accumulated shader programs.
+   * This destroys and recreates regl, FBOs, and render commands.
+   */
+  hydra._refreshRegl = function() {
+    if (hydra.useWGSL || !hydra.regl) return
+
+    // Clear all sprites first (destroys buffers)
+    hydra.o.forEach(output => {
+      if (output.clearSprites) output.clearSprites()
+    })
+
+    // Destroy old regl
+    hydra.regl.destroy()
+
+    // Create new regl
+    hydra.regl = regl({
+      canvas: hydra.canvas,
+      pixelRatio: 1,
+      attributes: { preserveDrawingBuffer: hydra.preserveDrawingBuffer }
+    })
+    hydra.regl.clear({ color: [0, 0, 0, 1] })
+
+    // Recreate FBOs for each output
+    hydra.o.forEach(output => {
+      output.regl = hydra.regl
+      output.fbos = Array(2).fill().map(() => hydra.regl.framebuffer({
+        color: hydra.regl.texture({
+          mag: 'nearest',
+          width: hydra.width,
+          height: hydra.height,
+          format: 'rgba'
+        }),
+        depthStencil: false
+      }))
+      // Reset draw to empty
+      output.draw = () => {}
+      // Clear sprites map
+      output.sprites = new Map()
+      // Recreate default position buffer
+      output.defaultPositionBuffer = hydra.regl.buffer([[-2, 0, 0], [0, -2, 0], [2, 2, 0]])
+      output.positionBuffer = output.defaultPositionBuffer
+      // Recreate copy command
+      output.copyCommand = hydra.regl({
+        frag: `precision ${hydra.precision} float; uniform sampler2D source; varying vec2 uv; void main() { gl_FragColor = texture2D(source, uv); }`,
+        vert: output.vert,
+        attributes: { position: output.defaultPositionBuffer },
+        uniforms: { source: hydra.regl.prop('source') },
+        count: 3,
+        depth: { enable: false }
+      })
+    })
+
+    // Recreate sources textures
+    hydra.s.forEach(source => {
+      if (source.src) {
+        source.tex = hydra.regl.texture({ data: source.src })
+      } else {
+        source.tex = hydra.regl.texture({ shape: [1, 1] })
+      }
+    })
+
+    // Recreate renderAll and renderFbo
+    hydra.renderAll = hydra.regl({
+      frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0, tex1, tex2, tex3;
+        void main() { vec2 st = vec2(1.0-uv.x,uv.y)*2.0; vec2 q = floor(st)*vec2(2.0,1.0); int quad = int(q.x)+int(q.y);
+        st.x += step(1.,mod(st.y,2.0)); st.y += step(1.,mod(st.x,2.0)); st = fract(st);
+        if(quad==0) gl_FragColor=texture2D(tex0,st); else if(quad==1) gl_FragColor=texture2D(tex1,st);
+        else if(quad==2) gl_FragColor=texture2D(tex2,st); else gl_FragColor=texture2D(tex3,st); }`,
+      vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
+      attributes: { position: [[-2,0],[0,-2],[2,2]] },
+      uniforms: { tex0: hydra.regl.prop('tex0'), tex1: hydra.regl.prop('tex1'), tex2: hydra.regl.prop('tex2'), tex3: hydra.regl.prop('tex3') },
+      count: 3, depth: { enable: false }
+    })
+    hydra.renderFbo = hydra.regl({
+      frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = texture2D(tex0, vec2(1.0-uv.x, uv.y)); }`,
+      vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
+      attributes: { position: [[-2,0],[0,-2],[2,2]] },
+      uniforms: { tex0: hydra.regl.prop('tex0'), resolution: hydra.regl.prop('resolution') },
+      count: 3, depth: { enable: false }
+    })
+
+    console.log('[hydra] regl refreshed')
+  }
+
   // If makeGlobal is true, also expose synth properties on window for legacy compatibility
   if (makeGlobal && typeof window !== 'undefined') {
     const exposeGlobals = () => {
