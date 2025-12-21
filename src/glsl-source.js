@@ -1,10 +1,9 @@
 import generateGlsl from './generate-glsl.js'
-import {regenerate} from './regen-hydra.js'
 // const formatArguments = require('./glsl-utils.js').formatArguments
 
 // const glslTransforms = require('./glsl/composable-glsl-functions.js')
 import utilityGlsl from './glsl/utility-functions.js'
-import utilityWgsl from './wgsl/utility-functions-wgsl.js'
+
 var GlslSource = function (obj) {
   this.transforms = []
   this.transforms.push(obj)
@@ -12,7 +11,6 @@ var GlslSource = function (obj) {
   this.synth = obj.synth
   this.type = 'GlslSource'
   this.defaultUniforms = obj.defaultUniforms
-  this.isWGSL = obj.synth.isWGSL;
   return this
 }
 
@@ -31,8 +29,6 @@ GlslSource.prototype.out = function (_output) {
   } catch (error) {
     console.warn('shader could not compile', error)
   }
-  
-  regenerate(this, output);
 }
 
 GlslSource.prototype.glsl = function () {
@@ -71,35 +67,8 @@ GlslSource.prototype.compile = function (transforms) {
   var shaderInfo = generateGlsl(transforms, this.synth)
   var uniforms = {}
   shaderInfo.uniforms.forEach((uniform) => { uniforms[uniform.name] = uniform.value })
-	let frag;
 
-// In our new world, we do not declare uniforms in the fragment header.
-	// let utilityWgsl = [];
-	if (this.isWGSL) {
-		frag =`${Object.values(utilityWgsl).map((transform) => {
-  //  console.log(transform.glsl)
-    return `
-            ${transform.wgsl}
-          `
-  }).join('')}
-
- ${shaderInfo.glslFunctions.map((transform) => {
- 	if (this.isWGSL && transform.transform.strange) return '';
-    return `
-            ${transform.transform.wgsl}
-          `
-  }).join('')}
-
-  @fragment
-  	 fn main(ourIn: VertexOutput) -> @location(0) vec4<f32> {
-     let c : vec4<f32> = vec4<f32>(1.0, 0.0, 0.0, 1);
-     let st : vec2<f32> = ourIn.position.xy / resolution.xy;
-     return ${shaderInfo.fragColor};
-  }
-		`;
-	} else {
-// Old school glsl
-  frag = `
+  var frag = `
   precision ${this.defaultOutput.precision} float;
   ${Object.values(shaderInfo.uniforms).map((uniform) => {
     let type = uniform.type
@@ -132,10 +101,11 @@ GlslSource.prototype.compile = function (transforms) {
   void main () {
     vec2 st = gl_FragCoord.xy/resolution.xy;
 
-    gl_FragColor = ${shaderInfo.fragColor};
+    ${shaderInfo.fragColor}
+    gl_FragColor = c;
   }
   `
- }
+
   return {
     frag: frag,
     uniforms: Object.assign({}, this.defaultUniforms, uniforms)

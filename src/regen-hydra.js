@@ -1,7 +1,6 @@
 import HydraSource from "./hydra-source.js"
 import GlslSource from "./glsl-source.js"
 import Output from "./output.js"
-import {OutputWgsl} from "./wgsl/outputWgsl.js"
 
 function isObject (item) {
   return (typeof item === "object" && !Array.isArray(item) && item !== null);
@@ -53,7 +52,7 @@ class RegenHydra {
 							this.outs.push(a.label);
 							//this.outs.push(')');
 						} else
-							if (a instanceof GlslSource || a instanceof Output || a instanceof OutputWgsl) {
+							if (a instanceof GlslSource || a instanceof Output) {
 							this.depth++;
 							if(isArray(a.transforms))this.gen(a.transforms);
 							 else this.outs.push(a.label);
