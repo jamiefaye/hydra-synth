@@ -157,16 +157,56 @@ export function parseObj(objText, options = {}) {
   return vs
 }
 
+// Apply orientation correction to a VertexSource based on 'up' direction
+// glTF spec is Y-up, so we rotate to match that from other conventions
+function applyUpCorrection(vs, up) {
+  const PI = Math.PI
+  switch (up.toLowerCase()) {
+    case 'y':
+    case '+y':
+      // Already Y-up, no correction needed
+      return vs
+    case '-y':
+      // Upside down - rotate 180° around X
+      return vs.rotateX(PI)
+    case 'z':
+    case '+z':
+      // Z-up (Blender default) - rotate -90° around X
+      return vs.rotateX(-PI / 2)
+    case '-z':
+      // Negative Z-up - rotate 90° around X
+      return vs.rotateX(PI / 2)
+    case 'x':
+    case '+x':
+      // X-up - rotate 90° around Z
+      return vs.rotateZ(PI / 2)
+    case '-x':
+      // Negative X-up - rotate -90° around Z
+      return vs.rotateZ(-PI / 2)
+    default:
+      console.warn(`Unknown 'up' value: ${up}, using default Y-up`)
+      return vs
+  }
+}
+
 // Load OBJ file from URL and return Promise<VertexSource>
 // Options:
 //   swapYZ: swap Y and Z axes (for Z-up exports like Blender). Default: false (Y-up, WebGL standard)
+//   up: orientation correction - 'y' (default), '-y' (flip), 'z' (Blender), '-z', 'x', '-x'
+//       Note: 'up' is applied after swapYZ if both are specified
 export async function loadObj(url, options = {}) {
+  const { up = 'y', ...parseOptions } = options
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to load OBJ from ${url}: ${response.status} ${response.statusText}`)
   }
   const text = await response.text()
-  return parseObj(text, options)
+  let model = parseObj(text, parseOptions)
+
+  // Apply orientation correction based on 'up' option
+  model = applyUpCorrection(model, up)
+
+  return model
 }
 
 // ============================================================================
@@ -449,8 +489,9 @@ function extractMeshFromGltf(gltf, binBuffer, meshIndex, primitiveIndex) {
 //   meshIndex: which mesh to load (default 0)
 //   primitiveIndex: which primitive to load (default: all primitives combined)
 //   extractTextures: extract embedded textures (default: true)
+//   up: orientation correction - 'y' (default), '-y' (flip), 'z' (Blender), '-z', 'x', '-x'
 export async function loadGlb(url, options = {}) {
-  const { extractTextures = true, ...parseOptions } = options
+  const { extractTextures = true, up = 'y', ...parseOptions } = options
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to load GLB from ${url}: ${response.status} ${response.statusText}`)
@@ -459,7 +500,7 @@ export async function loadGlb(url, options = {}) {
   if (arrayBuffer.byteLength < 12) {
     throw new Error(`Invalid GLB file from ${url}: file too small (${arrayBuffer.byteLength} bytes)`)
   }
-  const model = parseGlb(arrayBuffer, parseOptions)
+  let model = parseGlb(arrayBuffer, parseOptions)
 
   // Attach embedded texture to model if available
   if (extractTextures) {
@@ -467,6 +508,9 @@ export async function loadGlb(url, options = {}) {
     model.texture = textures[0]?.image || null
     model.textures = textures.map(t => t.image)  // all textures if multiple
   }
+
+  // Apply orientation correction based on 'up' option
+  model = applyUpCorrection(model, up)
 
   return model
 }
