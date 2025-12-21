@@ -206,7 +206,18 @@ GlslSource.prototype.compile = function (transforms) {
 
   if (isWGSL) {
     // Generate WGSL fragment shader
-    frag = `${Object.values(utilityWgsl).map((transform) => {
+    // Module-scope private variables for varyings (accessible from all functions)
+    frag = `
+var<private> v_position: vec3<f32>;
+var<private> v_normal: vec3<f32>;
+var<private> v_worldNormal: vec3<f32>;
+var<private> v_tangent: vec3<f32>;
+var<private> v_bitangent: vec3<f32>;
+var<private> v_viewDir: vec3<f32>;
+var<private> v_depth: f32;
+var<private> v_color: vec4<f32>;
+
+${Object.values(utilityWgsl).map((transform) => {
       return `
             ${transform.wgsl}
           `
@@ -221,6 +232,15 @@ ${shaderInfo.glslFunctions.map((transform) => {
   fn main(ourIn: VertexOutput) -> @location(0) vec4<f32> {
     let c: vec4<f32> = vec4<f32>(1.0, 0.0, 0.0, 1.0);
     let st: vec2<f32> = ourIn.texcoord;
+    // Copy varyings to module-scope private variables
+    v_position = ourIn.v_position;
+    v_normal = ourIn.v_normal;
+    v_worldNormal = ourIn.v_worldNormal;
+    v_tangent = ourIn.v_tangent;
+    v_bitangent = ourIn.v_bitangent;
+    v_viewDir = ourIn.v_viewDir;
+    v_depth = ourIn.v_depth;
+    v_color = ourIn.v_color;
     return ${shaderInfo.fragColor};
   }
 `
