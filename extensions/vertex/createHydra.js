@@ -513,10 +513,38 @@ export async function createHydra({
       hydra.looper.stop()
       delete hydra.looper
     }
+    // WebGL cleanup
     if (hydra.regl) {
       hydra.regl.destroy()
       delete hydra.regl
     }
+    // WebGPU cleanup
+    if (hydra.wgslHydra) {
+      // Clear all sprite chains to release GPU buffers
+      for (let i = 0; i < hydra.wgslHydra.numChannels; i++) {
+        hydra.wgslHydra.clearSpriteChains?.(i)
+      }
+      // Destroy output textures
+      if (hydra.o) {
+        hydra.o.forEach(output => {
+          if (output.textures) {
+            output.textures.forEach(tex => tex?.destroy?.())
+          }
+        })
+      }
+      // Destroy depth texture if exists
+      if (hydra.wgslHydra.depthTexture) {
+        hydra.wgslHydra.depthTexture.destroy()
+        hydra.wgslHydra.depthTexture = null
+      }
+      delete hydra.wgslHydra
+    }
+    // Cleanup ResizeObserver
+    if (hydra._vertexResizeObserver) {
+      hydra._vertexResizeObserver.disconnect()
+      delete hydra._vertexResizeObserver
+    }
+    // Audio cleanup
     if (hydra.synth && hydra.synth.a && hydra.synth.a.destroy) {
       hydra.synth.a.destroy()
     }
