@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import path from 'path'
 
 // Get build target from environment or default to 'webgl'
-const target = process.env.VERTEX_TARGET || 'webgl'
+const target = process.env.EXT_TARGET || process.env.VERTEX_TARGET || 'webgl'
 
 const configs = {
   webgl: {
@@ -14,6 +14,11 @@ const configs = {
     entry: path.resolve(__dirname, 'extensions/vertex/index-webgpu.js'),
     name: 'HydraVertexExtensionWebGPU',
     fileName: (format) => `vertex-webgpu.${format}.js`
+  },
+  inact: {
+    entry: path.resolve(__dirname, 'extensions/inact/index.js'),
+    name: 'HydraInActExtension',
+    fileName: (format) => `inact.${format}.js`
   }
 }
 

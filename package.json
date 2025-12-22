@@ -22,6 +22,9 @@
     },
     "./extensions/vertex/webgpu": {
       "import": "./extensions/vertex/index-webgpu.js"
+    },
+    "./extensions/inact": {
+      "import": "./extensions/inact/index.js"
     }
   },
   "scripts": {
@@ -30,7 +33,9 @@
     "preview": "vite preview",
     "build:vertex": "npm run build:vertex-webgl && npm run build:vertex-webgpu",
     "build:vertex-webgl": "VERTEX_TARGET=webgl vite build --config vite.config.vertex.js",
-    "build:vertex-webgpu": "VERTEX_TARGET=webgpu vite build --config vite.config.vertex.js"
+    "build:vertex-webgpu": "VERTEX_TARGET=webgpu vite build --config vite.config.vertex.js",
+    "build:inact": "EXT_TARGET=inact vite build --config vite.config.vertex.js",
+    "build:extensions": "npm run build:vertex && npm run build:inact"
   },
   "dependencies": {
     "acorn": "^8.7.0",
