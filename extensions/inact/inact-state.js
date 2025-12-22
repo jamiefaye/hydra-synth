@@ -125,7 +125,6 @@ class InActState {
   }
 
   emit() {
-    console.log('[inact] emit:', this.statusObj.hasrecord, this.statusObj.hasplay, 'listeners:', this.listeners.length)
     this.listeners.forEach(cb => {
       try {
         cb(this.statusObj)

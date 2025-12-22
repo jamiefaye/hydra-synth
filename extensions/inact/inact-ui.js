@@ -183,8 +183,6 @@ class InActUI {
     this.container.id = 'inact-toolbar'
     document.body.appendChild(this.container)
 
-    // Watchdog: re-add toolbar if it gets removed from DOM
-    this.startWatchdog()
 
     // Recording section
     this.elements.recordDot = document.createElement('div')
@@ -258,12 +256,8 @@ class InActUI {
   // Update UI based on state
   update() {
     try {
-      if (!this.container) {
-        console.log('[inact] UI update skipped - no container')
-        return
-      }
+      if (!this.container) return
       const s = this.state.statusObj
-      console.log('[inact] UI update:', s.hasrecord, s.hasplay, 'elements:', Object.keys(this.elements).length)
 
     // Recording dot
     if (this.elements.recordDot) {
@@ -333,26 +327,8 @@ class InActUI {
     }
   }
 
-  // Watchdog to re-add toolbar if removed from DOM
-  startWatchdog() {
-    this.watchdogInterval = setInterval(() => {
-      if (this.container && !document.body.contains(this.container)) {
-        console.log('[inact] Toolbar was removed, re-adding...')
-        document.body.appendChild(this.container)
-      }
-    }, 500)
-  }
-
-  stopWatchdog() {
-    if (this.watchdogInterval) {
-      clearInterval(this.watchdogInterval)
-      this.watchdogInterval = null
-    }
-  }
-
   // Remove from DOM
   destroy() {
-    this.stopWatchdog()
     if (this.container && this.container.parentNode) {
       this.container.parentNode.removeChild(this.container)
     }

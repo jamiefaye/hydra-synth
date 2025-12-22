@@ -240,7 +240,6 @@ function hookEval() {
         if (cm) {
           const code = cm.getValue ? cm.getValue() : ''
           if (code && code.trim()) {
-            console.log('[inact] Recording sketch, length:', code.length)
             _inactState.pushSketch(code)
           }
         }
