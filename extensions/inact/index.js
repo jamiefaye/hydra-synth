@@ -100,6 +100,7 @@ export function install(hydra = null, options = {}) {
       load: () => _inactState.doLoad(),
       import: () => _inactState.doFileImport(),
       export: () => _inactState.doFileExport(),
+      loadURL: (url) => loadFromURL(url),
       toggle: () => _inactUI.toggle(),
       show: () => _inactUI.show(),
       hide: () => _inactUI.hide()
@@ -160,6 +161,33 @@ function updateAndEval(sketch, sketchInfo, what) {
     window.eval(jsString)
   } catch (err) {
     console.error('[inact] Direct eval failed:', err)
+  }
+}
+
+/**
+ * Load a recording from a remote URL
+ * @param {string} url - URL to fetch the recording from
+ * @returns {Promise} - Resolves when loaded
+ */
+async function loadFromURL(url) {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    const text = await response.text()
+    _inactState.loadPlayer(text)
+
+    // Extract filename from URL for display
+    const filename = url.split('/').pop() || 'remote'
+    _inactState.statusObj.filename = filename
+    _inactState.emit()
+
+    console.log(`[inact] Loaded ${_inactState.playA.length} sketches from ${filename}`)
+    return _inactState.playA.length
+  } catch (err) {
+    console.error('[inact] Failed to load URL:', err)
+    throw err
   }
 }
 
