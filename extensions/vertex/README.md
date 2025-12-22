@@ -4,21 +4,32 @@ Adds 3D vertex shader capabilities to [hydra-synth](https://hydra.ojack.xyz/), i
 
 ## Installation
 
+### Quick Start on hydra.ojack.xyz
+
+Paste this in the browser console to upgrade to WebGPU with 3D support:
+
+```javascript
+const ext = await import('https://www.fentonia.com/hydra-extensions/vertex-webgpu/index.js')
+await ext.replaceHydra()
+// Now use 3D features!
+osc(10).out(o0, sphere().perspective(60).rotateY(() => time))
+```
+
 ### WebGL Mode (works with vanilla hydra-synth)
 
 ```javascript
 // In hydra editor or your own setup
-await import('https://your-host.com/vertex/index.js')
+await import('https://www.fentonia.com/hydra-extensions/vertex/index.js')
   .then(m => m.install(window.hydraSynth))
 
 // Now use 3D features
 osc(10).out(o0, sphere().perspective(60).rotateY(() => time))
 ```
 
-### WebGPU Mode (experimental, better performance)
+### WebGPU Mode (better performance)
 
 ```javascript
-import { createHydra } from 'hydra-vertex-extension'
+import { createHydra } from 'https://www.fentonia.com/hydra-extensions/vertex-webgpu/index.js'
 
 const hydra = await createHydra({
   useWGSL: true,  // Enable WebGPU
@@ -59,6 +70,14 @@ loadGlb('https://example.com/model.glb').then(model => {
 // Load OBJ models
 loadObj('https://example.com/model.obj').then(model => {
   solid(1, 0, 0).out(o0, model.scale(0.5))
+})
+
+// Animated models with skeletal animation
+loadGlb('https://example.com/character.glb').then(model => {
+  osc(10).out(o0, model
+    .animate('Walk', () => time)  // Play animation by name
+    .rotateY(() => time * 0.5)
+    .perspective(45))
 })
 ```
 
@@ -146,6 +165,15 @@ Options:
 - `makeGlobal: boolean` - Expose functions globally (default: true)
 - `canvas: HTMLCanvasElement` - Custom canvas element
 - `detectAudio: boolean` - Enable audio reactivity
+
+### `replaceHydra(existingHydra?, options?)`
+
+Replaces an existing hydra instance with a WebGPU-enabled one. Useful for upgrading vanilla hydra (e.g., on hydra.ojack.xyz).
+
+```javascript
+const ext = await import('https://www.fentonia.com/hydra-extensions/vertex-webgpu/index.js')
+await ext.replaceHydra()  // Replaces window.hydraSynth
+```
 
 ## Browser Support
 
