@@ -250,7 +250,75 @@ class InActUI {
     // Initial update
     this.update()
 
+    // Watchdog: if our toolbar gets removed from DOM (e.g., by choo/nanomorph), rebuild it
+    this.watchInterval = setInterval(() => {
+      if (!document.getElementById('inact-toolbar')) {
+        this.rebuild()
+      }
+    }, 500)
+
     return this
+  }
+
+  // Rebuild toolbar after DOM removal
+  rebuild() {
+    this.container = document.createElement('div')
+    this.container.className = 'inact-toolbar fixed-top'
+    this.container.id = 'inact-toolbar'
+    document.body.appendChild(this.container)
+
+    this.elements.recordDot = document.createElement('div')
+    this.elements.recordDot.className = 'recording-dot'
+    this.elements.recordDot.style.display = 'none'
+    this.container.appendChild(this.elements.recordDot)
+
+    this.elements.clear = this.createIcon('fa-trash', 'Clear recording', () => this.state.doClear())
+    this.container.appendChild(this.elements.clear)
+
+    this.elements.import = this.createIcon('fa-download', 'Import recording', () => this.state.doFileImport())
+    this.container.appendChild(this.elements.import)
+
+    this.elements.export = this.createIcon('fa-upload', 'Export recording', () => this.state.doFileExport())
+    this.container.appendChild(this.elements.export)
+
+    this.elements.load = this.createIcon('fa-sync-alt', 'Load recording to player', () => this.state.doLoad())
+    this.container.appendChild(this.elements.load)
+
+    this.elements.mark = this.createIcon('fa-bookmark', 'Mark current position', () => this.state.doMark())
+    this.container.appendChild(this.elements.mark)
+
+    this.container.appendChild(this.createSeparator())
+
+    this.elements.fastBack = this.createIcon('fa-fast-backward', 'Jump to previous mark', (e) => this.state.doFastBackward(e))
+    this.container.appendChild(this.elements.fastBack)
+
+    this.elements.stepBack = this.createIcon('fa-step-backward', 'Step backward', (e) => this.state.doStepBackward(e))
+    this.container.appendChild(this.elements.stepBack)
+
+    this.elements.play = this.createIcon('fa-play', 'Play / Pause', (e) => this.state.doPlay(e), 'inact-play')
+    this.container.appendChild(this.elements.play)
+
+    this.elements.stepForward = this.createIcon('fa-step-forward', 'Step forward', (e) => this.state.doStepForward(e))
+    this.container.appendChild(this.elements.stepForward)
+
+    this.elements.fastForward = this.createIcon('fa-fast-forward', 'Jump to next mark', (e) => this.state.doFastForward(e))
+    this.container.appendChild(this.elements.fastForward)
+
+    this.container.appendChild(this.createSeparator())
+
+    this.elements.playerIndex = document.createElement('span')
+    this.elements.playerIndex.className = 'status'
+    this.container.appendChild(this.elements.playerIndex)
+
+    this.elements.countdown = document.createElement('span')
+    this.elements.countdown.className = 'countdown'
+    this.container.appendChild(this.elements.countdown)
+
+    this.elements.filename = document.createElement('span')
+    this.elements.filename.className = 'filename'
+    this.container.appendChild(this.elements.filename)
+
+    this.update()
   }
 
   // Update UI based on state
@@ -329,6 +397,10 @@ class InActUI {
 
   // Remove from DOM
   destroy() {
+    if (this.watchInterval) {
+      clearInterval(this.watchInterval)
+      this.watchInterval = null
+    }
     if (this.container && this.container.parentNode) {
       this.container.parentNode.removeChild(this.container)
     }
