@@ -332,6 +332,53 @@ export async function createHydra(options = {}) {
   return hydra
 }
 
+/**
+ * Replace an existing Hydra instance with a new WebGPU-enabled one
+ * Useful for upgrading vanilla hydra (e.g., on hydra.ojack.xyz) to WebGPU
+ *
+ * Usage:
+ *   const ext = await import('https://www.fentonia.com/hydra-extensions/vertex-webgpu/index.js')
+ *   await ext.replaceHydra()  // Replaces window.hydraSynth with WebGPU version
+ *   osc(10).out()  // Now running on WebGPU!
+ */
+export async function replaceHydra(existingHydra = null, options = {}) {
+  // Find existing hydra
+  const oldHydra = existingHydra || (typeof window !== 'undefined' ? window.hydraSynth : null)
+
+  // Stop existing animation loop
+  if (oldHydra?.looper) {
+    oldHydra.looper.stop()
+  }
+
+  // Find and replace the canvas (can't reuse WebGL canvas for WebGPU)
+  const oldCanvas = oldHydra?.canvas || document.querySelector('canvas')
+  if (!oldCanvas) {
+    throw new Error('No canvas found to replace')
+  }
+
+  const newCanvas = document.createElement('canvas')
+  newCanvas.width = oldCanvas.width
+  newCanvas.height = oldCanvas.height
+  newCanvas.style.cssText = oldCanvas.style.cssText
+  oldCanvas.replaceWith(newCanvas)
+
+  // Create new WebGPU hydra
+  const hydra = await createHydra({
+    canvas: newCanvas,
+    useWGSL: true,
+    makeGlobal: true,
+    ...options
+  })
+
+  // Update global reference
+  if (typeof window !== 'undefined') {
+    window.hydraSynth = hydra
+  }
+
+  console.log('[hydra-vertex-webgpu] Replaced hydra with WebGPU version')
+  return hydra
+}
+
 // Re-export everything for direct import
 export {
   tri, quad, poly, circle, line, ring,
