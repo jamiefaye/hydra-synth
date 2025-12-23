@@ -111,6 +111,12 @@ export function install(hydra, options = {}) {
     window.v = v
   }
 
+  // Register VertexSource for custom geometry creation
+  synth.VertexSource = VertexSource
+  if (typeof window !== 'undefined') {
+    window.VertexSource = VertexSource
+  }
+
   // Replace GlslSource prototype methods with vertex-shader branch versions
   patchGlslSource(hydra)
 
