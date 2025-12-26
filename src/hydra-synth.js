@@ -250,15 +250,17 @@ class HydraRenderer {
     this.regl = regl({
     //  profile: true,
       canvas: this.canvas,
-      pixelRatio: 1//,
-      // extensions: [
-      //   'oes_texture_half_float',
-      //   'oes_texture_half_float_linear'
-      // ],
+      pixelRatio: 1,
+      // Enable instancing extension for GPU instancing (grid/scatter)
+      extensions: [
+        'ANGLE_instanced_arrays'
+      ]
       // optionalExtensions: [
+      //   'oes_texture_half_float',
+      //   'oes_texture_half_float_linear',
       //   'oes_texture_float',
       //   'oes_texture_float_linear'
-     //]
+      // ]
    })
 
     // This clears the color buffer to black and the depth buffer to 1

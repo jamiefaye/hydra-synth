@@ -3,6 +3,38 @@
 // Then pass to out(): osc(10).out(o0, tri(0.3).rotate(0.5), 1)
 
 import { extractSkeletonFromGltf, extractAnimationsFromGltf, computeSkinningMatrices, applySkinning } from './geometry.js'
+import { parseShaderExpr } from '../../src/shader-expr/index.js'
+
+// Create a uniform accessor function that handles static values and lambdas
+function makeUniformAccessor(value) {
+  return (context, props) => {
+    // Handle array of values (may contain lambdas)
+    if (Array.isArray(value)) {
+      return value.map(v => typeof v === 'function' ? v() : v)
+    }
+    // Handle single lambda
+    if (typeof value === 'function') {
+      return value()
+    }
+    // Static value
+    return value
+  }
+}
+
+// Helper to check if a value is a shader expression (string) and get its GLSL
+function getAngleGlsl(value, uniformName, uniforms, uniformDecls, suffix) {
+  if (typeof value === 'string') {
+    // Shader expression - parse and return inline GLSL
+    const expr = parseShaderExpr(value)
+    if (expr) {
+      return expr.toGLSL()
+    }
+  }
+  // Number or function - use uniform
+  uniformDecls.push(`uniform float ${uniformName};`)
+  uniforms[uniformName] = makeUniformAccessor(value)
+  return uniformName
+}
 
 class VertexSource {
   constructor(vertices) {
@@ -10,6 +42,9 @@ class VertexSource {
     this.vertices = vertices
     // Accumulated transforms
     this.transforms = []
+    // GPU instancing data
+    this.instanceOffsets = null  // Float32Array of vec3 offsets
+    this.instanceCount = 0
   }
 
   // Get raw vertices (for backward compat or direct access)
@@ -132,8 +167,8 @@ class VertexSource {
     return this
   }
 
-  // 3D grid instancing with faceId support
-  // Creates a grid of copies, each with unique faceId for variation
+  // 3D grid instancing (GPU-accelerated)
+  // Creates a grid of instances without duplicating vertices
   // nx, ny, nz: number of copies in each direction
   // spacing: distance between copies (or {x, y, z} object)
   grid(nx = 2, ny = 2, nz = 1, spacing = 1.0) {
@@ -141,157 +176,59 @@ class VertexSource {
     const sy = typeof spacing === 'object' ? spacing.y || 1 : spacing
     const sz = typeof spacing === 'object' ? spacing.z || 1 : spacing
 
-    const orig = this.vertices
-    const stride = this.is3D ? 3 : 2
-    const vertexCount = orig.length / stride
+    const count = nx * ny * nz
 
-    // Safety check: limit total vertices to prevent browser crash
-    const maxVertices = 5000000  // 5 million vertex limit
-    const totalInstances = nx * ny * nz
-    const totalVertices = vertexCount * totalInstances
-    if (totalVertices > maxVertices) {
-      const maxInstances = Math.floor(maxVertices / vertexCount)
-      const scale = Math.cbrt(maxInstances / totalInstances)
-      const newNx = Math.max(1, Math.floor(nx * scale))
-      const newNy = Math.max(1, Math.floor(ny * scale))
-      const newNz = Math.max(1, Math.floor(nz * scale))
-      console.warn(`grid(${nx}, ${ny}, ${nz}) would create ${totalVertices.toLocaleString()} vertices. ` +
-        `Limiting to grid(${newNx}, ${newNy}, ${newNz}) to prevent crash. ` +
-        `Use lower-poly geometry (e.g., sphere(0.1, 8, 4)) for large grids.`)
-      nx = newNx
-      ny = newNy
-      nz = newNz
-    }
-
-    const newVerts = []
-    const newNormals = this.normals ? [] : null
-    const newUVs = this.uvs ? [] : null
-    const newColors = this.colors ? [] : null
-    const newFaceIds = []
+    // Store instance offsets for GPU instancing (vec3 per instance)
+    this.instanceOffsets = new Float32Array(count * 3)
 
     // Center the grid
     const offsetX = -((nx - 1) * sx) / 2
     const offsetY = -((ny - 1) * sy) / 2
     const offsetZ = -((nz - 1) * sz) / 2
 
-    let instanceId = 0
+    let idx = 0
     for (let iz = 0; iz < nz; iz++) {
       for (let iy = 0; iy < ny; iy++) {
         for (let ix = 0; ix < nx; ix++) {
-          const dx = offsetX + ix * sx
-          const dy = offsetY + iy * sy
-          const dz = offsetZ + iz * sz
-
-          // Copy all vertices with offset
-          for (let v = 0; v < vertexCount; v++) {
-            const vi = v * stride
-            newVerts.push(orig[vi] + dx, orig[vi + 1] + dy)
-            if (stride === 3) newVerts.push(orig[vi + 2] + dz)
-
-            // Copy normals (unchanged by translation)
-            if (this.normals) {
-              const ni = v * 3
-              newNormals.push(this.normals[ni], this.normals[ni + 1], this.normals[ni + 2])
-            }
-
-            // Copy UVs (unchanged)
-            if (this.uvs) {
-              const ui = v * 2
-              newUVs.push(this.uvs[ui], this.uvs[ui + 1])
-            }
-
-            // Copy colors (unchanged)
-            if (this.colors) {
-              const ci = v * 4
-              newColors.push(this.colors[ci], this.colors[ci + 1], this.colors[ci + 2], this.colors[ci + 3])
-            }
-
-            // FaceId = instance index (for per-instance variation)
-            newFaceIds.push(instanceId)
-          }
-          instanceId++
+          this.instanceOffsets[idx++] = offsetX + ix * sx
+          this.instanceOffsets[idx++] = offsetY + iy * sy
+          this.instanceOffsets[idx++] = offsetZ + iz * sz
         }
       }
     }
 
-    this.vertices = newVerts
-    if (newNormals) this.normals = newNormals
-    if (newUVs) this.uvs = newUVs
-    if (newColors) this.colors = newColors
-    this.faceIds = newFaceIds
-    this.instanceCount = nx * ny * nz
-
+    this.instanceCount = count
     return this
   }
 
-  // Scatter instances randomly
+  // Scatter instances randomly (GPU-accelerated)
+  // Creates random instance offsets without duplicating vertices
   // count: number of instances
   // range: {x, y, z} spread range (centered at origin)
   // seed: optional random seed for reproducibility
   scatter(count = 10, range = { x: 2, y: 2, z: 0 }, seed = 0) {
     // Simple seeded random
+    let s = seed
     const random = () => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff
-      return seed / 0x7fffffff
+      s = (s * 1103515245 + 12345) & 0x7fffffff
+      return s / 0x7fffffff
     }
 
-    const orig = this.vertices
-    const stride = this.is3D ? 3 : 2
-    const vertexCount = orig.length / stride
+    const rx = typeof range === 'number' ? range : (range.x || 2)
+    const ry = typeof range === 'number' ? range : (range.y || 2)
+    const rz = typeof range === 'number' ? 0 : (range.z || 0)
 
-    // Safety check: limit total vertices to prevent browser crash
-    const maxVertices = 5000000  // 5 million vertex limit
-    const totalVertices = vertexCount * count
-    if (totalVertices > maxVertices) {
-      const newCount = Math.floor(maxVertices / vertexCount)
-      console.warn(`scatter(${count}) would create ${totalVertices.toLocaleString()} vertices. ` +
-        `Limiting to scatter(${newCount}) to prevent crash. ` +
-        `Use lower-poly geometry for large scatter counts.`)
-      count = newCount
-    }
+    // Store instance offsets for GPU instancing (vec3 per instance)
+    this.instanceOffsets = new Float32Array(count * 3)
 
-    const newVerts = []
-    const newNormals = this.normals ? [] : null
-    const newUVs = this.uvs ? [] : null
-    const newColors = this.colors ? [] : null
-    const newFaceIds = []
-
+    let idx = 0
     for (let i = 0; i < count; i++) {
-      const dx = (random() - 0.5) * range.x
-      const dy = (random() - 0.5) * range.y
-      const dz = (random() - 0.5) * (range.z || 0)
-
-      for (let v = 0; v < vertexCount; v++) {
-        const vi = v * stride
-        newVerts.push(orig[vi] + dx, orig[vi + 1] + dy)
-        if (stride === 3) newVerts.push(orig[vi + 2] + dz)
-
-        if (this.normals) {
-          const ni = v * 3
-          newNormals.push(this.normals[ni], this.normals[ni + 1], this.normals[ni + 2])
-        }
-
-        if (this.uvs) {
-          const ui = v * 2
-          newUVs.push(this.uvs[ui], this.uvs[ui + 1])
-        }
-
-        if (this.colors) {
-          const ci = v * 4
-          newColors.push(this.colors[ci], this.colors[ci + 1], this.colors[ci + 2], this.colors[ci + 3])
-        }
-
-        newFaceIds.push(i)
-      }
+      this.instanceOffsets[idx++] = (random() - 0.5) * rx
+      this.instanceOffsets[idx++] = (random() - 0.5) * ry
+      this.instanceOffsets[idx++] = (random() - 0.5) * rz
     }
 
-    this.vertices = newVerts
-    if (newNormals) this.normals = newNormals
-    if (newUVs) this.uvs = newUVs
-    if (newColors) this.colors = newColors
-    this.faceIds = newFaceIds
     this.instanceCount = count
-
     return this
   }
 
@@ -362,9 +299,9 @@ class VertexSource {
 
 // Generate vertex shader GLSL from transforms
 // Returns { glsl: string, uniforms: object }
-// Options: { useExplicitUVs: boolean, useFaceIds: boolean, useNormals: boolean, useTangents: boolean, useColors: boolean }
+// Options: { useExplicitUVs: boolean, useFaceIds: boolean, useNormals: boolean, useTangents: boolean, useColors: boolean, useInstancing: boolean }
 export function generateVertexGlsl(vertexSource, precision, options = {}) {
-  const { useExplicitUVs = false, useFaceIds = false, useNormals = false, useTangents = false, useColors = false } = options
+  const { useExplicitUVs = false, useFaceIds = false, useNormals = false, useTangents = false, useColors = false, useInstancing = false } = options
 
   // UV source code - either from attribute or computed from bounds
   const uvAttributeDecl = useExplicitUVs ? 'attribute vec2 texcoord;' : ''
@@ -388,17 +325,27 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
   const colorAttributeDecl = useColors ? 'attribute vec4 color;' : ''
   const colorPassthrough = useColors ? 'v_color = color;' : 'v_color = vec4(1.0, 1.0, 1.0, 1.0);'
 
+  // GPU instancing - per-instance offset and ID attributes, plus instance ID varying
+  // Note: WebGL 1 doesn't have gl_InstanceID, so we pass it as an attribute
+  const instanceAttributeDecl = useInstancing ? 'attribute vec3 instanceOffset;\nattribute float instanceId;' : ''
+  const instanceIdVaryingDecl = 'varying float v_instanceId;'  // Always declare for fragment shader compatibility
+  const instanceIdPassthrough = useInstancing ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
+  const instanceOffsetCode = useInstancing ? 'pos += instanceOffset;' : ''
+
   if (!vertexSource.hasTransforms) {
     // No transforms - use simple passthrough with bounds
+    // Still need to handle instancing if enabled
     return {
       glsl: `
         precision ${precision} float;
         attribute vec3 position;
+        ${instanceAttributeDecl}
         ${uvAttributeDecl}
         ${faceIdAttributeDecl}
         ${colorAttributeDecl}
         varying vec2 uv;
         ${faceIdVaryingDecl}
+        ${instanceIdVaryingDecl}
 
         // Vertex data for fragment shader (default values for 2D)
         varying vec3 v_position;
@@ -418,9 +365,14 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
           ${uvComputation}
           ${faceIdPassthrough}
           ${colorPassthrough}
+          ${instanceIdPassthrough}
+
+          // Apply instance offset if instancing is enabled
+          vec3 pos = position;
+          ${instanceOffsetCode}
 
           // Set default vertex data for 2D geometry
-          v_position = vec3(position.xy, 0.0);
+          v_position = pos;
           v_normal = vec3(0.0, 0.0, 1.0);
           v_worldNormal = vec3(0.0, 0.0, 1.0);
           v_tangent = vec3(1.0, 0.0, 0.0);
@@ -428,7 +380,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
           v_viewDir = vec3(0.0, 0.0, 1.0);
           v_depth = 1.0;
 
-          gl_Position = vec4(position.xy, 0.0, 1.0);
+          gl_Position = vec4(pos.xy, 0.0, 1.0);
           gl_PointSize = 2.0;
         }
       `,
@@ -458,36 +410,35 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     switch (transform.type) {
       case 'rotate': {
         const uniformName = `u_rotate_${suffix}`
-        uniformDecls.push(`uniform float ${uniformName};`)
-        uniforms[uniformName] = makeUniformAccessor(transform.args.angle)
+        const angleGlsl = getAngleGlsl(transform.args.angle, uniformName, uniforms, uniformDecls, suffix)
         if (has3D) {
           // 2D rotate = rotate around Z axis
           const rotateCode = `
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec3(pos.x * c - pos.y * s, pos.x * s + pos.y * c, pos.z);
           }`
           transformCode.push(rotateCode)
           // Apply same rotation to normal (using nrm variable)
           normalTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             nrm = vec3(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c, nrm.z);
           }`)
           // Apply same rotation to tangent
           tangentTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             tang = vec3(tang.x * c - tang.y * s, tang.x * s + tang.y * c, tang.z);
           }`)
         } else {
           transformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
           }`)
         }
@@ -496,26 +447,25 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
       case 'rotateX': {
         const uniformName = `u_rotateX_${suffix}`
-        uniformDecls.push(`uniform float ${uniformName};`)
-        uniforms[uniformName] = makeUniformAccessor(transform.args.angle)
+        const angleGlsl = getAngleGlsl(transform.args.angle, uniformName, uniforms, uniformDecls, suffix)
         transformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec3(pos.x, pos.y * c - pos.z * s, pos.y * s + pos.z * c);
           }`)
         // Apply same rotation to normal
         normalTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             nrm = vec3(nrm.x, nrm.y * c - nrm.z * s, nrm.y * s + nrm.z * c);
           }`)
         // Apply same rotation to tangent
         tangentTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             tang = vec3(tang.x, tang.y * c - tang.z * s, tang.y * s + tang.z * c);
           }`)
         break
@@ -523,26 +473,25 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
       case 'rotateY': {
         const uniformName = `u_rotateY_${suffix}`
-        uniformDecls.push(`uniform float ${uniformName};`)
-        uniforms[uniformName] = makeUniformAccessor(transform.args.angle)
+        const angleGlsl = getAngleGlsl(transform.args.angle, uniformName, uniforms, uniformDecls, suffix)
         transformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec3(pos.x * c + pos.z * s, pos.y, -pos.x * s + pos.z * c);
           }`)
         // Apply same rotation to normal
         normalTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             nrm = vec3(nrm.x * c + nrm.z * s, nrm.y, -nrm.x * s + nrm.z * c);
           }`)
         // Apply same rotation to tangent
         tangentTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             tang = vec3(tang.x * c + tang.z * s, tang.y, -tang.x * s + tang.z * c);
           }`)
         break
@@ -550,26 +499,25 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
       case 'rotateZ': {
         const uniformName = `u_rotateZ_${suffix}`
-        uniformDecls.push(`uniform float ${uniformName};`)
-        uniforms[uniformName] = makeUniformAccessor(transform.args.angle)
+        const angleGlsl = getAngleGlsl(transform.args.angle, uniformName, uniforms, uniformDecls, suffix)
         transformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec3(pos.x * c - pos.y * s, pos.x * s + pos.y * c, pos.z);
           }`)
         // Apply same rotation to normal
         normalTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             nrm = vec3(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c, nrm.z);
           }`)
         // Apply same rotation to tangent
         tangentTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             tang = vec3(tang.x * c - tang.y * s, tang.x * s + tang.y * c, tang.z);
           }`)
         break
@@ -675,6 +623,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     glsl = `
     precision ${precision} float;
     attribute vec3 position;
+    ${instanceAttributeDecl}
     ${uvAttributeDecl}
     ${faceIdAttributeDecl}
     ${normalAttributeDecl}
@@ -682,6 +631,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     ${colorAttributeDecl}
     varying vec2 uv;
     ${faceIdVaryingDecl}
+    ${instanceIdVaryingDecl}
 
     // Vertex data for fragment shader
     varying vec3 v_position;
@@ -693,6 +643,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     varying float v_depth;
     varying vec4 v_color;
 
+    uniform float time;
     uniform vec2 resolution;
     uniform vec2 u_boundsMin;
     uniform vec2 u_boundsMax;
@@ -703,9 +654,11 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${uvComputation}
       ${faceIdPassthrough}
       ${colorPassthrough}
+      ${instanceIdPassthrough}
 
       // Apply transforms (3D)
       vec3 pos = position;
+      ${instanceOffsetCode}
       ${transformCode.join('\n      ')}
 
       // Compute vertex data for fragment shader
@@ -739,11 +692,13 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     glsl = `
     precision ${precision} float;
     attribute vec3 position;
+    ${instanceAttributeDecl}
     ${uvAttributeDecl}
     ${faceIdAttributeDecl}
     ${colorAttributeDecl}
     varying vec2 uv;
     ${faceIdVaryingDecl}
+    ${instanceIdVaryingDecl}
 
     // Vertex data for fragment shader (default values for 2D)
     varying vec3 v_position;
@@ -755,6 +710,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     varying float v_depth;
     varying vec4 v_color;
 
+    uniform float time;
     uniform vec2 u_boundsMin;
     uniform vec2 u_boundsMax;
     ${uniformDecls.join('\n    ')}
@@ -764,9 +720,11 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${uvComputation}
       ${faceIdPassthrough}
       ${colorPassthrough}
+      ${instanceIdPassthrough}
 
       // Apply transforms (2D)
       vec2 pos = position.xy;
+      ${useInstancing ? 'pos += instanceOffset.xy;' : ''}
       ${transformCode.join('\n      ')}
 
       // Set default vertex data for 2D geometry
@@ -785,22 +743,6 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
   }
 
   return { glsl, uniforms }
-}
-
-// Create a uniform accessor function that handles static values and lambdas
-function makeUniformAccessor(value) {
-  return (context, props) => {
-    // Handle array of values (may contain lambdas)
-    if (Array.isArray(value)) {
-      return value.map(v => typeof v === 'function' ? v() : v)
-    }
-    // Handle single lambda
-    if (typeof value === 'function') {
-      return value()
-    }
-    // Static value
-    return value
-  }
 }
 
 // Generate WGSL vertex shader from transforms

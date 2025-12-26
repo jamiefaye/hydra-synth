@@ -277,6 +277,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
   uniform vec2 resolution;
   varying vec2 uv;
   varying float v_faceId;
+  varying float v_instanceId;
 
   // Vertex data from vertex shader (for 3D geometry)
   varying vec3 v_position;

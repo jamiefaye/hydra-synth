@@ -275,7 +275,8 @@ export async function createHydra({
     hydra.regl = regl({
       canvas: hydra.canvas,
       pixelRatio: 1,
-      attributes: { preserveDrawingBuffer }
+      attributes: { preserveDrawingBuffer },
+      extensions: ['ANGLE_instanced_arrays']
     })
 
     hydra.regl.clear({ color: [0, 0, 0, 1] })
@@ -423,7 +424,8 @@ export async function createHydra({
     hydra.regl = regl({
       canvas: hydra.canvas,
       pixelRatio: 1,
-      attributes: { preserveDrawingBuffer: hydra.preserveDrawingBuffer }
+      attributes: { preserveDrawingBuffer: hydra.preserveDrawingBuffer },
+      extensions: ['ANGLE_instanced_arrays']
     })
     hydra.regl.clear({ color: [0, 0, 0, 1] })
 

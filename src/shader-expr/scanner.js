@@ -92,10 +92,10 @@ export function scanExpression(ast, source) {
     if (unknown.name === 'uv') suggestion = " Did you mean '_st' or '_v.uv'?"
     if (unknown.name === 'c0') suggestion = " Did you mean '_c0'?"
     if (unknown.name === 'v') suggestion = " Did you mean '_v.position', '_v.normal', etc?"
-    if (unknown.name === 'ix' || unknown.name === 'i') suggestion = " Instance index '_ix' is not yet implemented."
+    if (unknown.name === 'ix' || unknown.name === 'i') suggestion = " Did you mean '_ix' (instance index)?"
 
     throw new ShaderExprError(
-      `Unknown variable '${unknown.name}'.${suggestion} Shader expressions can reference: _st, _c0, _v.*, time, resolution, mouse`,
+      `Unknown variable '${unknown.name}'.${suggestion} Shader expressions can reference: _st, _c0, _v.*, _ix, time, resolution, mouse`,
       source,
       unknown.start
     )

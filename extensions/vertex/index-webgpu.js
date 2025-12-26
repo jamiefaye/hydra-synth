@@ -220,6 +220,7 @@ function patchOutput(hydra) {
     attribute vec3 position;
     varying vec2 uv;
     varying float v_faceId;
+    varying float v_instanceId;
 
     varying vec3 v_position;
     varying vec3 v_normal;
@@ -232,6 +233,7 @@ function patchOutput(hydra) {
     void main () {
       uv = position.xy;
       v_faceId = 0.0;
+      v_instanceId = 0.0;
 
       v_position = vec3(position.xy * 2.0 - 1.0, 0.0);
       v_normal = vec3(0.0, 0.0, 1.0);

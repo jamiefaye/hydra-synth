@@ -46,9 +46,9 @@ function looksLikeExpression(value) {
   // Must contain something that looks like an expression:
   // - operators
   // - function calls
-  // - reserved variables
+  // - reserved variables (including _ix for instance index)
   // - swizzle patterns
-  return /[+\-*/%()<>?:]|_st|_c0|_v\.|time|resolution|mouse|sin|cos|pow|mix|vec[234]/.test(value)
+  return /[+\-*/%()<>?:]|_st|_c0|_v\.|_ix|time|resolution|mouse|sin|cos|pow|mix|vec[234]/.test(value)
 }
 
 // Parse a value as a shader expression if it's a string that looks like one

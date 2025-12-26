@@ -6,6 +6,9 @@ export const RESERVED_VARS = {
   '_st': { level: 'fragment', glsl: 'st' },
   '_c0': { level: 'fragment', glsl: '_c0' },
 
+  // Instance-level (per-instance, same for all vertices of an instance) - requires vertex extension with GPU instancing
+  '_ix': { level: 'instance', glsl: 'v_instanceId' },
+
   // Vertex-level (interpolated to fragment) - requires vertex extension
   '_v': { level: 'vertex', glsl: 'v_', isPrefix: true },
 
@@ -26,14 +29,16 @@ export const VERTEX_VARYINGS = {
   'depth': 'v_depth',
   'uv': 'uv',
   'faceId': 'v_faceId',
-  'color': 'v_color'
+  'color': 'v_color',
+  'instanceId': 'v_instanceId'
 }
 
 // Level hierarchy - higher number = more specific execution context
 export const LEVEL_PRIORITY = {
   'uniform': 0,   // runs once per frame
-  'vertex': 1,    // runs per vertex, interpolated to fragment
-  'fragment': 2   // runs per pixel
+  'instance': 1,  // runs per instance (GPU instancing)
+  'vertex': 2,    // runs per vertex, interpolated to fragment
+  'fragment': 3   // runs per pixel
 }
 
 // Math functions allowed in expressions (maps to GLSL builtins)
