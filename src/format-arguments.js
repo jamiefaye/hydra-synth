@@ -1,4 +1,5 @@
 import arrayUtils from './lib/array-utils.js'
+import { parseShaderExpr } from './shader-expr/index.js'
 
 // [WIP] how to treat different dimensions (?)
 const DEFAULT_CONVERSIONS = {
@@ -98,6 +99,14 @@ export default function formatArguments(transform, startIndex, synthContext) {
         typedArg.value = (context, props, batchId) => arrayUtils.getValue(userArgs[index])(props)
         typedArg.isUniform = true
         // }
+      } else if (typeof userArgs[index] === 'string') {
+        // Shader expression - parse string to GLSL
+        const expr = parseShaderExpr(userArgs[index])
+        if (expr) {
+          typedArg.value = expr
+          typedArg.isShaderExpr = true
+          typedArg.isUniform = false
+        }
       }
     }
 

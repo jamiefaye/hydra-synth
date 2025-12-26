@@ -86,6 +86,9 @@ function shaderString (uv, method, inputs, shaderParams) {
     } else if (input.isVaryingRef && isVaryingRef(input.value)) {
       // Varying reference from v proxy (e.g., v.normal.z)
       return getVaryingString(input.value, false)
+    } else if (input.isShaderExpr) {
+      // Shader expression - emit as GLSL (or WGSL in future)
+      return shaderParams.wgsl ? input.value.toWGSL() : input.value.toGLSL()
     } else if (input.value && input.value.transforms) {
       // this by definition needs to be a generator, hence we start with 'st' as the initial value for generating the glsl fragment
       const srcCode = `${generateGlsl(input.value.transforms, shaderParams)('st')}`

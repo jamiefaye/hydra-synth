@@ -90,6 +90,9 @@ function shaderString (uv, method, inputs, shaderParams) {
   const str = inputs.map((input) => {
     if (input.isUniform) {
       return shaderParams.wgsl ? 'uf.' + input.name : input.name // 'uf.' needed for value struct in wgsl.
+    } else if (input.isShaderExpr) {
+      // Shader expression - emit as GLSL (or WGSL in future)
+      return shaderParams.wgsl ? input.value.toWGSL() : input.value.toGLSL()
     } else if (input.value && input.value.transforms) {
       // this by definition needs to be a generator, hence we start with 'st' as the initial value for generating the glsl fragment
       return `${generateGlsl(input.value.transforms, shaderParams)('st')}`
