@@ -657,7 +657,7 @@ class wgslHydra {
 				}],
 			},
 			primitive: {
-				topology: "triangle-list",
+				topology: primitive === 'lines' ? 'line-list' : 'triangle-list',
 			},
 		};
 
@@ -1106,8 +1106,9 @@ class wgslHydra {
 		// Create a master command encoder.
     const commandEncoder = this.device.createCommandEncoder();
 
-		// Setup the universal uniforms
-		this.timeUniformValues[0] = this.time += (dT / 1000.0);
+		// Setup the universal uniforms (dT is actually absolute time from hydra.synth.time)
+		this.time = dT;
+		this.timeUniformValues[0] = this.time;
    	this.device.queue.writeBuffer(this.timeUniformBuffer, 0, this.timeUniformValues);
 
 		this.resolutionUniformValues[0] = this.canvas.width;

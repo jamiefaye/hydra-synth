@@ -298,8 +298,8 @@ class VertexSource {
     }
 
     // Handle different input formats
-    if (Array.isArray(data)) {
-      // Simple array of positions
+    if (Array.isArray(data) || data instanceof Float32Array) {
+      // Simple array of positions (or Float32Array)
       this.instancePositions = flatten(data, 3)
       this.instanceCount = this.instancePositions.length / 3
     } else if (typeof data === 'object') {
@@ -677,17 +677,25 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       }
 
       case 'offset': {
-        const uniformName = `u_offset_${suffix}`
+        // Support shader expressions for each component
+        const getOffsetGlsl = (val, name) => {
+          if (typeof val === 'string') {
+            const expr = parseShaderExpr(val)
+            if (expr) return expr.toGLSL()
+          }
+          uniformDecls.push(`uniform float ${name};`)
+          uniforms[name] = makeUniformAccessor(val)
+          return name
+        }
+        const ox = getOffsetGlsl(transform.args.x, `u_offsetX_${suffix}`)
+        const oy = getOffsetGlsl(transform.args.y, `u_offsetY_${suffix}`)
         if (has3D) {
-          uniformDecls.push(`uniform vec3 ${uniformName};`)
-          uniforms[uniformName] = makeUniformAccessor([transform.args.x, transform.args.y, transform.args.z || 0])
+          const oz = getOffsetGlsl(transform.args.z || 0, `u_offsetZ_${suffix}`)
           transformCode.push(`
-          pos += ${uniformName};`)
+          pos += vec3(${ox}, ${oy}, ${oz});`)
         } else {
-          uniformDecls.push(`uniform vec2 ${uniformName};`)
-          uniforms[uniformName] = makeUniformAccessor([transform.args.x, transform.args.y])
           transformCode.push(`
-          pos += ${uniformName};`)
+          pos += vec2(${ox}, ${oy});`)
         }
         break
       }
@@ -1050,14 +1058,25 @@ export function generateVertexWgsl(vertexSource, options = {}) {
         }
 
         case 'offset': {
-          const uniformName = `u_offset_${suffix}`
-          if (has3D) {
-            uniforms.push({ name: uniformName, type: 'vec3f', value: [transform.args.x, transform.args.y, transform.args.z || 0] })
-          } else {
-            uniforms.push({ name: uniformName, type: 'vec2f', value: [transform.args.x, transform.args.y] })
+          // Support shader expressions for each component
+          const getOffsetWgsl = (val, name) => {
+            if (typeof val === 'string') {
+              const expr = parseShaderExpr(val)
+              if (expr) return expr.toWGSL()
+            }
+            uniforms.push({ name, type: 'f32', value: val })
+            return `vtx.${name}`
           }
-          transformCode.push(`
-      pos += vtx.${uniformName};`)
+          const ox = getOffsetWgsl(transform.args.x, `u_offsetX_${suffix}`)
+          const oy = getOffsetWgsl(transform.args.y, `u_offsetY_${suffix}`)
+          if (has3D) {
+            const oz = getOffsetWgsl(transform.args.z || 0, `u_offsetZ_${suffix}`)
+            transformCode.push(`
+      pos += vec3f(${ox}, ${oy}, ${oz});`)
+          } else {
+            transformCode.push(`
+      pos += vec2f(${ox}, ${oy});`)
+          }
           break
         }
 
@@ -1296,11 +1315,34 @@ ${transformCode.join('\n')}
 }
 `
   } else {
-    // For 2D with instancing, we need vec3 internally for 3D rotations
-    const use3DPos = useInstancing || useInstanceRotation || useInstanceScale
+    // For 2D with instancing or perspective, we need vec3 internally
+    const use3DPos = useInstancing || useInstanceRotation || useInstanceScale || hasPerspective
     const posInit = use3DPos ? 'var pos = input.position;' : 'var pos = input.position.xy;'
-    const finalPos = use3DPos ? 'output.position = vec4f(pos.xy, 0.0, 1.0);' : 'output.position = vec4f(pos, 0.0, 1.0);'
     const v_position = use3DPos ? 'output.v_position = pos;' : 'output.v_position = vec3f(pos, 0.0);'
+
+    // Projection code - handle perspective for 2D geometry with Z transforms
+    const projectionCode = hasPerspective ? `
+      // Perspective projection for 2D geometry with Z
+      let fov = vtx.${perspectiveUniform}.x;
+      let near = vtx.${perspectiveUniform}.y;
+      let far = vtx.${perspectiveUniform}.z;
+      let f = 1.0 / tan(radians(fov) / 2.0);
+      let aspect = resolution.x / resolution.y;
+      let rangeInv = 1.0 / (near - far);
+
+      // Move camera back
+      pos.z -= 2.0;
+
+      // Apply perspective
+      let w = -pos.z;
+      output.position = vec4f(
+        pos.x * f / aspect,
+        pos.y * f,
+        (pos.z * (near + far) + 2.0 * near * far) * rangeInv,
+        w
+      );` : (use3DPos
+        ? 'output.position = vec4f(pos.xy, pos.z * 0.1, 1.0);'
+        : 'output.position = vec4f(pos, 0.0, 1.0);')
 
     wgsl = `struct VertexInput {
 ${inputFields.join('\n')}
@@ -1344,7 +1386,7 @@ ${transformCode.join('\n')}
   output.v_viewDir = vec3f(0.0, 0.0, 1.0);  // Looking at camera
   output.v_depth = 1.0;
 
-  ${finalPos}
+  ${projectionCode}
   return output;
 }
 `
