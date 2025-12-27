@@ -256,6 +256,8 @@ ${shaderInfo.glslFunctions.map((transform) => {
     v_viewDir = ourIn.v_viewDir;
     v_depth = ourIn.v_depth;
     v_color = ourIn.v_color;
+    // Define _ix for shader expressions (instance index)
+    let _ix = ourIn.v_instanceId;
     return ${shaderInfo.fragColor};
   }
 `

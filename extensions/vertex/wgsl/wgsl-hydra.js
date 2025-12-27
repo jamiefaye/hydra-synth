@@ -27,6 +27,7 @@ const vertexPrefix = `
   	@location(7) v_viewDir : vec3f,
   	@location(8) v_depth : f32,
   	@location(9) v_color : vec4f,
+  	@location(10) v_instanceId : f32,
 	 };
 `;
 
@@ -68,6 +69,7 @@ const fragPrefix = `
      output.v_viewDir = vec3f(0.0, 0.0, 1.0);
      output.v_depth = 1.0;
      output.v_color = vec4f(1.0, 1.0, 1.0, 1.0);
+     output.v_instanceId = 0.0;
 
      return output;
     }
@@ -470,7 +472,9 @@ class wgslHydra {
 	async setupSpriteChain(chan, spriteLevel, config) {
 		if (trace) console.timeStamp("setupSpriteChain");
 		const { uniforms, fragShader, vertexWgsl, vertexUniforms, rawVerts, blendMode, primitive, has3D,
-			hasExplicitUVs, hasFaceIds, hasNormals, hasTangents, hasColors, uvs, faceIds, normals, tangents, colors, sprite, animation } = config;
+			hasExplicitUVs, hasFaceIds, hasNormals, hasTangents, hasColors, uvs, faceIds, normals, tangents, colors,
+			hasInstancing, hasInstanceRotation, hasInstanceScale, instanceCount, instancePositions, instanceRotations, instanceScales,
+			sprite, animation } = config;
 
 		const rpe = this.renderPassInfo[chan];
 		rpe.outputObject = this.outputChannelObjects[chan];
@@ -492,6 +496,10 @@ class wgslHydra {
 		spe.hasNormals = hasNormals || false;
 		spe.hasTangents = hasTangents || false;
 		spe.hasColors = hasColors || false;
+		spe.hasInstancing = hasInstancing || false;
+		spe.hasInstanceRotation = hasInstanceRotation || false;
+		spe.hasInstanceScale = hasInstanceScale || false;
+		spe.instanceCount = instanceCount || 1;
 		spe.sprite = sprite || null;
 		spe.animation = animation || null;
 
@@ -580,6 +588,36 @@ class wgslHydra {
 					usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
 				});
 				this.device.queue.writeBuffer(spe.colorBuffer, 0, colorData);
+			}
+
+			// Create instance offset buffer if instancing enabled
+			if (spe.hasInstancing && instancePositions && instancePositions.length > 0) {
+				spe.instanceOffsetBuffer = this.device.createBuffer({
+					label: `instanceOffsetBuf_c${chan}_s${spriteLevel}`,
+					size: instancePositions.byteLength,
+					usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+				});
+				this.device.queue.writeBuffer(spe.instanceOffsetBuffer, 0, instancePositions);
+			}
+
+			// Create instance rotation buffer if per-instance rotations provided
+			if (spe.hasInstanceRotation && instanceRotations && instanceRotations.length > 0) {
+				spe.instanceRotationBuffer = this.device.createBuffer({
+					label: `instanceRotationBuf_c${chan}_s${spriteLevel}`,
+					size: instanceRotations.byteLength,
+					usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+				});
+				this.device.queue.writeBuffer(spe.instanceRotationBuffer, 0, instanceRotations);
+			}
+
+			// Create instance scale buffer if per-instance scales provided
+			if (spe.hasInstanceScale && instanceScales && instanceScales.length > 0) {
+				spe.instanceScaleBuffer = this.device.createBuffer({
+					label: `instanceScaleBuf_c${chan}_s${spriteLevel}`,
+					size: instanceScales.byteLength,
+					usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+				});
+				this.device.queue.writeBuffer(spe.instanceScaleBuffer, 0, instanceScales);
 			}
 
 			// Setup vertex uniform buffer if needed
@@ -690,6 +728,45 @@ class wgslHydra {
 						shaderLocation: 5,
 						offset: 0,
 						format: 'float32x4'
+					}]
+				});
+			}
+
+			// Add instance offset buffer layout (step mode: instance)
+			if (spe.hasInstancing && spe.instanceOffsetBuffer) {
+				bufferLayouts.push({
+					arrayStride: 12, // 3 floats * 4 bytes (vec3)
+					stepMode: 'instance',
+					attributes: [{
+						shaderLocation: 6,
+						offset: 0,
+						format: 'float32x3'
+					}]
+				});
+			}
+
+			// Add instance rotation buffer layout (step mode: instance)
+			if (spe.hasInstanceRotation && spe.instanceRotationBuffer) {
+				bufferLayouts.push({
+					arrayStride: 12, // 3 floats * 4 bytes (vec3)
+					stepMode: 'instance',
+					attributes: [{
+						shaderLocation: 7,
+						offset: 0,
+						format: 'float32x3'
+					}]
+				});
+			}
+
+			// Add instance scale buffer layout (step mode: instance)
+			if (spe.hasInstanceScale && spe.instanceScaleBuffer) {
+				bufferLayouts.push({
+					arrayStride: 12, // 3 floats * 4 bytes (vec3)
+					stepMode: 'instance',
+					attributes: [{
+						shaderLocation: 8,
+						offset: 0,
+						format: 'float32x3'
 					}]
 				});
 			}
@@ -1195,7 +1272,20 @@ class wgslHydra {
 						if (spe.hasColors && spe.colorBuffer) {
 							passEncoder.setVertexBuffer(slot++, spe.colorBuffer);
 						}
-						passEncoder.draw(spe.vertexCount);
+						// Set instance offset buffer if instancing
+						if (spe.hasInstancing && spe.instanceOffsetBuffer) {
+							passEncoder.setVertexBuffer(slot++, spe.instanceOffsetBuffer);
+						}
+						// Set instance rotation buffer if per-instance rotations
+						if (spe.hasInstanceRotation && spe.instanceRotationBuffer) {
+							passEncoder.setVertexBuffer(slot++, spe.instanceRotationBuffer);
+						}
+						// Set instance scale buffer if per-instance scales
+						if (spe.hasInstanceScale && spe.instanceScaleBuffer) {
+							passEncoder.setVertexBuffer(slot++, spe.instanceScaleBuffer);
+						}
+						// Draw with instance count
+						passEncoder.draw(spe.vertexCount, spe.instanceCount);
 					} else {
 						passEncoder.draw(6);
 					}

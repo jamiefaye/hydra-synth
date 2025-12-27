@@ -36,6 +36,21 @@ function getAngleGlsl(value, uniformName, uniforms, uniformDecls, suffix) {
   return uniformName
 }
 
+// Helper to check if a value is a shader expression (string) and get its WGSL
+// For WGSL, uniforms are stored in the vtx struct and accessed as vtx.uniformName
+function getAngleWgsl(value, uniformName, uniforms) {
+  if (typeof value === 'string') {
+    // Shader expression - parse and return inline WGSL
+    const expr = parseShaderExpr(value)
+    if (expr) {
+      return expr.toWGSL()
+    }
+  }
+  // Number or function - use uniform (accessed via vtx struct)
+  uniforms.push({ name: uniformName, type: 'f32', value: value })
+  return `vtx.${uniformName}`
+}
+
 class VertexSource {
   constructor(vertices) {
     // Raw vertex array (flat [x,y, x,y, ...] or [x,y,z, ...])
@@ -876,9 +891,18 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
 // Generate WGSL vertex shader from transforms
 // Returns { wgsl: string, uniforms: array of {name, type, value} }
-// Options: { useExplicitUVs: boolean, useFaceIds: boolean, useNormals: boolean, useTangents: boolean, useColors: boolean }
+// Options: { useExplicitUVs, useFaceIds, useNormals, useTangents, useColors, useInstancing, useInstanceRotation, useInstanceScale }
 export function generateVertexWgsl(vertexSource, options = {}) {
-  const { useExplicitUVs = false, useFaceIds = false, useNormals = false, useTangents = false, useColors = false } = options
+  const {
+    useExplicitUVs = false,
+    useFaceIds = false,
+    useNormals = false,
+    useTangents = false,
+    useColors = false,
+    useInstancing = false,
+    useInstanceRotation = false,
+    useInstanceScale = false
+  } = options
 
   // Collect uniforms and build transform code
   const uniforms = []
@@ -902,33 +926,33 @@ export function generateVertexWgsl(vertexSource, options = {}) {
       switch (transform.type) {
         case 'rotate': {
           const uniformName = `u_rotate_${suffix}`
-          uniforms.push({ name: uniformName, type: 'f32', value: transform.args.angle })
+          const angleWgsl = getAngleWgsl(transform.args.angle, uniformName, uniforms)
           if (has3D) {
             transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec3f(pos.x * c - pos.y * s, pos.x * s + pos.y * c, pos.z);
       }`)
             // Apply same rotation to normal
             normalTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         nrm = vec3f(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c, nrm.z);
       }`)
             // Apply same rotation to tangent
             tangentTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         tang = vec3f(tang.x * c - tang.y * s, tang.x * s + tang.y * c, tang.z);
       }`)
           } else {
             transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec2f(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
       }`)
           }
@@ -937,25 +961,25 @@ export function generateVertexWgsl(vertexSource, options = {}) {
 
         case 'rotateX': {
           const uniformName = `u_rotateX_${suffix}`
-          uniforms.push({ name: uniformName, type: 'f32', value: transform.args.angle })
+          const angleWgsl = getAngleWgsl(transform.args.angle, uniformName, uniforms)
           transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec3f(pos.x, pos.y * c - pos.z * s, pos.y * s + pos.z * c);
       }`)
           // Apply same rotation to normal
           normalTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         nrm = vec3f(nrm.x, nrm.y * c - nrm.z * s, nrm.y * s + nrm.z * c);
       }`)
           // Apply same rotation to tangent
           tangentTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         tang = vec3f(tang.x, tang.y * c - tang.z * s, tang.y * s + tang.z * c);
       }`)
           break
@@ -963,25 +987,25 @@ export function generateVertexWgsl(vertexSource, options = {}) {
 
         case 'rotateY': {
           const uniformName = `u_rotateY_${suffix}`
-          uniforms.push({ name: uniformName, type: 'f32', value: transform.args.angle })
+          const angleWgsl = getAngleWgsl(transform.args.angle, uniformName, uniforms)
           transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec3f(pos.x * c + pos.z * s, pos.y, -pos.x * s + pos.z * c);
       }`)
           // Apply same rotation to normal
           normalTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         nrm = vec3f(nrm.x * c + nrm.z * s, nrm.y, -nrm.x * s + nrm.z * c);
       }`)
           // Apply same rotation to tangent
           tangentTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         tang = vec3f(tang.x * c + tang.z * s, tang.y, -tang.x * s + tang.z * c);
       }`)
           break
@@ -989,25 +1013,25 @@ export function generateVertexWgsl(vertexSource, options = {}) {
 
         case 'rotateZ': {
           const uniformName = `u_rotateZ_${suffix}`
-          uniforms.push({ name: uniformName, type: 'f32', value: transform.args.angle })
+          const angleWgsl = getAngleWgsl(transform.args.angle, uniformName, uniforms)
           transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec3f(pos.x * c - pos.y * s, pos.x * s + pos.y * c, pos.z);
       }`)
           // Apply same rotation to normal
           normalTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         nrm = vec3f(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c, nrm.z);
       }`)
           // Apply same rotation to tangent
           tangentTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         tang = vec3f(tang.x * c - tang.y * s, tang.x * s + tang.y * c, tang.z);
       }`)
           break
@@ -1077,6 +1101,17 @@ ${allUniformFields.join('\n')}
     inputFields.push('  @location(5) color: vec4f,')  // RGBA vertex color
   }
 
+  // GPU instancing - per-instance attributes with step_mode: instance
+  if (useInstancing) {
+    inputFields.push('  @location(6) instanceOffset: vec3f,')
+  }
+  if (useInstanceRotation) {
+    inputFields.push('  @location(7) instanceRotation: vec3f,')
+  }
+  if (useInstanceScale) {
+    inputFields.push('  @location(8) instanceScale: vec3f,')
+  }
+
   // Build vertex output struct
   const outputFields = [
     '  @builtin(position) position: vec4f,',
@@ -1090,7 +1125,8 @@ ${allUniformFields.join('\n')}
     '  @location(6) v_bitangent: vec3f,',
     '  @location(7) v_viewDir: vec3f,',
     '  @location(8) v_depth: f32,',
-    '  @location(9) v_color: vec4f,'
+    '  @location(9) v_color: vec4f,',
+    '  @location(10) v_instanceId: f32,'  // Instance ID for fragment shader
   ]
 
   // UV computation
@@ -1107,6 +1143,45 @@ ${allUniformFields.join('\n')}
   const colorCode = useColors
     ? 'output.v_color = input.color;'
     : 'output.v_color = vec4f(1.0, 1.0, 1.0, 1.0);'
+
+  // Instance ID passthrough
+  const instanceIdCode = useInstancing
+    ? 'output.v_instanceId = f32(instanceIdx);'
+    : 'output.v_instanceId = 0.0;'
+
+  // Define _ix local variable for shader expressions (e.g., rotateZ("_ix * 0.1"))
+  const ixDefCode = useInstancing
+    ? 'let _ix = f32(instanceIdx);'
+    : 'let _ix = 0.0;'
+
+  // Per-instance scale (applied before chain transforms)
+  const instanceScaleCode = useInstanceScale ? 'pos *= input.instanceScale;' : ''
+
+  // Per-instance rotation (applied before chain transforms, euler XYZ order)
+  const instanceRotationCode = useInstanceRotation ? `
+      // Per-instance rotation (euler XYZ)
+      {
+        let cx = cos(input.instanceRotation.x);
+        let sx = sin(input.instanceRotation.x);
+        let cy = cos(input.instanceRotation.y);
+        let sy = sin(input.instanceRotation.y);
+        let cz = cos(input.instanceRotation.z);
+        let sz = sin(input.instanceRotation.z);
+        // Rotate X
+        pos = vec3f(pos.x, pos.y * cx - pos.z * sx, pos.y * sx + pos.z * cx);
+        // Rotate Y
+        pos = vec3f(pos.x * cy + pos.z * sy, pos.y, -pos.x * sy + pos.z * cy);
+        // Rotate Z
+        pos = vec3f(pos.x * cz - pos.y * sz, pos.x * sz + pos.y * cz, pos.z);
+      }` : ''
+
+  // Per-instance offset (applied after chain transforms)
+  const instanceOffsetCode = useInstancing ? 'pos += input.instanceOffset;' : ''
+
+  // Function signature - include instance_index builtin when instancing
+  const fnSignature = useInstancing
+    ? 'fn main(input: VertexInput, @builtin(instance_index) instanceIdx: u32) -> VertexOutput'
+    : 'fn main(input: VertexInput) -> VertexOutput'
 
   // Build the vertex shader
   let wgsl
@@ -1168,10 +1243,11 @@ struct VertexOutput {
 ${outputFields.join('\n')}
 };
 
+@group(0) @binding(0) var<uniform> time: f32;
 @group(0) @binding(1) var<uniform> resolution: vec2f;
 ${uniformStruct}
 @vertex
-fn main(input: VertexInput) -> VertexOutput {
+${fnSignature} {
   var output: VertexOutput;
 
   // UV
@@ -1180,10 +1256,17 @@ fn main(input: VertexInput) -> VertexOutput {
   ${faceIdCode}
   // Color
   ${colorCode}
+  // Instance ID
+  ${instanceIdCode}
+  // Define _ix for shader expressions
+  ${ixDefCode}
 
   // Apply transforms (3D)
   var pos = input.position;
+  ${instanceScaleCode}
+  ${instanceRotationCode}
 ${transformCode.join('\n')}
+  ${instanceOffsetCode}
 
   // Compute vertex data for fragment shader
   output.v_position = pos;
@@ -1213,6 +1296,12 @@ ${transformCode.join('\n')}
 }
 `
   } else {
+    // For 2D with instancing, we need vec3 internally for 3D rotations
+    const use3DPos = useInstancing || useInstanceRotation || useInstanceScale
+    const posInit = use3DPos ? 'var pos = input.position;' : 'var pos = input.position.xy;'
+    const finalPos = use3DPos ? 'output.position = vec4f(pos.xy, 0.0, 1.0);' : 'output.position = vec4f(pos, 0.0, 1.0);'
+    const v_position = use3DPos ? 'output.v_position = pos;' : 'output.v_position = vec3f(pos, 0.0);'
+
     wgsl = `struct VertexInput {
 ${inputFields.join('\n')}
 };
@@ -1221,9 +1310,11 @@ struct VertexOutput {
 ${outputFields.join('\n')}
 };
 
+@group(0) @binding(0) var<uniform> time: f32;
+@group(0) @binding(1) var<uniform> resolution: vec2f;
 ${uniformStruct}
 @vertex
-fn main(input: VertexInput) -> VertexOutput {
+${fnSignature} {
   var output: VertexOutput;
 
   // UV
@@ -1232,13 +1323,20 @@ fn main(input: VertexInput) -> VertexOutput {
   ${faceIdCode}
   // Color
   ${colorCode}
+  // Instance ID
+  ${instanceIdCode}
+  // Define _ix for shader expressions
+  ${ixDefCode}
 
   // Apply transforms (2D)
-  var pos = input.position.xy;
+  ${posInit}
+  ${instanceScaleCode}
+  ${instanceRotationCode}
 ${transformCode.join('\n')}
+  ${instanceOffsetCode}
 
   // Set default vertex data for 2D geometry
-  output.v_position = vec3f(pos, 0.0);
+  ${v_position}
   output.v_normal = vec3f(0.0, 0.0, 1.0);  // Facing camera
   output.v_worldNormal = vec3f(0.0, 0.0, 1.0);  // Same as normal for 2D
   output.v_tangent = vec3f(1.0, 0.0, 0.0);
@@ -1246,7 +1344,7 @@ ${transformCode.join('\n')}
   output.v_viewDir = vec3f(0.0, 0.0, 1.0);  // Looking at camera
   output.v_depth = 1.0;
 
-  output.position = vec4f(pos, 0.0, 1.0);
+  ${finalPos}
   return output;
 }
 `
@@ -1275,6 +1373,7 @@ struct VertexOutput {
   @location(7) v_viewDir: vec3f,
   @location(8) v_depth: f32,
   @location(9) v_color: vec4f,
+  @location(10) v_instanceId: f32,
 };
 
 struct VertexUniforms {
@@ -1299,6 +1398,7 @@ fn main(input: VertexInput) -> VertexOutput {
   output.v_viewDir = vec3f(0.0, 0.0, 1.0);
   output.v_depth = 1.0;
   output.v_color = vec4f(1.0, 1.0, 1.0, 1.0);
+  output.v_instanceId = 0.0;
 
   output.position = vec4f(input.position.xy, 0.0, 1.0);
   return output;

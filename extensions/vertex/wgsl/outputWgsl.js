@@ -118,6 +118,12 @@ class OutputWgsl {
       hasColors = vertexSource.colors && vertexSource.colors.length > 0
     }
 
+    // Check for GPU instancing
+    const hasInstancing = vertexSource?.instanceCount > 0
+    const hasInstanceRotation = vertexSource?.instanceRotations != null
+    const hasInstanceScale = vertexSource?.instanceScales != null
+    const instanceCount = hasInstancing ? vertexSource.instanceCount : 1
+
     // Compute bounds for UV normalization
     let bounds = { minX: -1, maxX: 1, minY: -1, maxY: 1 }
     if (rawVerts && rawVerts.length >= 6 && !hasExplicitUVs) {
@@ -144,8 +150,17 @@ class OutputWgsl {
         { name: 'u_boundsMax', type: 'vec2f', value: [bounds.maxX, bounds.maxY] }
       ]
 
-      if (hasChainedTransforms) {
-        const generated = generateVertexWgsl(vertexSource, { useExplicitUVs: hasExplicitUVs, useFaceIds: hasFaceIds, useNormals: hasNormals, useTangents: hasTangents, useColors: hasColors })
+      if (hasChainedTransforms || hasInstancing) {
+        const generated = generateVertexWgsl(vertexSource, {
+          useExplicitUVs: hasExplicitUVs,
+          useFaceIds: hasFaceIds,
+          useNormals: hasNormals,
+          useTangents: hasTangents,
+          useColors: hasColors,
+          useInstancing: hasInstancing,
+          useInstanceRotation: hasInstanceRotation,
+          useInstanceScale: hasInstanceScale
+        })
         vertexWgsl = generated.wgsl
         vertexUniforms = [...boundsUniforms, ...generated.uniforms]
       } else {
@@ -190,6 +205,10 @@ class OutputWgsl {
       hasNormals,
       hasTangents,
       hasColors,
+      hasInstancing,
+      hasInstanceRotation,
+      hasInstanceScale,
+      instanceCount,
       sprite,
       animation
     })
@@ -214,6 +233,14 @@ class OutputWgsl {
       normals: vertexSource?.normals,
       tangents: vertexSource?.tangents,
       colors: vertexSource?.colors,
+      // Instancing data
+      hasInstancing,
+      hasInstanceRotation,
+      hasInstanceScale,
+      instanceCount,
+      instancePositions: vertexSource?.instancePositions,
+      instanceRotations: vertexSource?.instanceRotations,
+      instanceScales: vertexSource?.instanceScales,
       sprite,
       animation
     })

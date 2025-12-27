@@ -4,6 +4,7 @@
 import { parseExpression } from './parser.js'
 import { scanExpression } from './scanner.js'
 import { emitGLSL } from './emitter-glsl.js'
+import { emitWGSL } from './emitter-wgsl.js'
 import { ShaderExprError } from './errors.js'
 
 export class ShaderExpression {
@@ -14,6 +15,7 @@ export class ShaderExpression {
     this.foundVars = foundVars
     this.level = level
     this._glslCache = null
+    this._wgslCache = null
   }
 
   toGLSL() {
@@ -23,10 +25,11 @@ export class ShaderExpression {
     return this._glslCache
   }
 
-  // Placeholder for future WGSL support
   toWGSL() {
-    // For now, just return GLSL - WGSL emitter will be added later
-    return this.toGLSL()
+    if (this._wgslCache === null) {
+      this._wgslCache = emitWGSL(this.ast)
+    }
+    return this._wgslCache
   }
 
   // For compatibility with existing uniform system
