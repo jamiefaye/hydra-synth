@@ -196,6 +196,9 @@ function applyUpCorrection(vs, up) {
 //       Note: 'up' is applied after swapYZ if both are specified
 export async function loadObj(url, options = {}) {
   const { up = 'y', ...parseOptions } = options
+  const startTime = performance.now()
+  console.log(`[hydra-vertex] Loading OBJ: ${url}`)
+
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to load OBJ from ${url}: ${response.status} ${response.statusText}`)
@@ -205,6 +208,10 @@ export async function loadObj(url, options = {}) {
 
   // Apply orientation correction based on 'up' option
   model = applyUpCorrection(model, up)
+
+  const elapsed = (performance.now() - startTime).toFixed(0)
+  const vertCount = model.vertices ? model.vertices.length / 3 : 0
+  console.log(`[hydra-vertex] ✓ OBJ loaded: ${vertCount} vertices in ${elapsed}ms`)
 
   return model
 }
@@ -492,6 +499,9 @@ function extractMeshFromGltf(gltf, binBuffer, meshIndex, primitiveIndex) {
 //   up: orientation correction - 'y' (default), '-y' (flip), 'z' (Blender), '-z', 'x', '-x'
 export async function loadGlb(url, options = {}) {
   const { extractTextures = true, up = 'y', ...parseOptions } = options
+  const startTime = performance.now()
+  console.log(`[hydra-vertex] Loading GLB: ${url}`)
+
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(`Failed to load GLB from ${url}: ${response.status} ${response.statusText}`)
@@ -511,6 +521,10 @@ export async function loadGlb(url, options = {}) {
 
   // Apply orientation correction based on 'up' option
   model = applyUpCorrection(model, up)
+
+  const elapsed = (performance.now() - startTime).toFixed(0)
+  const vertCount = model.vertices ? model.vertices.length / 3 : 0
+  console.log(`[hydra-vertex] ✓ GLB loaded: ${vertCount} vertices in ${elapsed}ms`)
 
   return model
 }

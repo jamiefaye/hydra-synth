@@ -360,6 +360,11 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     hasInstancing = true
     instanceCount = vertexSource.instanceCount
 
+    // Log instance setup info
+    const baseVerts = vertexSource.vertices ? vertexSource.vertices.length / 3 : 0
+    const totalVerts = baseVerts * instanceCount
+    console.log(`[hydra-vertex] Instancing: ${instanceCount} instances × ${baseVerts} vertices = ${totalVerts} total vertices`)
+
     // Reshape instance positions to vec3 array
     const offsetData = []
     for (let i = 0; i < vertexSource.instancePositions.length; i += 3) {
@@ -671,9 +676,34 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
   // Add instancing if enabled
   if (hasInstancing) {
     drawConfig.instances = instanceCount
+    // Warn about very high instance counts
+    if (instanceCount > 5000) {
+      console.warn(`[hydra-vertex] ⚠️ High instance count: ${instanceCount}. This may cause GPU performance issues.`)
+    }
   }
 
-  const drawCommand = this.regl(drawConfig)
+  // Wrap shader compilation in try-catch to provide helpful errors
+  let drawCommand
+  try {
+    drawCommand = this.regl(drawConfig)
+  } catch (err) {
+    console.error('[hydra-vertex] ❌ Shader compilation failed!')
+    console.error('[hydra-vertex] Error:', err.message)
+
+    // Try to extract line info from error
+    if (err.message.includes('ERROR:')) {
+      console.error('[hydra-vertex] This is usually caused by invalid shader expressions or unsupported GLSL operations.')
+    }
+
+    // Log shader sources for debugging (truncated)
+    console.group('[hydra-vertex] Shader sources (for debugging):')
+    console.log('Vertex shader (first 500 chars):', vert.substring(0, 500) + '...')
+    console.log('Fragment shader (first 500 chars):', pass.frag.substring(0, 500) + '...')
+    console.groupEnd()
+
+    // Return early - sprite won't render but won't crash
+    return
+  }
 
   // Store sprite config with all buffer references for cleanup
   const spriteConfig = {

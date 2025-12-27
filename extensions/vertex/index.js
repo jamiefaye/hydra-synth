@@ -129,8 +129,60 @@ export function install(hydra, options = {}) {
   // Add ResizeObserver to handle canvas resize automatically
   setupResizeObserver(hydra)
 
+  // Add WebGL context loss detection
+  setupContextLossDetection(hydra)
+
   console.log('[hydra-vertex] Extension installed successfully')
   return true
+}
+
+/**
+ * Setup WebGL context loss detection and recovery
+ */
+function setupContextLossDetection(hydra) {
+  const canvas = hydra.canvas
+  if (!canvas) return
+
+  const gl = hydra.regl._gl
+
+  canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault()
+    console.error('[hydra-vertex] ⚠️ WebGL context LOST! GPU may have crashed or timed out.')
+    console.error('[hydra-vertex] This can happen with very complex scenes (many instances, complex shaders).')
+
+    // Store state for potential recovery
+    hydra._contextLost = true
+
+    // Notify user visually if possible
+    if (typeof window !== 'undefined' && window.alert) {
+      // Don't block with alert, just log prominently
+      console.error('%c WebGL Context Lost - GPU timeout or crash ', 'background: #ff0000; color: white; font-size: 16px;')
+    }
+  })
+
+  canvas.addEventListener('webglcontextrestored', (event) => {
+    console.log('[hydra-vertex] ✓ WebGL context restored! Reinitializing...')
+    hydra._contextLost = false
+
+    // Clear all sprites and reinitialize
+    for (const output of hydra.o) {
+      if (output.clearSprites) {
+        output.clearSprites()
+      }
+    }
+
+    console.log('[hydra-vertex] Context restored. You may need to re-run your code.')
+  })
+
+  // Check for extension that can provide more GPU info
+  const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+  if (debugInfo) {
+    const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
+    const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+    console.log(`[hydra-vertex] GPU: ${vendor} - ${renderer}`)
+  }
+
+  console.log('[hydra-vertex] WebGL context loss detection enabled')
 }
 
 /**
