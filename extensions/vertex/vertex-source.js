@@ -42,9 +42,16 @@ class VertexSource {
     this.vertices = vertices
     // Accumulated transforms
     this.transforms = []
-    // GPU instancing data
-    this.instanceOffsets = null  // Float32Array of vec3 offsets
+    // GPU instancing data (all Float32Arrays, vec3 per instance)
+    this.instancePositions = null   // xyz offsets
+    this.instanceRotations = null   // xyz euler angles (radians)
+    this.instanceScales = null      // xyz scale factors
     this.instanceCount = 0
+    // Legacy alias for backwards compatibility
+    Object.defineProperty(this, 'instanceOffsets', {
+      get: () => this.instancePositions,
+      set: (v) => { this.instancePositions = v }
+    })
   }
 
   // Get raw vertices (for backward compat or direct access)
@@ -232,6 +239,88 @@ class VertexSource {
     return this
   }
 
+  // Custom instance data (GPU-accelerated)
+  // Accepts various formats:
+  //   instances([[x,y,z], ...])  - positions only (nested)
+  //   instances([x,y,z, x,y,z, ...])  - positions only (flat)
+  //   instances({ positions: [...], rotations: [...], scales: [...] })  - full control
+  //
+  // Each array can be nested [[x,y,z], ...] or flat [x,y,z, ...]
+  // Scales can also be scalar per instance [s0, s1, ...] for uniform scaling
+  instances(data) {
+    // Helper to flatten nested array to Float32Array
+    const flatten = (arr, componentsPerItem) => {
+      if (!arr) return null
+      if (arr instanceof Float32Array) return arr
+
+      // Check if already flat (first element is a number)
+      if (typeof arr[0] === 'number') {
+        return new Float32Array(arr)
+      }
+
+      // Nested array - flatten it
+      const count = arr.length
+      const flat = new Float32Array(count * componentsPerItem)
+      for (let i = 0; i < count; i++) {
+        const item = arr[i]
+        if (Array.isArray(item)) {
+          for (let j = 0; j < componentsPerItem; j++) {
+            flat[i * componentsPerItem + j] = item[j] !== undefined ? item[j] : (j < 3 ? 0 : 1)
+          }
+        } else if (typeof item === 'object') {
+          // {x, y, z} format
+          flat[i * componentsPerItem] = item.x !== undefined ? item.x : 0
+          flat[i * componentsPerItem + 1] = item.y !== undefined ? item.y : 0
+          flat[i * componentsPerItem + 2] = item.z !== undefined ? item.z : 0
+        } else {
+          // Scalar (for uniform scale)
+          flat[i * componentsPerItem] = item
+          flat[i * componentsPerItem + 1] = item
+          flat[i * componentsPerItem + 2] = item
+        }
+      }
+      return flat
+    }
+
+    // Handle different input formats
+    if (Array.isArray(data)) {
+      // Simple array of positions
+      this.instancePositions = flatten(data, 3)
+      this.instanceCount = this.instancePositions.length / 3
+    } else if (typeof data === 'object') {
+      // Object with positions, rotations, scales
+      if (data.positions) {
+        this.instancePositions = flatten(data.positions, 3)
+        this.instanceCount = this.instancePositions.length / 3
+      }
+      if (data.rotations) {
+        this.instanceRotations = flatten(data.rotations, 3)
+      }
+      if (data.scales) {
+        // Scales can be scalar or vec3
+        const scales = data.scales
+        if (typeof scales[0] === 'number' && !Array.isArray(scales[0])) {
+          // Check if it's flat vec3 or array of scalars
+          if (scales.length === this.instanceCount) {
+            // Array of scalars - expand to vec3
+            const flat = new Float32Array(this.instanceCount * 3)
+            for (let i = 0; i < this.instanceCount; i++) {
+              flat[i * 3] = flat[i * 3 + 1] = flat[i * 3 + 2] = scales[i]
+            }
+            this.instanceScales = flat
+          } else {
+            // Flat vec3 array
+            this.instanceScales = flatten(scales, 3)
+          }
+        } else {
+          this.instanceScales = flatten(scales, 3)
+        }
+      }
+    }
+
+    return this
+  }
+
   // ========== Animation ==========
 
   // Animate a skinned model using embedded animation clips
@@ -299,9 +388,18 @@ class VertexSource {
 
 // Generate vertex shader GLSL from transforms
 // Returns { glsl: string, uniforms: object }
-// Options: { useExplicitUVs: boolean, useFaceIds: boolean, useNormals: boolean, useTangents: boolean, useColors: boolean, useInstancing: boolean }
+// Options: { useExplicitUVs, useFaceIds, useNormals, useTangents, useColors, useInstancing, useInstanceRotation, useInstanceScale }
 export function generateVertexGlsl(vertexSource, precision, options = {}) {
-  const { useExplicitUVs = false, useFaceIds = false, useNormals = false, useTangents = false, useColors = false, useInstancing = false } = options
+  const {
+    useExplicitUVs = false,
+    useFaceIds = false,
+    useNormals = false,
+    useTangents = false,
+    useColors = false,
+    useInstancing = false,
+    useInstanceRotation = false,
+    useInstanceScale = false
+  } = options
 
   // UV source code - either from attribute or computed from bounds
   const uvAttributeDecl = useExplicitUVs ? 'attribute vec2 texcoord;' : ''
@@ -327,10 +425,32 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
   // GPU instancing - per-instance offset and ID attributes, plus instance ID varying
   // Note: WebGL 1 doesn't have gl_InstanceID, so we pass it as an attribute
-  const instanceAttributeDecl = useInstancing ? 'attribute vec3 instanceOffset;\nattribute float instanceId;' : ''
+  let instanceAttributeDecl = useInstancing ? 'attribute vec3 instanceOffset;\nattribute float instanceId;' : ''
+  if (useInstanceRotation) instanceAttributeDecl += '\nattribute vec3 instanceRotation;'
+  if (useInstanceScale) instanceAttributeDecl += '\nattribute vec3 instanceScale;'
+
   const instanceIdVaryingDecl = 'varying float v_instanceId;'  // Always declare for fragment shader compatibility
   const instanceIdPassthrough = useInstancing ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
   const instanceOffsetCode = useInstancing ? 'pos += instanceOffset;' : ''
+
+  // Per-instance rotation (applied before chain transforms)
+  // Uses euler angles XYZ order
+  const instanceRotationCode = useInstanceRotation ? `
+          // Per-instance rotation (euler XYZ)
+          {
+            float cx = cos(instanceRotation.x), sx = sin(instanceRotation.x);
+            float cy = cos(instanceRotation.y), sy = sin(instanceRotation.y);
+            float cz = cos(instanceRotation.z), sz = sin(instanceRotation.z);
+            // Rotate X
+            pos = vec3(pos.x, pos.y * cx - pos.z * sx, pos.y * sx + pos.z * cx);
+            // Rotate Y
+            pos = vec3(pos.x * cy + pos.z * sy, pos.y, -pos.x * sy + pos.z * cy);
+            // Rotate Z
+            pos = vec3(pos.x * cz - pos.y * sz, pos.x * sz + pos.y * cz, pos.z);
+          }` : ''
+
+  // Per-instance scale (applied before chain transforms)
+  const instanceScaleCode = useInstanceScale ? 'pos *= instanceScale;' : ''
 
   if (!vertexSource.hasTransforms) {
     // No transforms - use simple passthrough with bounds
@@ -367,8 +487,10 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
           ${colorPassthrough}
           ${instanceIdPassthrough}
 
-          // Apply instance offset if instancing is enabled
+          // Apply instance transforms if enabled
           vec3 pos = position;
+          ${instanceScaleCode}
+          ${instanceRotationCode}
           ${instanceOffsetCode}
 
           // Set default vertex data for 2D geometry
@@ -658,8 +780,10 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
       // Apply transforms (3D)
       vec3 pos = position;
-      ${instanceOffsetCode}
+      ${instanceScaleCode}
+      ${instanceRotationCode}
       ${transformCode.join('\n      ')}
+      ${instanceOffsetCode}
 
       // Compute vertex data for fragment shader
       v_position = pos;
@@ -724,8 +848,13 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
       // Apply transforms (2D)
       vec2 pos = position.xy;
-      ${useInstancing ? 'pos += instanceOffset.xy;' : ''}
+      ${useInstanceScale ? 'pos *= instanceScale.xy;' : ''}
+      ${useInstanceRotation ? `{
+        float c = cos(instanceRotation.z), s = sin(instanceRotation.z);
+        pos = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
+      }` : ''}
       ${transformCode.join('\n      ')}
+      ${useInstancing ? 'pos += instanceOffset.xy;' : ''}
 
       // Set default vertex data for 2D geometry
       v_position = vec3(pos, 0.0);

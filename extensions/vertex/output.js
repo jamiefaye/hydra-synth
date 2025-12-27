@@ -353,17 +353,20 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
   let instanceCount = 0
   let instanceOffsetBuffer = null
   let instanceIdBuffer = null
+  let instanceRotationBuffer = null
+  let instanceScaleBuffer = null
 
-  if (vertexSource && vertexSource.instanceOffsets && vertexSource.instanceCount > 0) {
+  if (vertexSource && vertexSource.instancePositions && vertexSource.instanceCount > 0) {
     hasInstancing = true
     instanceCount = vertexSource.instanceCount
-    // Reshape instance offsets to vec3 array
+
+    // Reshape instance positions to vec3 array
     const offsetData = []
-    for (let i = 0; i < vertexSource.instanceOffsets.length; i += 3) {
+    for (let i = 0; i < vertexSource.instancePositions.length; i += 3) {
       offsetData.push([
-        vertexSource.instanceOffsets[i],
-        vertexSource.instanceOffsets[i + 1],
-        vertexSource.instanceOffsets[i + 2]
+        vertexSource.instancePositions[i],
+        vertexSource.instancePositions[i + 1],
+        vertexSource.instancePositions[i + 2]
       ])
     }
     instanceOffsetBuffer = this.regl.buffer(offsetData)
@@ -375,6 +378,32 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
       idData.push([i])
     }
     instanceIdBuffer = this.regl.buffer(idData)
+
+    // Create instance rotation buffer if provided (vec3 euler angles)
+    if (vertexSource.instanceRotations) {
+      const rotData = []
+      for (let i = 0; i < vertexSource.instanceRotations.length; i += 3) {
+        rotData.push([
+          vertexSource.instanceRotations[i],
+          vertexSource.instanceRotations[i + 1],
+          vertexSource.instanceRotations[i + 2]
+        ])
+      }
+      instanceRotationBuffer = this.regl.buffer(rotData)
+    }
+
+    // Create instance scale buffer if provided (vec3)
+    if (vertexSource.instanceScales) {
+      const scaleData = []
+      for (let i = 0; i < vertexSource.instanceScales.length; i += 3) {
+        scaleData.push([
+          vertexSource.instanceScales[i],
+          vertexSource.instanceScales[i + 1],
+          vertexSource.instanceScales[i + 2]
+        ])
+      }
+      instanceScaleBuffer = this.regl.buffer(scaleData)
+    }
   }
 
   if (!rawVerts) {
@@ -463,7 +492,9 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         useNormals: hasNormals,
         useTangents: hasTangents,
         useColors: hasColors,
-        useInstancing: hasInstancing
+        useInstancing: hasInstancing,
+        useInstanceRotation: hasInstancing && !!instanceRotationBuffer,
+        useInstanceScale: hasInstancing && !!instanceScaleBuffer
       })
       vert = generated.glsl
       vertexUniforms = generated.uniforms
@@ -609,6 +640,20 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
       buffer: instanceIdBuffer,
       divisor: 1
     }
+    // Per-instance rotation (euler angles xyz)
+    if (instanceRotationBuffer) {
+      attributes.instanceRotation = {
+        buffer: instanceRotationBuffer,
+        divisor: 1
+      }
+    }
+    // Per-instance scale (xyz)
+    if (instanceScaleBuffer) {
+      attributes.instanceScale = {
+        buffer: instanceScaleBuffer,
+        divisor: 1
+      }
+    }
   }
 
   // Create the draw command
@@ -641,6 +686,8 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     colorBuffer,
     instanceOffsetBuffer,
     instanceIdBuffer,
+    instanceRotationBuffer,
+    instanceScaleBuffer,
     blendMode,
     has3D,
     hasInstancing,
@@ -697,6 +744,12 @@ Output.prototype.clearSprites = function () {
     if (sprite.instanceIdBuffer) {
       sprite.instanceIdBuffer.destroy()
     }
+    if (sprite.instanceRotationBuffer) {
+      sprite.instanceRotationBuffer.destroy()
+    }
+    if (sprite.instanceScaleBuffer) {
+      sprite.instanceScaleBuffer.destroy()
+    }
   }
   this.sprites.clear()
 }
@@ -729,6 +782,12 @@ Output.prototype.removeSprite = function (level) {
     }
     if (sprite.instanceIdBuffer) {
       sprite.instanceIdBuffer.destroy()
+    }
+    if (sprite.instanceRotationBuffer) {
+      sprite.instanceRotationBuffer.destroy()
+    }
+    if (sprite.instanceScaleBuffer) {
+      sprite.instanceScaleBuffer.destroy()
     }
     this.sprites.delete(level)
   }
@@ -774,6 +833,12 @@ Output.prototype.render = function (passes) {
     }
     if (oldSprite.instanceIdBuffer) {
       oldSprite.instanceIdBuffer.destroy()
+    }
+    if (oldSprite.instanceRotationBuffer) {
+      oldSprite.instanceRotationBuffer.destroy()
+    }
+    if (oldSprite.instanceScaleBuffer) {
+      oldSprite.instanceScaleBuffer.destroy()
     }
   }
   this.registerSprite(0, { passes, vertexData: null, blendMode: 'normal' })
