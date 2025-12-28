@@ -82,6 +82,17 @@ function createLoop(fn) {
  * Install the vertex shader extension into a Hydra instance
  */
 export function install(hydra, options = {}) {
+  // Detect mixing WebGL and WebGPU extensions
+  if (typeof window !== 'undefined') {
+    if (window.__hydraVertexWebGPU) {
+      console.error('[hydra-vertex] ⚠️ WebGPU vertex extension already loaded!')
+      console.error('[hydra-vertex] Mixing WebGL and WebGPU extensions causes errors.')
+      console.error('[hydra-vertex] Reload the page and use only one extension.')
+      return false
+    }
+    window.__hydraVertexWebGL = VERSION
+  }
+
   console.log(`[hydra-vertex] Installing vertex shader extension v${VERSION}`)
 
   _hydra = hydra

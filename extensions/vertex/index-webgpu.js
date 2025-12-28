@@ -61,6 +61,17 @@ let _hydra = null
  * Install the vertex shader extension with WebGL + WebGPU support
  */
 export function install(hydra, options = {}) {
+  // Detect mixing WebGL and WebGPU extensions
+  if (typeof window !== 'undefined') {
+    if (window.__hydraVertexWebGL) {
+      console.error('[hydra-vertex-webgpu] ⚠️ WebGL vertex extension already loaded!')
+      console.error('[hydra-vertex-webgpu] Mixing WebGL and WebGPU extensions causes errors.')
+      console.error('[hydra-vertex-webgpu] Reload the page and use only one extension.')
+      return false
+    }
+    window.__hydraVertexWebGPU = VERSION
+  }
+
   console.log(`[hydra-vertex-webgpu] Installing vertex shader extension v${VERSION}`)
 
   _hydra = hydra
@@ -344,6 +355,17 @@ export async function createHydra(options = {}) {
  *   osc(10).out()  // Now running on WebGPU!
  */
 export async function replaceHydra(existingHydra = null, options = {}) {
+  // Detect mixing WebGL and WebGPU extensions
+  if (typeof window !== 'undefined') {
+    if (window.__hydraVertexWebGL) {
+      console.error('[hydra-vertex-webgpu] ⚠️ WebGL vertex extension already loaded!')
+      console.error('[hydra-vertex-webgpu] Mixing WebGL and WebGPU extensions causes errors.')
+      console.error('[hydra-vertex-webgpu] Reload the page and use only one extension.')
+      throw new Error('Cannot mix WebGL and WebGPU vertex extensions')
+    }
+    window.__hydraVertexWebGPU = VERSION
+  }
+
   // Find existing hydra
   const oldHydra = existingHydra || (typeof window !== 'undefined' ? window.hydraSynth : null)
 
