@@ -248,10 +248,12 @@ This pattern extends naturally to full shaders.
 
 **NOT included in the initial PR:**
 - WebGPU renderer (stays in Jamie's vertex extension repo)
-- 3D/Vertex shader features (stays in Jamie's vertex extension repo)
+- 3D/Vertex shader features (stays in Jamie's vertex extension repo, works with both WebGL and WebGPU)
 - WebGL2 renderer (Max's separate contribution)
 
 This keeps the PR focused, non-breaking, and easy to review. The architecture enables future renderers without requiring them upfront.
+
+**Note:** The vertex extension is NOT WebGPU-only. It provides 3D geometry, instancing, lighting, and model loading for BOTH WebGL and WebGPU backends. The `useWGSL` flag selects the rendering backend.
 
 ---
 
@@ -282,7 +284,8 @@ This keeps the PR focused, non-breaking, and easy to review. The architecture en
 1. Refactor existing `wgsl-hydra.js` and `outputWgsl.js` to implement interface
 2. Keep in vertex extension repo: `extensions/vertex/renderer/WebGPURenderer.js`
 3. Can be submitted as PR to hydra-synth when/if requested
-4. Includes 3D geometry, instancing, and vertex shader features
+
+**Note:** The vertex extension already supports BOTH WebGL and WebGPU via the `useWGSL` flag. The 3D geometry, instancing, lighting, and model loading features work with either backend. The renderer interface would formalize this dual-backend support.
 
 ---
 
