@@ -9,6 +9,8 @@ export const RESERVED_VARS = {
   // Instance-level (per-instance, same for all vertices of an instance) - requires vertex extension with GPU instancing
   // In WGSL, _ix is defined as a local variable in both vertex and fragment shaders
   '_ix': { level: 'instance', glsl: 'v_instanceId', wgsl: '_ix' },
+  // Instance position offset (vec3) - the position from instances()/grid()/scatter()
+  'instanceOffset': { level: 'instance', glsl: 'instanceOffset', wgsl: 'input.instanceOffset' },
 
   // Vertex-level (interpolated to fragment) - requires vertex extension
   // In WGSL, varyings are accessed via ourIn parameter (ourIn.v_normal, etc.)

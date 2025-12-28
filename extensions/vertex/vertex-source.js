@@ -661,17 +661,25 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       }
 
       case 'scale': {
-        const uniformName = `u_scale_${suffix}`
+        // Support shader expressions for each component
+        const getScaleGlsl = (val, name) => {
+          if (typeof val === 'string') {
+            const expr = parseShaderExpr(val)
+            if (expr) return expr.toGLSL()
+          }
+          uniformDecls.push(`uniform float ${name};`)
+          uniforms[name] = makeUniformAccessor(val)
+          return name
+        }
+        const sx = getScaleGlsl(transform.args.x, `u_scaleX_${suffix}`)
+        const sy = getScaleGlsl(transform.args.y, `u_scaleY_${suffix}`)
         if (has3D) {
-          uniformDecls.push(`uniform vec3 ${uniformName};`)
-          uniforms[uniformName] = makeUniformAccessor([transform.args.x, transform.args.y, transform.args.z || 1])
+          const sz = getScaleGlsl(transform.args.z ?? 1, `u_scaleZ_${suffix}`)
           transformCode.push(`
-          pos *= ${uniformName};`)
+          pos *= vec3(${sx}, ${sy}, ${sz});`)
         } else {
-          uniformDecls.push(`uniform vec2 ${uniformName};`)
-          uniforms[uniformName] = makeUniformAccessor([transform.args.x, transform.args.y])
           transformCode.push(`
-          pos *= ${uniformName};`)
+          pos *= vec2(${sx}, ${sy});`)
         }
         break
       }
@@ -1046,14 +1054,25 @@ export function generateVertexWgsl(vertexSource, options = {}) {
         }
 
         case 'scale': {
-          const uniformName = `u_scale_${suffix}`
-          if (has3D) {
-            uniforms.push({ name: uniformName, type: 'vec3f', value: [transform.args.x, transform.args.y, transform.args.z || 1] })
-          } else {
-            uniforms.push({ name: uniformName, type: 'vec2f', value: [transform.args.x, transform.args.y] })
+          // Support shader expressions for each component
+          const getScaleWgsl = (val, name) => {
+            if (typeof val === 'string') {
+              const expr = parseShaderExpr(val)
+              if (expr) return expr.toWGSL()
+            }
+            uniforms.push({ name, type: 'f32', value: val })
+            return `vtx.${name}`
           }
-          transformCode.push(`
-      pos *= vtx.${uniformName};`)
+          const sx = getScaleWgsl(transform.args.x, `u_scaleX_${suffix}`)
+          const sy = getScaleWgsl(transform.args.y, `u_scaleY_${suffix}`)
+          if (has3D) {
+            const sz = getScaleWgsl(transform.args.z ?? 1, `u_scaleZ_${suffix}`)
+            transformCode.push(`
+      pos *= vec3f(${sx}, ${sy}, ${sz});`)
+          } else {
+            transformCode.push(`
+      pos *= vec2f(${sx}, ${sy});`)
+          }
           break
         }
 

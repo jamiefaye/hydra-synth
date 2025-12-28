@@ -54,31 +54,42 @@ solid(0.0, 0.0, 0.05)
   .brightness("0.3 * (" + speedUp + " - " + speedDown + ")")
   .out(o0)
 
-// Stars as small quads with instancing
-// For trails: switch to line geometry (see below)
+// Trail length expression: small during cruise, longer during hyperspace
+const trailLen = "1.0 + 12.0 * (" + speedUp + " - " + speedDown + ")"
+
+// Radial angle: atan2(y, x) + 90° so +Y points toward center
+const radialAngle = "atan(instanceOffset.y, instanceOffset.x) + 1.5708"
+
+// Stars as quads - thin, stretched into trails during hyperspace
+// Order matters: scale first (in local coords), then rotate to point at center
 solid(1, 1, 1)
-  .brightness(brightExpr)
   .out(o0,
-    quad(0.006, 0.006)
+    quad(0.003, 0.01)             // thin base shape
       .instances(starPositions)
       .translate(0, 0, zExpr)
+      .scale(1, trailLen, 1)      // stretch into trail (local Y)
+      .rotateZ(radialAngle)       // then rotate to point toward center
       .perspective(60)
   , 1)
 
-// === Alternative: Line geometry for trails ===
+// === Alternative: Trail geometry (thin quad along Z) ===
 // Uncomment below and comment out the quad version above
 /*
-// Line: 2 vertices stretched along Z
-const lineVerts = [0, 0, 0,  0, 0, 1]
-const starLines = new VertexSource(lineVerts)
+// Thin quad along Z axis (2 triangles)
+const t = 0.003  // half-thickness
+const trailVerts = new Float32Array([
+  -t, 0, 0,   t, 0, 0,   t, 0, 1,   // tri 1
+  -t, 0, 0,   t, 0, 1,  -t, 0, 1    // tri 2
+])
+const starTrails = new VertexSource(trailVerts)
   .instances(starPositions)
 
 solid(1, 1, 1)
   .brightness(brightExpr)
   .out(o0,
-    starLines
+    starTrails
       .translate(0, 0, zExpr)
-      .scale(0.003, 0.003, stretchExpr)
+      .scale(1, 1, stretchExpr)
       .perspective(60)
   , 1)
 */
