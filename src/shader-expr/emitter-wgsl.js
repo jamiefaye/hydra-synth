@@ -78,10 +78,14 @@ function emit(node) {
       const callee = emit(node.callee)
       const args = node.arguments.map(emit)
 
-      // Handle GLSL functions that don't exist in WGSL
+      // Handle GLSL functions that don't exist or differ in WGSL
       if (callee === 'mod' && args.length === 2) {
         // WGSL doesn't have mod() for floats, use: (a - b * floor(a / b))
         return `(${args[0]} - ${args[1]} * floor(${args[0]} / ${args[1]}))`
+      }
+      if (callee === 'atan' && args.length === 2) {
+        // GLSL atan(y, x) is atan2(y, x) in WGSL
+        return `atan2(${args[0]}, ${args[1]})`
       }
 
       return `${callee}(${args.join(', ')})`
