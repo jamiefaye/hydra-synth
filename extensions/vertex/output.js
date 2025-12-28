@@ -286,6 +286,7 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     positionBuffer = this.regl.buffer(verts)
     vertexCount = verts.length
 
+
     // Check for explicit UVs from VertexSource (e.g., cube)
     if (vertexSource && vertexSource.uvs && vertexSource.uvs.length > 0) {
       hasExplicitUVs = true
