@@ -211,6 +211,19 @@ GlslSource.prototype.compile = function (transforms) {
   if (isWGSL) {
     // Generate WGSL fragment shader
     // Module-scope private variables for varyings (accessible from all functions)
+
+    // Post-process fragColor to prefix uniform names with 'uf.'
+    // Uniforms in WGSL are declared as: struct UF { angle0: f32 }; var<uniform> uf : UF;
+    let wgslFragColor = shaderInfo.fragColor
+    shaderInfo.uniforms.forEach((uniform) => {
+      // Only value uniforms (not textures) go in the struct
+      if (uniform.type !== 'texture') {
+        // Replace uniform name with uf.uniformName (word boundary match)
+        const regex = new RegExp(`\\b${uniform.name}\\b`, 'g')
+        wgslFragColor = wgslFragColor.replace(regex, `uf.${uniform.name}`)
+      }
+    })
+
     frag = `
 var<private> v_position: vec3<f32>;
 var<private> v_normal: vec3<f32>;
@@ -245,7 +258,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
     v_viewDir = ourIn.v_viewDir;
     v_depth = ourIn.v_depth;
     v_color = ourIn.v_color;
-    return ${shaderInfo.fragColor};
+    return ${wgslFragColor};
   }
 `
   } else {

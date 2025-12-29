@@ -141,6 +141,13 @@ class HydraRenderer {
     this.sandbox.eval(code)
   }
 
+  // Returns a promise that resolves when Hydra is ready
+  // Currently initialization is synchronous, but this provides
+  // a consistent async API for future async initialization needs
+  ready() {
+    return Promise.resolve(this)
+  }
+
   getScreenImage(callback) {
     this.imageCallback = callback
     this.saveFrame = true
