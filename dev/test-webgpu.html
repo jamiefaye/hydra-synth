@@ -14,7 +14,7 @@
   <body>
     <div id="status">Loading...</div>
     <div id="controls">
-      Press 1-4 to switch patterns
+      Press 1-7 to switch patterns
     </div>
     <script type="module">
       // Use the vertex extension's createHydra which has full WGSL support
@@ -66,11 +66,31 @@
                 gradient(0.5).rotate(() => time * 0.1).out(o0)
                 status.textContent = 'Pattern 4: rotating gradient'
                 break
+              case '5':
+                // Test texture sources - render to o1, then use src(o1) in o0
+                osc(10, 0.1, 1).out(o1)
+                src(o1).modulate(noise(3), 0.1).rotate(0.1).out(o0)
+                status.textContent = 'Pattern 5: texture source (src(o1))'
+                break
+              case '6':
+                // Test external image + 3D geometry + sprite sheet
+                hush()
+                s0.initImage('https://raw.githubusercontent.com/jamiefaye/hydra-models/main/test-grid-4x4.png')
+                src(s0).out(o0, cube(0.4).rotateY(() => hydra.synth.time).rotateX(() => hydra.synth.time * 0.7).perspective(45), { level: 0, sprite: { cols: 4, rows: 4 } })
+                status.textContent = 'Pattern 6: image texture on 3D cube'
+                break
+              case '7':
+                // Simpler test - just src(s0) fullscreen
+                hush()
+                s0.initImage('https://raw.githubusercontent.com/jamiefaye/hydra-models/main/test-grid-4x4.png')
+                src(s0).out(o0)
+                status.textContent = 'Pattern 7: simple src(s0) test'
+                break
             }
           })
 
           console.log('Hydra WebGPU initialized successfully')
-          status.textContent += ' - Press 1-4 for patterns'
+          status.textContent += ' - Press 1-7 for patterns'
 
         } catch (e) {
           console.error('Error:', e)

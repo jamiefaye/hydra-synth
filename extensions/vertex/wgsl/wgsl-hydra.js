@@ -1,6 +1,7 @@
 import {FBOToCanvas} from "./FBOToCanvas.js";
 import {FBO4ToCanvas} from "./FBO4ToCanvas.js";
 import {BLEND_MODES} from "./outputWgsl.js";
+import { computeSkinningMatrices, applySkinning } from '../geometry.js';
 
 // Used to enable a single pass through the "animate" routine.
 // Used for testing to avoid a flood of console error messages.
@@ -26,6 +27,7 @@ const vertexPrefix = `
   	@location(7) v_viewDir : vec3f,
   	@location(8) v_depth : f32,
   	@location(9) v_color : vec4f,
+  	@location(10) v_instanceId : f32,
 	 };
 `;
 
@@ -67,6 +69,7 @@ const fragPrefix = `
      output.v_viewDir = vec3f(0.0, 0.0, 1.0);
      output.v_depth = 1.0;
      output.v_color = vec4f(1.0, 1.0, 1.0, 1.0);
+     output.v_instanceId = 0.0;
 
      return output;
     }
@@ -122,6 +125,13 @@ class SpritePassEntry {
 
 		// Blend mode
 		this.blendMode = 'normal';
+
+		// Per-sprite bind group (replaces shared bind group with sprite-specific spriteGrid)
+		this.spriteGridBuffer = undefined;
+		this.spriteBindGroup = undefined;
+
+		// Animation data
+		this.animation = null;
 	}
 }
 
@@ -462,7 +472,9 @@ class wgslHydra {
 	async setupSpriteChain(chan, spriteLevel, config) {
 		if (trace) console.timeStamp("setupSpriteChain");
 		const { uniforms, fragShader, vertexWgsl, vertexUniforms, rawVerts, blendMode, primitive, has3D,
-			hasExplicitUVs, hasFaceIds, hasNormals, hasTangents, hasColors, uvs, faceIds, normals, tangents, colors, sprite } = config;
+			hasExplicitUVs, hasFaceIds, hasNormals, hasTangents, hasColors, uvs, faceIds, normals, tangents, colors,
+			hasInstancing, hasInstanceRotation, hasInstanceScale, instanceCount, instancePositions, instanceRotations, instanceScales,
+			sprite, animation } = config;
 
 		const rpe = this.renderPassInfo[chan];
 		rpe.outputObject = this.outputChannelObjects[chan];
@@ -484,7 +496,12 @@ class wgslHydra {
 		spe.hasNormals = hasNormals || false;
 		spe.hasTangents = hasTangents || false;
 		spe.hasColors = hasColors || false;
+		spe.hasInstancing = hasInstancing || false;
+		spe.hasInstanceRotation = hasInstanceRotation || false;
+		spe.hasInstanceScale = hasInstanceScale || false;
+		spe.instanceCount = instanceCount || 1;
 		spe.sprite = sprite || null;
+		spe.animation = animation || null;
 
 		// Generate uniform declarations for fragment shader
 		this.generateSpriteUniformDeclarations(spe);
@@ -573,6 +590,36 @@ class wgslHydra {
 				this.device.queue.writeBuffer(spe.colorBuffer, 0, colorData);
 			}
 
+			// Create instance offset buffer if instancing enabled
+			if (spe.hasInstancing && instancePositions && instancePositions.length > 0) {
+				spe.instanceOffsetBuffer = this.device.createBuffer({
+					label: `instanceOffsetBuf_c${chan}_s${spriteLevel}`,
+					size: instancePositions.byteLength,
+					usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+				});
+				this.device.queue.writeBuffer(spe.instanceOffsetBuffer, 0, instancePositions);
+			}
+
+			// Create instance rotation buffer if per-instance rotations provided
+			if (spe.hasInstanceRotation && instanceRotations && instanceRotations.length > 0) {
+				spe.instanceRotationBuffer = this.device.createBuffer({
+					label: `instanceRotationBuf_c${chan}_s${spriteLevel}`,
+					size: instanceRotations.byteLength,
+					usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+				});
+				this.device.queue.writeBuffer(spe.instanceRotationBuffer, 0, instanceRotations);
+			}
+
+			// Create instance scale buffer if per-instance scales provided
+			if (spe.hasInstanceScale && instanceScales && instanceScales.length > 0) {
+				spe.instanceScaleBuffer = this.device.createBuffer({
+					label: `instanceScaleBuf_c${chan}_s${spriteLevel}`,
+					size: instanceScales.byteLength,
+					usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+				});
+				this.device.queue.writeBuffer(spe.instanceScaleBuffer, 0, instanceScales);
+			}
+
 			// Setup vertex uniform buffer if needed
 			if (spe.vertexUniforms.length > 0) {
 				this.setupVertexUniforms(spe);
@@ -610,7 +657,7 @@ class wgslHydra {
 				}],
 			},
 			primitive: {
-				topology: "triangle-list",
+				topology: primitive === 'lines' ? 'line-list' : 'triangle-list',
 			},
 		};
 
@@ -685,6 +732,45 @@ class wgslHydra {
 				});
 			}
 
+			// Add instance offset buffer layout (step mode: instance)
+			if (spe.hasInstancing && spe.instanceOffsetBuffer) {
+				bufferLayouts.push({
+					arrayStride: 12, // 3 floats * 4 bytes (vec3)
+					stepMode: 'instance',
+					attributes: [{
+						shaderLocation: 6,
+						offset: 0,
+						format: 'float32x3'
+					}]
+				});
+			}
+
+			// Add instance rotation buffer layout (step mode: instance)
+			if (spe.hasInstanceRotation && spe.instanceRotationBuffer) {
+				bufferLayouts.push({
+					arrayStride: 12, // 3 floats * 4 bytes (vec3)
+					stepMode: 'instance',
+					attributes: [{
+						shaderLocation: 7,
+						offset: 0,
+						format: 'float32x3'
+					}]
+				});
+			}
+
+			// Add instance scale buffer layout (step mode: instance)
+			if (spe.hasInstanceScale && spe.instanceScaleBuffer) {
+				bufferLayouts.push({
+					arrayStride: 12, // 3 floats * 4 bytes (vec3)
+					stepMode: 'instance',
+					attributes: [{
+						shaderLocation: 8,
+						offset: 0,
+						format: 'float32x3'
+					}]
+				});
+			}
+
 			pipelineDescriptor.vertex.buffers = bufferLayouts;
 		}
 
@@ -703,7 +789,42 @@ class wgslHydra {
 		// Create samplers/buffers for fragment uniforms
 		this.createSamplerOrBuffersForSprite(spe);
 
+		// Create per-sprite bind group with sprite-specific spriteGrid values
+		this.createSpriteBindGroup(spe);
+
 		if (trace) console.timeStamp("spriteChain", "setupSpriteChain", undefined, "wgsl-hydra", "hydra", "secondary-light");
+	}
+
+	// Create per-sprite bind group with sprite-specific spriteGrid
+	createSpriteBindGroup(spe) {
+		// Determine spriteGrid values for this sprite
+		let cols = 1, rows = 1;
+		if (spe.sprite && spe.sprite.cols && spe.sprite.rows) {
+			cols = spe.sprite.cols;
+			rows = spe.sprite.rows;
+		}
+
+		// Create per-sprite spriteGrid buffer
+		spe.spriteGridBuffer = this.device.createBuffer({
+			label: `spriteGrid_c${spe.chan}_s${spe.level}`,
+			size: 8, // 2 x 32-bit float
+			usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+		});
+		const gridValues = new Float32Array([cols, rows]);
+		this.device.queue.writeBuffer(spe.spriteGridBuffer, 0, gridValues);
+
+		// Create per-sprite bind group (same layout as shared, but with sprite-specific spriteGrid)
+		spe.spriteBindGroup = this.device.createBindGroup({
+			label: `spriteBindGroup_c${spe.chan}_s${spe.level}`,
+			layout: this.sharedBindGroupLayout,
+			entries: [
+				{ binding: 0, resource: { buffer: this.timeUniformBuffer } },
+				{ binding: 1, resource: { buffer: this.resolutionUniformBuffer } },
+				{ binding: 2, resource: { buffer: this.mouseUniformBuffer } },
+				{ binding: 3, resource: { buffer: this.spriteUVUniformBuffer } },
+				{ binding: 4, resource: { buffer: spe.spriteGridBuffer } },  // Per-sprite!
+			],
+		});
 	}
 
 	// Clear all sprite chains for a channel
@@ -731,6 +852,9 @@ class wgslHydra {
 				}
 				if (spe.vertexUniformBuffer) {
 					spe.vertexUniformBuffer.destroy();
+				}
+				if (spe.spriteGridBuffer) {
+					spe.spriteGridBuffer.destroy();
 				}
 			}
 			rpe.sprites.clear();
@@ -982,8 +1106,9 @@ class wgslHydra {
 		// Create a master command encoder.
     const commandEncoder = this.device.createCommandEncoder();
 
-		// Setup the universal uniforms
-		this.timeUniformValues[0] = this.time += (dT / 1000.0);
+		// Setup the universal uniforms (dT is actually absolute time from hydra.synth.time)
+		this.time = dT;
+		this.timeUniformValues[0] = this.time;
    	this.device.queue.writeBuffer(this.timeUniformBuffer, 0, this.timeUniformValues);
 
 		this.resolutionUniformValues[0] = this.canvas.width;
@@ -994,9 +1119,8 @@ class wgslHydra {
 		this.mouseUniformValues[1] = this.mousePos.y;
 		this.device.queue.writeBuffer(this.mouseUniformBuffer, 0, this.mouseUniformValues);
 
-		// Write sprite uniforms (defaults - could be updated per-sprite later)
+		// Write sprite UV uniforms (spriteGrid is now per-sprite)
 		this.device.queue.writeBuffer(this.spriteUVUniformBuffer, 0, this.spriteUVUniformValues);
-		this.device.queue.writeBuffer(this.spriteGridUniformBuffer, 0, this.spriteGridUniformValues);
 
 		// For each active channel...
     for (let chan = 0; chan < this.numChannels; ++chan) {
@@ -1006,7 +1130,25 @@ class wgslHydra {
 			const hasSprites = rpe.sprites && rpe.sprites.size > 0;
 			const hasLegacyPipeline = rpe.pipeline;
 
-			if (!hasSprites && !hasLegacyPipeline) continue;
+			if (!hasSprites && !hasLegacyPipeline) {
+				// No sprites and no legacy pipeline - clear the framebuffer (for hush())
+				// Only clear if the output has been used before (has textures)
+				if (rpe.outputObject && rpe.outputObject.views) {
+					rpe.outputObject.flipPingPong();
+					const clearPassDescriptor = {
+						label: `clearPass_c${chan}`,
+						colorAttachments: [{
+							view: rpe.outputObject.getCurrentTextureView(),
+							clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+							loadOp: "clear",
+							storeOp: "store",
+						}],
+					};
+					const clearPass = commandEncoder.beginRenderPass(clearPassDescriptor);
+					clearPass.end();
+				}
+				continue;
+			}
 
 		  rpe.outputObject.flipPingPong();
 
@@ -1019,8 +1161,47 @@ class wgslHydra {
 					const level = levels[i];
 					const spe = rpe.sprites.get(level);
 
-					// Level 0 clears, others load
-					const loadOp = level === 0 ? "clear" : "load";
+					// Update animation buffers if this sprite is animated
+					if (spe.animation) {
+						const anim = spe.animation;
+						const time = typeof anim.timeFunc === 'function' ? anim.timeFunc() : 0;
+
+						// Support dynamic clip name (function or string)
+						const clipName = typeof anim.clipName === 'function' ? anim.clipName() : anim.clipName;
+
+						// Find clip and compute looped time
+						const clip = anim.animations.find(a => a.name === clipName) || anim.animations[0];
+						const loopedTime = clip ? (time % clip.duration) : time;
+
+						// Compute skinning matrices
+						const skinningMatrices = computeSkinningMatrices(
+							anim.skeleton, anim.animations, clipName, loopedTime, anim.gltf,
+							anim.normCenter, anim.normScale
+						);
+
+						if (skinningMatrices) {
+							// Apply skinning to vertices
+							const skinned = applySkinning(
+								anim.originalVerts, anim.originalNormals,
+								anim.joints, anim.weights, skinningMatrices
+							);
+
+							// Update position buffer with skinned vertices
+							if (spe.vertexBuffer && skinned.vertices) {
+								const skinnedFloat32 = new Float32Array(skinned.vertices);
+								this.device.queue.writeBuffer(spe.vertexBuffer, 0, skinnedFloat32);
+							}
+
+							// Update normal buffer if present
+							if (spe.normalBuffer && skinned.normals) {
+								const skinnedNormals = new Float32Array(skinned.normals);
+								this.device.queue.writeBuffer(spe.normalBuffer, 0, skinnedNormals);
+							}
+						}
+					}
+
+					// Level 0 clears; level 1+ loads previous frame (enables feedback/accumulation)
+					const loadOp = (level === 0) ? "clear" : "load";
 
 					const renderPassDescriptor = {
 						label: `renderPass_c${chan}_s${level}`,
@@ -1055,20 +1236,11 @@ class wgslHydra {
 						this.updateVertexUniforms(spe);
 					}
 
-					// Update spriteGrid uniform for this sprite
-					if (spe.sprite && spe.sprite.cols && spe.sprite.rows) {
-						this.spriteGridUniformValues[0] = spe.sprite.cols;
-						this.spriteGridUniformValues[1] = spe.sprite.rows;
-					} else {
-						this.spriteGridUniformValues[0] = 1;
-						this.spriteGridUniformValues[1] = 1;
-					}
-					this.device.queue.writeBuffer(this.spriteGridUniformBuffer, 0, this.spriteGridUniformValues);
-
 					if (trace) console.timeStamp("spritepass");
 					const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
 					passEncoder.setPipeline(spe.pipeline);
-					passEncoder.setBindGroup(0, this.sharedBindGroup);
+					// Use per-sprite bind group (has sprite-specific spriteGrid)
+					passEncoder.setBindGroup(0, spe.spriteBindGroup || this.sharedBindGroup);
 					passEncoder.setBindGroup(1, ubg);
 
 					// Set vertex bind group if we have vertex uniforms
@@ -1101,7 +1273,20 @@ class wgslHydra {
 						if (spe.hasColors && spe.colorBuffer) {
 							passEncoder.setVertexBuffer(slot++, spe.colorBuffer);
 						}
-						passEncoder.draw(spe.vertexCount);
+						// Set instance offset buffer if instancing
+						if (spe.hasInstancing && spe.instanceOffsetBuffer) {
+							passEncoder.setVertexBuffer(slot++, spe.instanceOffsetBuffer);
+						}
+						// Set instance rotation buffer if per-instance rotations
+						if (spe.hasInstanceRotation && spe.instanceRotationBuffer) {
+							passEncoder.setVertexBuffer(slot++, spe.instanceRotationBuffer);
+						}
+						// Set instance scale buffer if per-instance scales
+						if (spe.hasInstanceScale && spe.instanceScaleBuffer) {
+							passEncoder.setVertexBuffer(slot++, spe.instanceScaleBuffer);
+						}
+						// Draw with instance count
+						passEncoder.draw(spe.vertexCount, spe.instanceCount);
 					} else {
 						passEncoder.draw(6);
 					}

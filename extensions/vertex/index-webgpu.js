@@ -61,6 +61,17 @@ let _hydra = null
  * Install the vertex shader extension with WebGL + WebGPU support
  */
 export function install(hydra, options = {}) {
+  // Detect mixing WebGL and WebGPU extensions
+  if (typeof window !== 'undefined') {
+    if (window.__hydraVertexWebGL) {
+      console.error('[hydra-vertex-webgpu] ⚠️ WebGL vertex extension already loaded!')
+      console.error('[hydra-vertex-webgpu] Mixing WebGL and WebGPU extensions causes errors.')
+      console.error('[hydra-vertex-webgpu] Reload the page and use only one extension.')
+      return false
+    }
+    window.__hydraVertexWebGPU = VERSION
+  }
+
   console.log(`[hydra-vertex-webgpu] Installing vertex shader extension v${VERSION}`)
 
   _hydra = hydra
@@ -109,12 +120,14 @@ export function install(hydra, options = {}) {
  */
 function setupResizeObserver(hydra) {
   const canvas = hydra.canvas
+  // Skip if no canvas, no ResizeObserver, or canvas is OffscreenCanvas (not a DOM Element)
   if (!canvas || typeof ResizeObserver === 'undefined') return
+  if (!(canvas instanceof Element)) return  // OffscreenCanvas can't be observed
 
   const observer = new ResizeObserver((entries) => {
     for (const entry of entries) {
-      const width = Math.round(entry.contentRect.width * (window.devicePixelRatio || 1))
-      const height = Math.round(entry.contentRect.height * (window.devicePixelRatio || 1))
+      const width = Math.round(entry.contentRect.width)
+      const height = Math.round(entry.contentRect.height)
 
       // Skip invalid dimensions (can happen before layout is ready)
       if (width <= 0 || height <= 0) continue
@@ -218,6 +231,7 @@ function patchOutput(hydra) {
     attribute vec3 position;
     varying vec2 uv;
     varying float v_faceId;
+    varying float v_instanceId;
 
     varying vec3 v_position;
     varying vec3 v_normal;
@@ -230,6 +244,7 @@ function patchOutput(hydra) {
     void main () {
       uv = position.xy;
       v_faceId = 0.0;
+      v_instanceId = 0.0;
 
       v_position = vec3(position.xy * 2.0 - 1.0, 0.0);
       v_normal = vec3(0.0, 0.0, 1.0);
@@ -327,6 +342,64 @@ export function cleanup(hydra) {
 export async function createHydra(options = {}) {
   const hydra = await _createHydra(options)
   install(hydra)
+  return hydra
+}
+
+/**
+ * Replace an existing Hydra instance with a new WebGPU-enabled one
+ * Useful for upgrading vanilla hydra (e.g., on hydra.ojack.xyz) to WebGPU
+ *
+ * Usage:
+ *   const ext = await import('https://www.fentonia.com/hydra-extensions/vertex-webgpu/index.js')
+ *   await ext.replaceHydra()  // Replaces window.hydraSynth with WebGPU version
+ *   osc(10).out()  // Now running on WebGPU!
+ */
+export async function replaceHydra(existingHydra = null, options = {}) {
+  // Detect mixing WebGL and WebGPU extensions
+  if (typeof window !== 'undefined') {
+    if (window.__hydraVertexWebGL) {
+      console.error('[hydra-vertex-webgpu] ⚠️ WebGL vertex extension already loaded!')
+      console.error('[hydra-vertex-webgpu] Mixing WebGL and WebGPU extensions causes errors.')
+      console.error('[hydra-vertex-webgpu] Reload the page and use only one extension.')
+      throw new Error('Cannot mix WebGL and WebGPU vertex extensions')
+    }
+    window.__hydraVertexWebGPU = VERSION
+  }
+
+  // Find existing hydra
+  const oldHydra = existingHydra || (typeof window !== 'undefined' ? window.hydraSynth : null)
+
+  // Stop existing animation loop
+  if (oldHydra?.looper) {
+    oldHydra.looper.stop()
+  }
+
+  // Find and replace the canvas (can't reuse WebGL canvas for WebGPU)
+  const oldCanvas = oldHydra?.canvas || document.querySelector('canvas')
+  if (!oldCanvas) {
+    throw new Error('No canvas found to replace')
+  }
+
+  const newCanvas = document.createElement('canvas')
+  newCanvas.width = oldCanvas.width
+  newCanvas.height = oldCanvas.height
+  newCanvas.style.cssText = oldCanvas.style.cssText
+  oldCanvas.replaceWith(newCanvas)
+
+  // Create new WebGPU hydra
+  const hydra = await createHydra({
+    canvas: newCanvas,
+    useWGSL: true,
+    makeGlobal: true,
+    ...options
+  })
+
+  // Update global reference
+  if (typeof window !== 'undefined') {
+    window.hydraSynth = hydra
+  }
+
+  console.log('[hydra-vertex-webgpu] Replaced hydra with WebGPU version')
   return hydra
 }
 

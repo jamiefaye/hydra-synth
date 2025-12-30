@@ -147,6 +147,7 @@ Output.prototype.init = function () {
   attribute vec3 position;
   varying vec2 uv;
   varying float v_faceId;
+  varying float v_instanceId;
 
   // Vertex data for fragment shader (default values for fullscreen quad)
   varying vec3 v_position;
@@ -160,6 +161,7 @@ Output.prototype.init = function () {
   void main () {
     uv = position.xy;
     v_faceId = 0.0;
+    v_instanceId = 0.0;
 
     // Default vertex data for fullscreen quad
     v_position = vec3(position.xy * 2.0 - 1.0, 0.0);
@@ -284,6 +286,7 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     positionBuffer = this.regl.buffer(verts)
     vertexCount = verts.length
 
+
     // Check for explicit UVs from VertexSource (e.g., cube)
     if (vertexSource && vertexSource.uvs && vertexSource.uvs.length > 0) {
       hasExplicitUVs = true
@@ -344,7 +347,72 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
       }
       colorBuffer = this.regl.buffer(colorData)
     }
-  } else {
+  }
+
+  // Check for GPU instancing data from VertexSource
+  let hasInstancing = false
+  let instanceCount = 0
+  let instanceOffsetBuffer = null
+  let instanceIdBuffer = null
+  let instanceRotationBuffer = null
+  let instanceScaleBuffer = null
+
+  if (vertexSource && vertexSource.instancePositions && vertexSource.instanceCount > 0) {
+    hasInstancing = true
+    instanceCount = vertexSource.instanceCount
+
+    // Log instance setup info
+    const baseVerts = vertexSource.vertices ? vertexSource.vertices.length / 3 : 0
+    const totalVerts = baseVerts * instanceCount
+    console.log(`[hydra-vertex] Instancing: ${instanceCount} instances × ${baseVerts} vertices = ${totalVerts} total vertices`)
+
+    // Reshape instance positions to vec3 array
+    const offsetData = []
+    for (let i = 0; i < vertexSource.instancePositions.length; i += 3) {
+      offsetData.push([
+        vertexSource.instancePositions[i],
+        vertexSource.instancePositions[i + 1],
+        vertexSource.instancePositions[i + 2]
+      ])
+    }
+    instanceOffsetBuffer = this.regl.buffer(offsetData)
+
+    // Create instance ID buffer (gl_InstanceID not available in WebGL 1)
+    // Each instance gets its index: [0, 1, 2, 3, ...]
+    const idData = []
+    for (let i = 0; i < instanceCount; i++) {
+      idData.push([i])
+    }
+    instanceIdBuffer = this.regl.buffer(idData)
+
+    // Create instance rotation buffer if provided (vec3 euler angles)
+    if (vertexSource.instanceRotations) {
+      const rotData = []
+      for (let i = 0; i < vertexSource.instanceRotations.length; i += 3) {
+        rotData.push([
+          vertexSource.instanceRotations[i],
+          vertexSource.instanceRotations[i + 1],
+          vertexSource.instanceRotations[i + 2]
+        ])
+      }
+      instanceRotationBuffer = this.regl.buffer(rotData)
+    }
+
+    // Create instance scale buffer if provided (vec3)
+    if (vertexSource.instanceScales) {
+      const scaleData = []
+      for (let i = 0; i < vertexSource.instanceScales.length; i += 3) {
+        scaleData.push([
+          vertexSource.instanceScales[i],
+          vertexSource.instanceScales[i + 1],
+          vertexSource.instanceScales[i + 2]
+        ])
+      }
+      instanceScaleBuffer = this.regl.buffer(scaleData)
+    }
+  }
+
+  if (!rawVerts) {
     // Default fullscreen triangle
     positionBuffer = this.defaultPositionBuffer
     vertexCount = 3
@@ -424,7 +492,16 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
   if (rawVerts) {
     if (hasChainedTransforms) {
       // Use generateVertexGlsl for chained transforms (Phase 5)
-      const generated = generateVertexGlsl(vertexSource, this.precision, { useExplicitUVs: hasExplicitUVs, useFaceIds: hasFaceIds, useNormals: hasNormals, useTangents: hasTangents, useColors: hasColors })
+      const generated = generateVertexGlsl(vertexSource, this.precision, {
+        useExplicitUVs: hasExplicitUVs,
+        useFaceIds: hasFaceIds,
+        useNormals: hasNormals,
+        useTangents: hasTangents,
+        useColors: hasColors,
+        useInstancing: hasInstancing,
+        useInstanceRotation: hasInstancing && !!instanceRotationBuffer,
+        useInstanceScale: hasInstancing && !!instanceScaleBuffer
+      })
       vert = generated.glsl
       vertexUniforms = generated.uniforms
     } else if (hasVertexOptions) {
@@ -558,9 +635,35 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
   if (hasColors && colorBuffer) {
     attributes.color = colorBuffer
   }
+  // Add instance attributes with divisor=1 (advances once per instance)
+  if (hasInstancing && instanceOffsetBuffer) {
+    attributes.instanceOffset = {
+      buffer: instanceOffsetBuffer,
+      divisor: 1
+    }
+    // Instance ID attribute (WebGL 1 doesn't have gl_InstanceID)
+    attributes.instanceId = {
+      buffer: instanceIdBuffer,
+      divisor: 1
+    }
+    // Per-instance rotation (euler angles xyz)
+    if (instanceRotationBuffer) {
+      attributes.instanceRotation = {
+        buffer: instanceRotationBuffer,
+        divisor: 1
+      }
+    }
+    // Per-instance scale (xyz)
+    if (instanceScaleBuffer) {
+      attributes.instanceScale = {
+        buffer: instanceScaleBuffer,
+        divisor: 1
+      }
+    }
+  }
 
   // Create the draw command
-  const drawCommand = this.regl({
+  const drawConfig = {
     frag: pass.frag,
     vert: vert,
     attributes: attributes,
@@ -569,15 +672,57 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     primitive: primitive,
     blend: BLEND_MODES[blendMode] || BLEND_MODES.normal,
     depth: { enable: has3D, func: 'less' }
-  })
+  }
 
-  // Store sprite config
+  // Add instancing if enabled
+  if (hasInstancing) {
+    drawConfig.instances = instanceCount
+    // Warn about very high instance counts
+    if (instanceCount > 5000) {
+      console.warn(`[hydra-vertex] ⚠️ High instance count: ${instanceCount}. This may cause GPU performance issues.`)
+    }
+  }
+
+  // Wrap shader compilation in try-catch to provide helpful errors
+  let drawCommand
+  try {
+    drawCommand = this.regl(drawConfig)
+  } catch (err) {
+    console.error('[hydra-vertex] ❌ Shader compilation failed!')
+    console.error('[hydra-vertex] Error:', err.message)
+
+    // Try to extract line info from error
+    if (err.message.includes('ERROR:')) {
+      console.error('[hydra-vertex] This is usually caused by invalid shader expressions or unsupported GLSL operations.')
+    }
+
+    // Log shader sources for debugging (truncated)
+    console.group('[hydra-vertex] Shader sources (for debugging):')
+    console.log('Vertex shader (first 500 chars):', vert.substring(0, 500) + '...')
+    console.log('Fragment shader (first 500 chars):', pass.frag.substring(0, 500) + '...')
+    console.groupEnd()
+
+    // Return early - sprite won't render but won't crash
+    return
+  }
+
+  // Store sprite config with all buffer references for cleanup
   const spriteConfig = {
     drawCommand,
     positionBuffer,
+    uvBuffer,
+    faceIdBuffer,
     normalBuffer,
+    tangentBuffer,
+    colorBuffer,
+    instanceOffsetBuffer,
+    instanceIdBuffer,
+    instanceRotationBuffer,
+    instanceScaleBuffer,
     blendMode,
     has3D,
+    hasInstancing,
+    instanceCount,
     enabled
   }
 
@@ -604,10 +749,37 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
 
 // Clear all sprites (called by hush)
 Output.prototype.clearSprites = function () {
-  // Clean up any custom position buffers
+  // Clean up all GPU buffers for each sprite
   for (const [level, sprite] of this.sprites) {
-    if (sprite.positionBuffer !== this.defaultPositionBuffer) {
+    if (sprite.positionBuffer && sprite.positionBuffer !== this.defaultPositionBuffer) {
       sprite.positionBuffer.destroy()
+    }
+    if (sprite.uvBuffer) {
+      sprite.uvBuffer.destroy()
+    }
+    if (sprite.faceIdBuffer) {
+      sprite.faceIdBuffer.destroy()
+    }
+    if (sprite.normalBuffer) {
+      sprite.normalBuffer.destroy()
+    }
+    if (sprite.tangentBuffer) {
+      sprite.tangentBuffer.destroy()
+    }
+    if (sprite.colorBuffer) {
+      sprite.colorBuffer.destroy()
+    }
+    if (sprite.instanceOffsetBuffer) {
+      sprite.instanceOffsetBuffer.destroy()
+    }
+    if (sprite.instanceIdBuffer) {
+      sprite.instanceIdBuffer.destroy()
+    }
+    if (sprite.instanceRotationBuffer) {
+      sprite.instanceRotationBuffer.destroy()
+    }
+    if (sprite.instanceScaleBuffer) {
+      sprite.instanceScaleBuffer.destroy()
     }
   }
   this.sprites.clear()
@@ -617,8 +789,36 @@ Output.prototype.clearSprites = function () {
 Output.prototype.removeSprite = function (level) {
   if (this.sprites.has(level)) {
     const sprite = this.sprites.get(level)
-    if (sprite.positionBuffer !== this.defaultPositionBuffer) {
+    // Clean up all GPU buffers
+    if (sprite.positionBuffer && sprite.positionBuffer !== this.defaultPositionBuffer) {
       sprite.positionBuffer.destroy()
+    }
+    if (sprite.uvBuffer) {
+      sprite.uvBuffer.destroy()
+    }
+    if (sprite.faceIdBuffer) {
+      sprite.faceIdBuffer.destroy()
+    }
+    if (sprite.normalBuffer) {
+      sprite.normalBuffer.destroy()
+    }
+    if (sprite.tangentBuffer) {
+      sprite.tangentBuffer.destroy()
+    }
+    if (sprite.colorBuffer) {
+      sprite.colorBuffer.destroy()
+    }
+    if (sprite.instanceOffsetBuffer) {
+      sprite.instanceOffsetBuffer.destroy()
+    }
+    if (sprite.instanceIdBuffer) {
+      sprite.instanceIdBuffer.destroy()
+    }
+    if (sprite.instanceRotationBuffer) {
+      sprite.instanceRotationBuffer.destroy()
+    }
+    if (sprite.instanceScaleBuffer) {
+      sprite.instanceScaleBuffer.destroy()
     }
     this.sprites.delete(level)
   }
@@ -640,8 +840,36 @@ Output.prototype.render = function (passes) {
   // Clear existing sprite at level 0 and register new one
   if (this.sprites.has(0)) {
     const oldSprite = this.sprites.get(0)
-    if (oldSprite.positionBuffer !== this.defaultPositionBuffer) {
+    // Clean up all GPU buffers from old sprite
+    if (oldSprite.positionBuffer && oldSprite.positionBuffer !== this.defaultPositionBuffer) {
       oldSprite.positionBuffer.destroy()
+    }
+    if (oldSprite.uvBuffer) {
+      oldSprite.uvBuffer.destroy()
+    }
+    if (oldSprite.faceIdBuffer) {
+      oldSprite.faceIdBuffer.destroy()
+    }
+    if (oldSprite.normalBuffer) {
+      oldSprite.normalBuffer.destroy()
+    }
+    if (oldSprite.tangentBuffer) {
+      oldSprite.tangentBuffer.destroy()
+    }
+    if (oldSprite.colorBuffer) {
+      oldSprite.colorBuffer.destroy()
+    }
+    if (oldSprite.instanceOffsetBuffer) {
+      oldSprite.instanceOffsetBuffer.destroy()
+    }
+    if (oldSprite.instanceIdBuffer) {
+      oldSprite.instanceIdBuffer.destroy()
+    }
+    if (oldSprite.instanceRotationBuffer) {
+      oldSprite.instanceRotationBuffer.destroy()
+    }
+    if (oldSprite.instanceScaleBuffer) {
+      oldSprite.instanceScaleBuffer.destroy()
     }
   }
   this.registerSprite(0, { passes, vertexData: null, blendMode: 'normal' })
@@ -655,7 +883,17 @@ Output.prototype.render = function (passes) {
 
 // Internal method to render all sprites in order
 Output.prototype._renderSprites = function (props) {
-  if (this.sprites.size === 0) return
+  if (this.sprites.size === 0) {
+    // No sprites - clear framebuffer (for hush())
+    this.pingPongIndex = this.pingPongIndex ? 0 : 1
+    const targetFbo = this.fbos[this.pingPongIndex]
+    this.regl.clear({
+      color: [0, 0, 0, 1],
+      depth: 1,
+      framebuffer: targetFbo
+    })
+    return
+  }
 
   // Sort sprite levels ascending
   const levels = Array.from(this.sprites.keys()).sort((a, b) => a - b)

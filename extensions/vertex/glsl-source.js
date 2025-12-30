@@ -30,12 +30,12 @@ function wrapWgslFunction(transform) {
   if (!t) return transform.transform.wgsl || ''
 
   // Get inputs from the original transform definition
-  // Note: processGlsl mutates obj.inputs to include base args (e.g., _c1 for combine types)
-  // We filter those out since they're already in t.args
+  // Note: generator-factory.js already prepends type args to inputs and slices the first,
+  // so originalInputs already contains _c0/_c1 for combine/combineCoord types.
+  // We only need to add the FIRST type arg (_st or _c0) to avoid duplicates.
   const originalInputs = transform.transform.inputs || []
-  const baseArgNames = new Set(t.args.map(a => a.name))
-  const userInputs = originalInputs.filter(inp => !baseArgNames.has(inp.name))
-  const allArgs = [...t.args, ...userInputs.map(inp => ({
+  const firstTypeArg = t.args[0]  // _st for src/coord/combineCoord, _c0 for color/combine
+  const allArgs = [firstTypeArg, ...originalInputs.map(inp => ({
     type: toWgslType(inp.type),
     name: inp.name
   }))]
@@ -211,19 +211,6 @@ GlslSource.prototype.compile = function (transforms) {
   if (isWGSL) {
     // Generate WGSL fragment shader
     // Module-scope private variables for varyings (accessible from all functions)
-
-    // Post-process fragColor to prefix uniform names with 'uf.'
-    // Uniforms in WGSL are declared as: struct UF { angle0: f32 }; var<uniform> uf : UF;
-    let wgslFragColor = shaderInfo.fragColor
-    shaderInfo.uniforms.forEach((uniform) => {
-      // Only value uniforms (not textures) go in the struct
-      if (uniform.type !== 'texture') {
-        // Replace uniform name with uf.uniformName (word boundary match)
-        const regex = new RegExp(`\\b${uniform.name}\\b`, 'g')
-        wgslFragColor = wgslFragColor.replace(regex, `uf.${uniform.name}`)
-      }
-    })
-
     frag = `
 var<private> v_position: vec3<f32>;
 var<private> v_normal: vec3<f32>;
@@ -248,7 +235,20 @@ ${shaderInfo.glslFunctions.map((transform) => {
   @fragment
   fn main(ourIn: VertexOutput) -> @location(0) vec4<f32> {
     let c: vec4<f32> = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-    let st: vec2<f32> = ourIn.texcoord;
+    // Sprite grid UV picking (like GLSL version)
+    var st: vec2<f32>;
+    // Flip X to correct mirroring in WGSL
+    let texcoord = vec2<f32>(1.0 - ourIn.texcoord.x, ourIn.texcoord.y);
+    if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
+      // faceId maps to cell in row-major order (left-to-right, top-to-bottom)
+      let cellX = ourIn.faceId % u_spriteGrid.x;
+      let cellY = floor(ourIn.faceId / u_spriteGrid.x);
+      let cellSize = vec2<f32>(1.0 / u_spriteGrid.x, 1.0 / u_spriteGrid.y);
+      st = texcoord * cellSize + vec2<f32>(cellX, cellY) * cellSize;
+    } else {
+      // Fallback to u_spriteUV for single sprite picking
+      st = u_spriteUV.xy + texcoord * (u_spriteUV.zw - u_spriteUV.xy);
+    }
     // Copy varyings to module-scope private variables
     v_position = ourIn.v_position;
     v_normal = ourIn.v_normal;
@@ -258,7 +258,9 @@ ${shaderInfo.glslFunctions.map((transform) => {
     v_viewDir = ourIn.v_viewDir;
     v_depth = ourIn.v_depth;
     v_color = ourIn.v_color;
-    return ${wgslFragColor};
+    // Define _ix for shader expressions (instance index)
+    let _ix = ourIn.v_instanceId;
+    return ${shaderInfo.fragColor};
   }
 `
   } else {
@@ -279,6 +281,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
   uniform vec2 resolution;
   varying vec2 uv;
   varying float v_faceId;
+  varying float v_instanceId;
 
   // Vertex data from vertex shader (for 3D geometry)
   varying vec3 v_position;

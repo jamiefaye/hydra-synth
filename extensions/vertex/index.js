@@ -82,6 +82,17 @@ function createLoop(fn) {
  * Install the vertex shader extension into a Hydra instance
  */
 export function install(hydra, options = {}) {
+  // Detect mixing WebGL and WebGPU extensions
+  if (typeof window !== 'undefined') {
+    if (window.__hydraVertexWebGPU) {
+      console.error('[hydra-vertex] ⚠️ WebGPU vertex extension already loaded!')
+      console.error('[hydra-vertex] Mixing WebGL and WebGPU extensions causes errors.')
+      console.error('[hydra-vertex] Reload the page and use only one extension.')
+      return false
+    }
+    window.__hydraVertexWebGL = VERSION
+  }
+
   console.log(`[hydra-vertex] Installing vertex shader extension v${VERSION}`)
 
   _hydra = hydra
@@ -111,6 +122,12 @@ export function install(hydra, options = {}) {
     window.v = v
   }
 
+  // Register VertexSource for custom geometry creation
+  synth.VertexSource = VertexSource
+  if (typeof window !== 'undefined') {
+    window.VertexSource = VertexSource
+  }
+
   // Replace GlslSource prototype methods with vertex-shader branch versions
   patchGlslSource(hydra)
 
@@ -123,8 +140,60 @@ export function install(hydra, options = {}) {
   // Add ResizeObserver to handle canvas resize automatically
   setupResizeObserver(hydra)
 
+  // Add WebGL context loss detection
+  setupContextLossDetection(hydra)
+
   console.log('[hydra-vertex] Extension installed successfully')
   return true
+}
+
+/**
+ * Setup WebGL context loss detection and recovery
+ */
+function setupContextLossDetection(hydra) {
+  const canvas = hydra.canvas
+  if (!canvas) return
+
+  const gl = hydra.regl._gl
+
+  canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault()
+    console.error('[hydra-vertex] ⚠️ WebGL context LOST! GPU may have crashed or timed out.')
+    console.error('[hydra-vertex] This can happen with very complex scenes (many instances, complex shaders).')
+
+    // Store state for potential recovery
+    hydra._contextLost = true
+
+    // Notify user visually if possible
+    if (typeof window !== 'undefined' && window.alert) {
+      // Don't block with alert, just log prominently
+      console.error('%c WebGL Context Lost - GPU timeout or crash ', 'background: #ff0000; color: white; font-size: 16px;')
+    }
+  })
+
+  canvas.addEventListener('webglcontextrestored', (event) => {
+    console.log('[hydra-vertex] ✓ WebGL context restored! Reinitializing...')
+    hydra._contextLost = false
+
+    // Clear all sprites and reinitialize
+    for (const output of hydra.o) {
+      if (output.clearSprites) {
+        output.clearSprites()
+      }
+    }
+
+    console.log('[hydra-vertex] Context restored. You may need to re-run your code.')
+  })
+
+  // Check for extension that can provide more GPU info
+  const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+  if (debugInfo) {
+    const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL)
+    const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+    console.log(`[hydra-vertex] GPU: ${vendor} - ${renderer}`)
+  }
+
+  console.log('[hydra-vertex] WebGL context loss detection enabled')
 }
 
 /**
@@ -240,6 +309,7 @@ function patchOutput(hydra) {
     attribute vec3 position;
     varying vec2 uv;
     varying float v_faceId;
+    varying float v_instanceId;
 
     // Vertex data for fragment shader (default values for fullscreen quad)
     varying vec3 v_position;
@@ -253,6 +323,7 @@ function patchOutput(hydra) {
     void main () {
       uv = position.xy;
       v_faceId = 0.0;
+      v_instanceId = 0.0;
 
       // Default vertex data for fullscreen quad
       v_position = vec3(position.xy * 2.0 - 1.0, 0.0);

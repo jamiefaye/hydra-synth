@@ -3,6 +3,53 @@
 // Then pass to out(): osc(10).out(o0, tri(0.3).rotate(0.5), 1)
 
 import { extractSkeletonFromGltf, extractAnimationsFromGltf, computeSkinningMatrices, applySkinning } from './geometry.js'
+import { parseShaderExpr } from '../../src/shader-expr/index.js'
+
+// Create a uniform accessor function that handles static values and lambdas
+function makeUniformAccessor(value) {
+  return (context, props) => {
+    // Handle array of values (may contain lambdas)
+    if (Array.isArray(value)) {
+      return value.map(v => typeof v === 'function' ? v() : v)
+    }
+    // Handle single lambda
+    if (typeof value === 'function') {
+      return value()
+    }
+    // Static value
+    return value
+  }
+}
+
+// Helper to check if a value is a shader expression (string) and get its GLSL
+function getAngleGlsl(value, uniformName, uniforms, uniformDecls, suffix) {
+  if (typeof value === 'string') {
+    // Shader expression - parse and return inline GLSL
+    const expr = parseShaderExpr(value)
+    if (expr) {
+      return expr.toGLSL()
+    }
+  }
+  // Number or function - use uniform
+  uniformDecls.push(`uniform float ${uniformName};`)
+  uniforms[uniformName] = makeUniformAccessor(value)
+  return uniformName
+}
+
+// Helper to check if a value is a shader expression (string) and get its WGSL
+// For WGSL, uniforms are stored in the vtx struct and accessed as vtx.uniformName
+function getAngleWgsl(value, uniformName, uniforms) {
+  if (typeof value === 'string') {
+    // Shader expression - parse and return inline WGSL
+    const expr = parseShaderExpr(value)
+    if (expr) {
+      return expr.toWGSL()
+    }
+  }
+  // Number or function - use uniform (accessed via vtx struct)
+  uniforms.push({ name: uniformName, type: 'f32', value: value })
+  return `vtx.${uniformName}`
+}
 
 class VertexSource {
   constructor(vertices) {
@@ -10,6 +57,16 @@ class VertexSource {
     this.vertices = vertices
     // Accumulated transforms
     this.transforms = []
+    // GPU instancing data (all Float32Arrays, vec3 per instance)
+    this.instancePositions = null   // xyz offsets
+    this.instanceRotations = null   // xyz euler angles (radians)
+    this.instanceScales = null      // xyz scale factors
+    this.instanceCount = 0
+    // Legacy alias for backwards compatibility
+    Object.defineProperty(this, 'instanceOffsets', {
+      get: () => this.instancePositions,
+      set: (v) => { this.instancePositions = v }
+    })
   }
 
   // Get raw vertices (for backward compat or direct access)
@@ -132,8 +189,8 @@ class VertexSource {
     return this
   }
 
-  // 3D grid instancing with faceId support
-  // Creates a grid of copies, each with unique faceId for variation
+  // 3D grid instancing (GPU-accelerated)
+  // Creates a grid of instances without duplicating vertices
   // nx, ny, nz: number of copies in each direction
   // spacing: distance between copies (or {x, y, z} object)
   grid(nx = 2, ny = 2, nz = 1, spacing = 1.0) {
@@ -141,156 +198,140 @@ class VertexSource {
     const sy = typeof spacing === 'object' ? spacing.y || 1 : spacing
     const sz = typeof spacing === 'object' ? spacing.z || 1 : spacing
 
-    const orig = this.vertices
-    const stride = this.is3D ? 3 : 2
-    const vertexCount = orig.length / stride
+    const count = nx * ny * nz
 
-    // Safety check: limit total vertices to prevent browser crash
-    const maxVertices = 5000000  // 5 million vertex limit
-    const totalInstances = nx * ny * nz
-    const totalVertices = vertexCount * totalInstances
-    if (totalVertices > maxVertices) {
-      const maxInstances = Math.floor(maxVertices / vertexCount)
-      const scale = Math.cbrt(maxInstances / totalInstances)
-      const newNx = Math.max(1, Math.floor(nx * scale))
-      const newNy = Math.max(1, Math.floor(ny * scale))
-      const newNz = Math.max(1, Math.floor(nz * scale))
-      console.warn(`grid(${nx}, ${ny}, ${nz}) would create ${totalVertices.toLocaleString()} vertices. ` +
-        `Limiting to grid(${newNx}, ${newNy}, ${newNz}) to prevent crash. ` +
-        `Use lower-poly geometry (e.g., sphere(0.1, 8, 4)) for large grids.`)
-      nx = newNx
-      ny = newNy
-      nz = newNz
-    }
-
-    const newVerts = []
-    const newNormals = this.normals ? [] : null
-    const newUVs = this.uvs ? [] : null
-    const newColors = this.colors ? [] : null
-    const newFaceIds = []
+    // Store instance offsets for GPU instancing (vec3 per instance)
+    this.instanceOffsets = new Float32Array(count * 3)
 
     // Center the grid
     const offsetX = -((nx - 1) * sx) / 2
     const offsetY = -((ny - 1) * sy) / 2
     const offsetZ = -((nz - 1) * sz) / 2
 
-    let instanceId = 0
+    let idx = 0
     for (let iz = 0; iz < nz; iz++) {
       for (let iy = 0; iy < ny; iy++) {
         for (let ix = 0; ix < nx; ix++) {
-          const dx = offsetX + ix * sx
-          const dy = offsetY + iy * sy
-          const dz = offsetZ + iz * sz
-
-          // Copy all vertices with offset
-          for (let v = 0; v < vertexCount; v++) {
-            const vi = v * stride
-            newVerts.push(orig[vi] + dx, orig[vi + 1] + dy)
-            if (stride === 3) newVerts.push(orig[vi + 2] + dz)
-
-            // Copy normals (unchanged by translation)
-            if (this.normals) {
-              const ni = v * 3
-              newNormals.push(this.normals[ni], this.normals[ni + 1], this.normals[ni + 2])
-            }
-
-            // Copy UVs (unchanged)
-            if (this.uvs) {
-              const ui = v * 2
-              newUVs.push(this.uvs[ui], this.uvs[ui + 1])
-            }
-
-            // Copy colors (unchanged)
-            if (this.colors) {
-              const ci = v * 4
-              newColors.push(this.colors[ci], this.colors[ci + 1], this.colors[ci + 2], this.colors[ci + 3])
-            }
-
-            // FaceId = instance index (for per-instance variation)
-            newFaceIds.push(instanceId)
-          }
-          instanceId++
+          this.instanceOffsets[idx++] = offsetX + ix * sx
+          this.instanceOffsets[idx++] = offsetY + iy * sy
+          this.instanceOffsets[idx++] = offsetZ + iz * sz
         }
       }
     }
 
-    this.vertices = newVerts
-    if (newNormals) this.normals = newNormals
-    if (newUVs) this.uvs = newUVs
-    if (newColors) this.colors = newColors
-    this.faceIds = newFaceIds
-    this.instanceCount = nx * ny * nz
-
+    this.instanceCount = count
     return this
   }
 
-  // Scatter instances randomly
+  // Scatter instances randomly (GPU-accelerated)
+  // Creates random instance offsets without duplicating vertices
   // count: number of instances
   // range: {x, y, z} spread range (centered at origin)
   // seed: optional random seed for reproducibility
   scatter(count = 10, range = { x: 2, y: 2, z: 0 }, seed = 0) {
     // Simple seeded random
+    let s = seed
     const random = () => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff
-      return seed / 0x7fffffff
+      s = (s * 1103515245 + 12345) & 0x7fffffff
+      return s / 0x7fffffff
     }
 
-    const orig = this.vertices
-    const stride = this.is3D ? 3 : 2
-    const vertexCount = orig.length / stride
+    const rx = typeof range === 'number' ? range : (range.x || 2)
+    const ry = typeof range === 'number' ? range : (range.y || 2)
+    const rz = typeof range === 'number' ? 0 : (range.z || 0)
 
-    // Safety check: limit total vertices to prevent browser crash
-    const maxVertices = 5000000  // 5 million vertex limit
-    const totalVertices = vertexCount * count
-    if (totalVertices > maxVertices) {
-      const newCount = Math.floor(maxVertices / vertexCount)
-      console.warn(`scatter(${count}) would create ${totalVertices.toLocaleString()} vertices. ` +
-        `Limiting to scatter(${newCount}) to prevent crash. ` +
-        `Use lower-poly geometry for large scatter counts.`)
-      count = newCount
-    }
+    // Store instance offsets for GPU instancing (vec3 per instance)
+    this.instanceOffsets = new Float32Array(count * 3)
 
-    const newVerts = []
-    const newNormals = this.normals ? [] : null
-    const newUVs = this.uvs ? [] : null
-    const newColors = this.colors ? [] : null
-    const newFaceIds = []
-
+    let idx = 0
     for (let i = 0; i < count; i++) {
-      const dx = (random() - 0.5) * range.x
-      const dy = (random() - 0.5) * range.y
-      const dz = (random() - 0.5) * (range.z || 0)
+      this.instanceOffsets[idx++] = (random() - 0.5) * rx
+      this.instanceOffsets[idx++] = (random() - 0.5) * ry
+      this.instanceOffsets[idx++] = (random() - 0.5) * rz
+    }
 
-      for (let v = 0; v < vertexCount; v++) {
-        const vi = v * stride
-        newVerts.push(orig[vi] + dx, orig[vi + 1] + dy)
-        if (stride === 3) newVerts.push(orig[vi + 2] + dz)
+    this.instanceCount = count
+    return this
+  }
 
-        if (this.normals) {
-          const ni = v * 3
-          newNormals.push(this.normals[ni], this.normals[ni + 1], this.normals[ni + 2])
+  // Custom instance data (GPU-accelerated)
+  // Accepts various formats:
+  //   instances([[x,y,z], ...])  - positions only (nested)
+  //   instances([x,y,z, x,y,z, ...])  - positions only (flat)
+  //   instances({ positions: [...], rotations: [...], scales: [...] })  - full control
+  //
+  // Each array can be nested [[x,y,z], ...] or flat [x,y,z, ...]
+  // Scales can also be scalar per instance [s0, s1, ...] for uniform scaling
+  instances(data) {
+    // Helper to flatten nested array to Float32Array
+    const flatten = (arr, componentsPerItem) => {
+      if (!arr) return null
+      if (arr instanceof Float32Array) return arr
+
+      // Check if already flat (first element is a number)
+      if (typeof arr[0] === 'number') {
+        return new Float32Array(arr)
+      }
+
+      // Nested array - flatten it
+      const count = arr.length
+      const flat = new Float32Array(count * componentsPerItem)
+      for (let i = 0; i < count; i++) {
+        const item = arr[i]
+        if (Array.isArray(item)) {
+          for (let j = 0; j < componentsPerItem; j++) {
+            flat[i * componentsPerItem + j] = item[j] !== undefined ? item[j] : (j < 3 ? 0 : 1)
+          }
+        } else if (typeof item === 'object') {
+          // {x, y, z} format
+          flat[i * componentsPerItem] = item.x !== undefined ? item.x : 0
+          flat[i * componentsPerItem + 1] = item.y !== undefined ? item.y : 0
+          flat[i * componentsPerItem + 2] = item.z !== undefined ? item.z : 0
+        } else {
+          // Scalar (for uniform scale)
+          flat[i * componentsPerItem] = item
+          flat[i * componentsPerItem + 1] = item
+          flat[i * componentsPerItem + 2] = item
         }
+      }
+      return flat
+    }
 
-        if (this.uvs) {
-          const ui = v * 2
-          newUVs.push(this.uvs[ui], this.uvs[ui + 1])
+    // Handle different input formats
+    if (Array.isArray(data) || data instanceof Float32Array) {
+      // Simple array of positions (or Float32Array)
+      this.instancePositions = flatten(data, 3)
+      this.instanceCount = this.instancePositions.length / 3
+    } else if (typeof data === 'object') {
+      // Object with positions, rotations, scales
+      if (data.positions) {
+        this.instancePositions = flatten(data.positions, 3)
+        this.instanceCount = this.instancePositions.length / 3
+      }
+      if (data.rotations) {
+        this.instanceRotations = flatten(data.rotations, 3)
+      }
+      if (data.scales) {
+        // Scales can be scalar or vec3
+        const scales = data.scales
+        if (typeof scales[0] === 'number' && !Array.isArray(scales[0])) {
+          // Check if it's flat vec3 or array of scalars
+          if (scales.length === this.instanceCount) {
+            // Array of scalars - expand to vec3
+            const flat = new Float32Array(this.instanceCount * 3)
+            for (let i = 0; i < this.instanceCount; i++) {
+              flat[i * 3] = flat[i * 3 + 1] = flat[i * 3 + 2] = scales[i]
+            }
+            this.instanceScales = flat
+          } else {
+            // Flat vec3 array
+            this.instanceScales = flatten(scales, 3)
+          }
+        } else {
+          this.instanceScales = flatten(scales, 3)
         }
-
-        if (this.colors) {
-          const ci = v * 4
-          newColors.push(this.colors[ci], this.colors[ci + 1], this.colors[ci + 2], this.colors[ci + 3])
-        }
-
-        newFaceIds.push(i)
       }
     }
-
-    this.vertices = newVerts
-    if (newNormals) this.normals = newNormals
-    if (newUVs) this.uvs = newUVs
-    if (newColors) this.colors = newColors
-    this.faceIds = newFaceIds
-    this.instanceCount = count
 
     return this
   }
@@ -362,9 +403,18 @@ class VertexSource {
 
 // Generate vertex shader GLSL from transforms
 // Returns { glsl: string, uniforms: object }
-// Options: { useExplicitUVs: boolean, useFaceIds: boolean, useNormals: boolean, useTangents: boolean, useColors: boolean }
+// Options: { useExplicitUVs, useFaceIds, useNormals, useTangents, useColors, useInstancing, useInstanceRotation, useInstanceScale }
 export function generateVertexGlsl(vertexSource, precision, options = {}) {
-  const { useExplicitUVs = false, useFaceIds = false, useNormals = false, useTangents = false, useColors = false } = options
+  const {
+    useExplicitUVs = false,
+    useFaceIds = false,
+    useNormals = false,
+    useTangents = false,
+    useColors = false,
+    useInstancing = false,
+    useInstanceRotation = false,
+    useInstanceScale = false
+  } = options
 
   // UV source code - either from attribute or computed from bounds
   const uvAttributeDecl = useExplicitUVs ? 'attribute vec2 texcoord;' : ''
@@ -388,17 +438,49 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
   const colorAttributeDecl = useColors ? 'attribute vec4 color;' : ''
   const colorPassthrough = useColors ? 'v_color = color;' : 'v_color = vec4(1.0, 1.0, 1.0, 1.0);'
 
+  // GPU instancing - per-instance offset and ID attributes, plus instance ID varying
+  // Note: WebGL 1 doesn't have gl_InstanceID, so we pass it as an attribute
+  let instanceAttributeDecl = useInstancing ? 'attribute vec3 instanceOffset;\nattribute float instanceId;' : ''
+  if (useInstanceRotation) instanceAttributeDecl += '\nattribute vec3 instanceRotation;'
+  if (useInstanceScale) instanceAttributeDecl += '\nattribute vec3 instanceScale;'
+
+  const instanceIdVaryingDecl = 'varying float v_instanceId;'  // Always declare for fragment shader compatibility
+  const instanceIdPassthrough = useInstancing ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
+  const instanceOffsetCode = useInstancing ? 'pos += instanceOffset;' : ''
+
+  // Per-instance rotation (applied before chain transforms)
+  // Uses euler angles XYZ order
+  const instanceRotationCode = useInstanceRotation ? `
+          // Per-instance rotation (euler XYZ)
+          {
+            float cx = cos(instanceRotation.x), sx = sin(instanceRotation.x);
+            float cy = cos(instanceRotation.y), sy = sin(instanceRotation.y);
+            float cz = cos(instanceRotation.z), sz = sin(instanceRotation.z);
+            // Rotate X
+            pos = vec3(pos.x, pos.y * cx - pos.z * sx, pos.y * sx + pos.z * cx);
+            // Rotate Y
+            pos = vec3(pos.x * cy + pos.z * sy, pos.y, -pos.x * sy + pos.z * cy);
+            // Rotate Z
+            pos = vec3(pos.x * cz - pos.y * sz, pos.x * sz + pos.y * cz, pos.z);
+          }` : ''
+
+  // Per-instance scale (applied before chain transforms)
+  const instanceScaleCode = useInstanceScale ? 'pos *= instanceScale;' : ''
+
   if (!vertexSource.hasTransforms) {
     // No transforms - use simple passthrough with bounds
+    // Still need to handle instancing if enabled
     return {
       glsl: `
         precision ${precision} float;
         attribute vec3 position;
+        ${instanceAttributeDecl}
         ${uvAttributeDecl}
         ${faceIdAttributeDecl}
         ${colorAttributeDecl}
         varying vec2 uv;
         ${faceIdVaryingDecl}
+        ${instanceIdVaryingDecl}
 
         // Vertex data for fragment shader (default values for 2D)
         varying vec3 v_position;
@@ -418,9 +500,16 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
           ${uvComputation}
           ${faceIdPassthrough}
           ${colorPassthrough}
+          ${instanceIdPassthrough}
+
+          // Apply instance transforms if enabled
+          vec3 pos = position;
+          ${instanceScaleCode}
+          ${instanceRotationCode}
+          ${instanceOffsetCode}
 
           // Set default vertex data for 2D geometry
-          v_position = vec3(position.xy, 0.0);
+          v_position = pos;
           v_normal = vec3(0.0, 0.0, 1.0);
           v_worldNormal = vec3(0.0, 0.0, 1.0);
           v_tangent = vec3(1.0, 0.0, 0.0);
@@ -428,7 +517,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
           v_viewDir = vec3(0.0, 0.0, 1.0);
           v_depth = 1.0;
 
-          gl_Position = vec4(position.xy, 0.0, 1.0);
+          gl_Position = vec4(pos.xy, 0.0, 1.0);
           gl_PointSize = 2.0;
         }
       `,
@@ -458,36 +547,35 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     switch (transform.type) {
       case 'rotate': {
         const uniformName = `u_rotate_${suffix}`
-        uniformDecls.push(`uniform float ${uniformName};`)
-        uniforms[uniformName] = makeUniformAccessor(transform.args.angle)
+        const angleGlsl = getAngleGlsl(transform.args.angle, uniformName, uniforms, uniformDecls, suffix)
         if (has3D) {
           // 2D rotate = rotate around Z axis
           const rotateCode = `
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec3(pos.x * c - pos.y * s, pos.x * s + pos.y * c, pos.z);
           }`
           transformCode.push(rotateCode)
           // Apply same rotation to normal (using nrm variable)
           normalTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             nrm = vec3(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c, nrm.z);
           }`)
           // Apply same rotation to tangent
           tangentTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             tang = vec3(tang.x * c - tang.y * s, tang.x * s + tang.y * c, tang.z);
           }`)
         } else {
           transformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
           }`)
         }
@@ -496,26 +584,25 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
       case 'rotateX': {
         const uniformName = `u_rotateX_${suffix}`
-        uniformDecls.push(`uniform float ${uniformName};`)
-        uniforms[uniformName] = makeUniformAccessor(transform.args.angle)
+        const angleGlsl = getAngleGlsl(transform.args.angle, uniformName, uniforms, uniformDecls, suffix)
         transformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec3(pos.x, pos.y * c - pos.z * s, pos.y * s + pos.z * c);
           }`)
         // Apply same rotation to normal
         normalTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             nrm = vec3(nrm.x, nrm.y * c - nrm.z * s, nrm.y * s + nrm.z * c);
           }`)
         // Apply same rotation to tangent
         tangentTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             tang = vec3(tang.x, tang.y * c - tang.z * s, tang.y * s + tang.z * c);
           }`)
         break
@@ -523,26 +610,25 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
       case 'rotateY': {
         const uniformName = `u_rotateY_${suffix}`
-        uniformDecls.push(`uniform float ${uniformName};`)
-        uniforms[uniformName] = makeUniformAccessor(transform.args.angle)
+        const angleGlsl = getAngleGlsl(transform.args.angle, uniformName, uniforms, uniformDecls, suffix)
         transformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec3(pos.x * c + pos.z * s, pos.y, -pos.x * s + pos.z * c);
           }`)
         // Apply same rotation to normal
         normalTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             nrm = vec3(nrm.x * c + nrm.z * s, nrm.y, -nrm.x * s + nrm.z * c);
           }`)
         // Apply same rotation to tangent
         tangentTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             tang = vec3(tang.x * c + tang.z * s, tang.y, -tang.x * s + tang.z * c);
           }`)
         break
@@ -550,59 +636,74 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
       case 'rotateZ': {
         const uniformName = `u_rotateZ_${suffix}`
-        uniformDecls.push(`uniform float ${uniformName};`)
-        uniforms[uniformName] = makeUniformAccessor(transform.args.angle)
+        const angleGlsl = getAngleGlsl(transform.args.angle, uniformName, uniforms, uniformDecls, suffix)
         transformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             pos = vec3(pos.x * c - pos.y * s, pos.x * s + pos.y * c, pos.z);
           }`)
         // Apply same rotation to normal
         normalTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             nrm = vec3(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c, nrm.z);
           }`)
         // Apply same rotation to tangent
         tangentTransformCode.push(`
           {
-            float c = cos(${uniformName});
-            float s = sin(${uniformName});
+            float c = cos(${angleGlsl});
+            float s = sin(${angleGlsl});
             tang = vec3(tang.x * c - tang.y * s, tang.x * s + tang.y * c, tang.z);
           }`)
         break
       }
 
       case 'scale': {
-        const uniformName = `u_scale_${suffix}`
+        // Support shader expressions for each component
+        const getScaleGlsl = (val, name) => {
+          if (typeof val === 'string') {
+            const expr = parseShaderExpr(val)
+            if (expr) return expr.toGLSL()
+          }
+          uniformDecls.push(`uniform float ${name};`)
+          uniforms[name] = makeUniformAccessor(val)
+          return name
+        }
+        const sx = getScaleGlsl(transform.args.x, `u_scaleX_${suffix}`)
+        const sy = getScaleGlsl(transform.args.y, `u_scaleY_${suffix}`)
         if (has3D) {
-          uniformDecls.push(`uniform vec3 ${uniformName};`)
-          uniforms[uniformName] = makeUniformAccessor([transform.args.x, transform.args.y, transform.args.z || 1])
+          const sz = getScaleGlsl(transform.args.z ?? 1, `u_scaleZ_${suffix}`)
           transformCode.push(`
-          pos *= ${uniformName};`)
+          pos *= vec3(${sx}, ${sy}, ${sz});`)
         } else {
-          uniformDecls.push(`uniform vec2 ${uniformName};`)
-          uniforms[uniformName] = makeUniformAccessor([transform.args.x, transform.args.y])
           transformCode.push(`
-          pos *= ${uniformName};`)
+          pos *= vec2(${sx}, ${sy});`)
         }
         break
       }
 
       case 'offset': {
-        const uniformName = `u_offset_${suffix}`
+        // Support shader expressions for each component
+        const getOffsetGlsl = (val, name) => {
+          if (typeof val === 'string') {
+            const expr = parseShaderExpr(val)
+            if (expr) return expr.toGLSL()
+          }
+          uniformDecls.push(`uniform float ${name};`)
+          uniforms[name] = makeUniformAccessor(val)
+          return name
+        }
+        const ox = getOffsetGlsl(transform.args.x, `u_offsetX_${suffix}`)
+        const oy = getOffsetGlsl(transform.args.y, `u_offsetY_${suffix}`)
         if (has3D) {
-          uniformDecls.push(`uniform vec3 ${uniformName};`)
-          uniforms[uniformName] = makeUniformAccessor([transform.args.x, transform.args.y, transform.args.z || 0])
+          const oz = getOffsetGlsl(transform.args.z || 0, `u_offsetZ_${suffix}`)
           transformCode.push(`
-          pos += ${uniformName};`)
+          pos += vec3(${ox}, ${oy}, ${oz});`)
         } else {
-          uniformDecls.push(`uniform vec2 ${uniformName};`)
-          uniforms[uniformName] = makeUniformAccessor([transform.args.x, transform.args.y])
           transformCode.push(`
-          pos += ${uniformName};`)
+          pos += vec2(${ox}, ${oy});`)
         }
         break
       }
@@ -675,6 +776,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     glsl = `
     precision ${precision} float;
     attribute vec3 position;
+    ${instanceAttributeDecl}
     ${uvAttributeDecl}
     ${faceIdAttributeDecl}
     ${normalAttributeDecl}
@@ -682,6 +784,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     ${colorAttributeDecl}
     varying vec2 uv;
     ${faceIdVaryingDecl}
+    ${instanceIdVaryingDecl}
 
     // Vertex data for fragment shader
     varying vec3 v_position;
@@ -693,6 +796,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     varying float v_depth;
     varying vec4 v_color;
 
+    uniform float time;
     uniform vec2 resolution;
     uniform vec2 u_boundsMin;
     uniform vec2 u_boundsMax;
@@ -703,10 +807,14 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${uvComputation}
       ${faceIdPassthrough}
       ${colorPassthrough}
+      ${instanceIdPassthrough}
 
       // Apply transforms (3D)
       vec3 pos = position;
+      ${instanceScaleCode}
+      ${instanceRotationCode}
       ${transformCode.join('\n      ')}
+      ${instanceOffsetCode}
 
       // Compute vertex data for fragment shader
       v_position = pos;
@@ -739,11 +847,13 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     glsl = `
     precision ${precision} float;
     attribute vec3 position;
+    ${instanceAttributeDecl}
     ${uvAttributeDecl}
     ${faceIdAttributeDecl}
     ${colorAttributeDecl}
     varying vec2 uv;
     ${faceIdVaryingDecl}
+    ${instanceIdVaryingDecl}
 
     // Vertex data for fragment shader (default values for 2D)
     varying vec3 v_position;
@@ -755,6 +865,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     varying float v_depth;
     varying vec4 v_color;
 
+    uniform float time;
     uniform vec2 u_boundsMin;
     uniform vec2 u_boundsMax;
     ${uniformDecls.join('\n    ')}
@@ -764,10 +875,17 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${uvComputation}
       ${faceIdPassthrough}
       ${colorPassthrough}
+      ${instanceIdPassthrough}
 
       // Apply transforms (2D)
       vec2 pos = position.xy;
+      ${useInstanceScale ? 'pos *= instanceScale.xy;' : ''}
+      ${useInstanceRotation ? `{
+        float c = cos(instanceRotation.z), s = sin(instanceRotation.z);
+        pos = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
+      }` : ''}
       ${transformCode.join('\n      ')}
+      ${useInstancing ? 'pos += instanceOffset.xy;' : ''}
 
       // Set default vertex data for 2D geometry
       v_position = vec3(pos, 0.0);
@@ -787,27 +905,20 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
   return { glsl, uniforms }
 }
 
-// Create a uniform accessor function that handles static values and lambdas
-function makeUniformAccessor(value) {
-  return (context, props) => {
-    // Handle array of values (may contain lambdas)
-    if (Array.isArray(value)) {
-      return value.map(v => typeof v === 'function' ? v() : v)
-    }
-    // Handle single lambda
-    if (typeof value === 'function') {
-      return value()
-    }
-    // Static value
-    return value
-  }
-}
-
 // Generate WGSL vertex shader from transforms
 // Returns { wgsl: string, uniforms: array of {name, type, value} }
-// Options: { useExplicitUVs: boolean, useFaceIds: boolean, useNormals: boolean, useTangents: boolean, useColors: boolean }
+// Options: { useExplicitUVs, useFaceIds, useNormals, useTangents, useColors, useInstancing, useInstanceRotation, useInstanceScale }
 export function generateVertexWgsl(vertexSource, options = {}) {
-  const { useExplicitUVs = false, useFaceIds = false, useNormals = false, useTangents = false, useColors = false } = options
+  const {
+    useExplicitUVs = false,
+    useFaceIds = false,
+    useNormals = false,
+    useTangents = false,
+    useColors = false,
+    useInstancing = false,
+    useInstanceRotation = false,
+    useInstanceScale = false
+  } = options
 
   // Collect uniforms and build transform code
   const uniforms = []
@@ -831,33 +942,33 @@ export function generateVertexWgsl(vertexSource, options = {}) {
       switch (transform.type) {
         case 'rotate': {
           const uniformName = `u_rotate_${suffix}`
-          uniforms.push({ name: uniformName, type: 'f32', value: transform.args.angle })
+          const angleWgsl = getAngleWgsl(transform.args.angle, uniformName, uniforms)
           if (has3D) {
             transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec3f(pos.x * c - pos.y * s, pos.x * s + pos.y * c, pos.z);
       }`)
             // Apply same rotation to normal
             normalTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         nrm = vec3f(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c, nrm.z);
       }`)
             // Apply same rotation to tangent
             tangentTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         tang = vec3f(tang.x * c - tang.y * s, tang.x * s + tang.y * c, tang.z);
       }`)
           } else {
             transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec2f(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
       }`)
           }
@@ -866,25 +977,25 @@ export function generateVertexWgsl(vertexSource, options = {}) {
 
         case 'rotateX': {
           const uniformName = `u_rotateX_${suffix}`
-          uniforms.push({ name: uniformName, type: 'f32', value: transform.args.angle })
+          const angleWgsl = getAngleWgsl(transform.args.angle, uniformName, uniforms)
           transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec3f(pos.x, pos.y * c - pos.z * s, pos.y * s + pos.z * c);
       }`)
           // Apply same rotation to normal
           normalTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         nrm = vec3f(nrm.x, nrm.y * c - nrm.z * s, nrm.y * s + nrm.z * c);
       }`)
           // Apply same rotation to tangent
           tangentTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         tang = vec3f(tang.x, tang.y * c - tang.z * s, tang.y * s + tang.z * c);
       }`)
           break
@@ -892,25 +1003,25 @@ export function generateVertexWgsl(vertexSource, options = {}) {
 
         case 'rotateY': {
           const uniformName = `u_rotateY_${suffix}`
-          uniforms.push({ name: uniformName, type: 'f32', value: transform.args.angle })
+          const angleWgsl = getAngleWgsl(transform.args.angle, uniformName, uniforms)
           transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec3f(pos.x * c + pos.z * s, pos.y, -pos.x * s + pos.z * c);
       }`)
           // Apply same rotation to normal
           normalTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         nrm = vec3f(nrm.x * c + nrm.z * s, nrm.y, -nrm.x * s + nrm.z * c);
       }`)
           // Apply same rotation to tangent
           tangentTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         tang = vec3f(tang.x * c + tang.z * s, tang.y, -tang.x * s + tang.z * c);
       }`)
           break
@@ -918,51 +1029,73 @@ export function generateVertexWgsl(vertexSource, options = {}) {
 
         case 'rotateZ': {
           const uniformName = `u_rotateZ_${suffix}`
-          uniforms.push({ name: uniformName, type: 'f32', value: transform.args.angle })
+          const angleWgsl = getAngleWgsl(transform.args.angle, uniformName, uniforms)
           transformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         pos = vec3f(pos.x * c - pos.y * s, pos.x * s + pos.y * c, pos.z);
       }`)
           // Apply same rotation to normal
           normalTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         nrm = vec3f(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c, nrm.z);
       }`)
           // Apply same rotation to tangent
           tangentTransformCode.push(`
       {
-        let c = cos(vtx.${uniformName});
-        let s = sin(vtx.${uniformName});
+        let c = cos(${angleWgsl});
+        let s = sin(${angleWgsl});
         tang = vec3f(tang.x * c - tang.y * s, tang.x * s + tang.y * c, tang.z);
       }`)
           break
         }
 
         case 'scale': {
-          const uniformName = `u_scale_${suffix}`
-          if (has3D) {
-            uniforms.push({ name: uniformName, type: 'vec3f', value: [transform.args.x, transform.args.y, transform.args.z || 1] })
-          } else {
-            uniforms.push({ name: uniformName, type: 'vec2f', value: [transform.args.x, transform.args.y] })
+          // Support shader expressions for each component
+          const getScaleWgsl = (val, name) => {
+            if (typeof val === 'string') {
+              const expr = parseShaderExpr(val)
+              if (expr) return expr.toWGSL()
+            }
+            uniforms.push({ name, type: 'f32', value: val })
+            return `vtx.${name}`
           }
-          transformCode.push(`
-      pos *= vtx.${uniformName};`)
+          const sx = getScaleWgsl(transform.args.x, `u_scaleX_${suffix}`)
+          const sy = getScaleWgsl(transform.args.y, `u_scaleY_${suffix}`)
+          if (has3D) {
+            const sz = getScaleWgsl(transform.args.z ?? 1, `u_scaleZ_${suffix}`)
+            transformCode.push(`
+      pos *= vec3f(${sx}, ${sy}, ${sz});`)
+          } else {
+            transformCode.push(`
+      pos *= vec2f(${sx}, ${sy});`)
+          }
           break
         }
 
         case 'offset': {
-          const uniformName = `u_offset_${suffix}`
-          if (has3D) {
-            uniforms.push({ name: uniformName, type: 'vec3f', value: [transform.args.x, transform.args.y, transform.args.z || 0] })
-          } else {
-            uniforms.push({ name: uniformName, type: 'vec2f', value: [transform.args.x, transform.args.y] })
+          // Support shader expressions for each component
+          const getOffsetWgsl = (val, name) => {
+            if (typeof val === 'string') {
+              const expr = parseShaderExpr(val)
+              if (expr) return expr.toWGSL()
+            }
+            uniforms.push({ name, type: 'f32', value: val })
+            return `vtx.${name}`
           }
-          transformCode.push(`
-      pos += vtx.${uniformName};`)
+          const ox = getOffsetWgsl(transform.args.x, `u_offsetX_${suffix}`)
+          const oy = getOffsetWgsl(transform.args.y, `u_offsetY_${suffix}`)
+          if (has3D) {
+            const oz = getOffsetWgsl(transform.args.z || 0, `u_offsetZ_${suffix}`)
+            transformCode.push(`
+      pos += vec3f(${ox}, ${oy}, ${oz});`)
+          } else {
+            transformCode.push(`
+      pos += vec2f(${ox}, ${oy});`)
+          }
           break
         }
 
@@ -1006,6 +1139,17 @@ ${allUniformFields.join('\n')}
     inputFields.push('  @location(5) color: vec4f,')  // RGBA vertex color
   }
 
+  // GPU instancing - per-instance attributes with step_mode: instance
+  if (useInstancing) {
+    inputFields.push('  @location(6) instanceOffset: vec3f,')
+  }
+  if (useInstanceRotation) {
+    inputFields.push('  @location(7) instanceRotation: vec3f,')
+  }
+  if (useInstanceScale) {
+    inputFields.push('  @location(8) instanceScale: vec3f,')
+  }
+
   // Build vertex output struct
   const outputFields = [
     '  @builtin(position) position: vec4f,',
@@ -1019,7 +1163,8 @@ ${allUniformFields.join('\n')}
     '  @location(6) v_bitangent: vec3f,',
     '  @location(7) v_viewDir: vec3f,',
     '  @location(8) v_depth: f32,',
-    '  @location(9) v_color: vec4f,'
+    '  @location(9) v_color: vec4f,',
+    '  @location(10) v_instanceId: f32,'  // Instance ID for fragment shader
   ]
 
   // UV computation
@@ -1036,6 +1181,45 @@ ${allUniformFields.join('\n')}
   const colorCode = useColors
     ? 'output.v_color = input.color;'
     : 'output.v_color = vec4f(1.0, 1.0, 1.0, 1.0);'
+
+  // Instance ID passthrough
+  const instanceIdCode = useInstancing
+    ? 'output.v_instanceId = f32(instanceIdx);'
+    : 'output.v_instanceId = 0.0;'
+
+  // Define _ix local variable for shader expressions (e.g., rotateZ("_ix * 0.1"))
+  const ixDefCode = useInstancing
+    ? 'let _ix = f32(instanceIdx);'
+    : 'let _ix = 0.0;'
+
+  // Per-instance scale (applied before chain transforms)
+  const instanceScaleCode = useInstanceScale ? 'pos *= input.instanceScale;' : ''
+
+  // Per-instance rotation (applied before chain transforms, euler XYZ order)
+  const instanceRotationCode = useInstanceRotation ? `
+      // Per-instance rotation (euler XYZ)
+      {
+        let cx = cos(input.instanceRotation.x);
+        let sx = sin(input.instanceRotation.x);
+        let cy = cos(input.instanceRotation.y);
+        let sy = sin(input.instanceRotation.y);
+        let cz = cos(input.instanceRotation.z);
+        let sz = sin(input.instanceRotation.z);
+        // Rotate X
+        pos = vec3f(pos.x, pos.y * cx - pos.z * sx, pos.y * sx + pos.z * cx);
+        // Rotate Y
+        pos = vec3f(pos.x * cy + pos.z * sy, pos.y, -pos.x * sy + pos.z * cy);
+        // Rotate Z
+        pos = vec3f(pos.x * cz - pos.y * sz, pos.x * sz + pos.y * cz, pos.z);
+      }` : ''
+
+  // Per-instance offset (applied after chain transforms)
+  const instanceOffsetCode = useInstancing ? 'pos += input.instanceOffset;' : ''
+
+  // Function signature - include instance_index builtin when instancing
+  const fnSignature = useInstancing
+    ? 'fn main(input: VertexInput, @builtin(instance_index) instanceIdx: u32) -> VertexOutput'
+    : 'fn main(input: VertexInput) -> VertexOutput'
 
   // Build the vertex shader
   let wgsl
@@ -1097,10 +1281,11 @@ struct VertexOutput {
 ${outputFields.join('\n')}
 };
 
+@group(0) @binding(0) var<uniform> time: f32;
 @group(0) @binding(1) var<uniform> resolution: vec2f;
 ${uniformStruct}
 @vertex
-fn main(input: VertexInput) -> VertexOutput {
+${fnSignature} {
   var output: VertexOutput;
 
   // UV
@@ -1109,10 +1294,17 @@ fn main(input: VertexInput) -> VertexOutput {
   ${faceIdCode}
   // Color
   ${colorCode}
+  // Instance ID
+  ${instanceIdCode}
+  // Define _ix for shader expressions
+  ${ixDefCode}
 
   // Apply transforms (3D)
   var pos = input.position;
+  ${instanceScaleCode}
+  ${instanceRotationCode}
 ${transformCode.join('\n')}
+  ${instanceOffsetCode}
 
   // Compute vertex data for fragment shader
   output.v_position = pos;
@@ -1142,6 +1334,35 @@ ${transformCode.join('\n')}
 }
 `
   } else {
+    // For 2D with instancing or perspective, we need vec3 internally
+    const use3DPos = useInstancing || useInstanceRotation || useInstanceScale || hasPerspective
+    const posInit = use3DPos ? 'var pos = input.position;' : 'var pos = input.position.xy;'
+    const v_position = use3DPos ? 'output.v_position = pos;' : 'output.v_position = vec3f(pos, 0.0);'
+
+    // Projection code - handle perspective for 2D geometry with Z transforms
+    const projectionCode = hasPerspective ? `
+      // Perspective projection for 2D geometry with Z
+      let fov = vtx.${perspectiveUniform}.x;
+      let near = vtx.${perspectiveUniform}.y;
+      let far = vtx.${perspectiveUniform}.z;
+      let f = 1.0 / tan(radians(fov) / 2.0);
+      let aspect = resolution.x / resolution.y;
+      let rangeInv = 1.0 / (near - far);
+
+      // Move camera back
+      pos.z -= 2.0;
+
+      // Apply perspective
+      let w = -pos.z;
+      output.position = vec4f(
+        pos.x * f / aspect,
+        pos.y * f,
+        (pos.z * (near + far) + 2.0 * near * far) * rangeInv,
+        w
+      );` : (use3DPos
+        ? 'output.position = vec4f(pos.xy, pos.z * 0.1, 1.0);'
+        : 'output.position = vec4f(pos, 0.0, 1.0);')
+
     wgsl = `struct VertexInput {
 ${inputFields.join('\n')}
 };
@@ -1150,9 +1371,11 @@ struct VertexOutput {
 ${outputFields.join('\n')}
 };
 
+@group(0) @binding(0) var<uniform> time: f32;
+@group(0) @binding(1) var<uniform> resolution: vec2f;
 ${uniformStruct}
 @vertex
-fn main(input: VertexInput) -> VertexOutput {
+${fnSignature} {
   var output: VertexOutput;
 
   // UV
@@ -1161,13 +1384,20 @@ fn main(input: VertexInput) -> VertexOutput {
   ${faceIdCode}
   // Color
   ${colorCode}
+  // Instance ID
+  ${instanceIdCode}
+  // Define _ix for shader expressions
+  ${ixDefCode}
 
   // Apply transforms (2D)
-  var pos = input.position.xy;
+  ${posInit}
+  ${instanceScaleCode}
+  ${instanceRotationCode}
 ${transformCode.join('\n')}
+  ${instanceOffsetCode}
 
   // Set default vertex data for 2D geometry
-  output.v_position = vec3f(pos, 0.0);
+  ${v_position}
   output.v_normal = vec3f(0.0, 0.0, 1.0);  // Facing camera
   output.v_worldNormal = vec3f(0.0, 0.0, 1.0);  // Same as normal for 2D
   output.v_tangent = vec3f(1.0, 0.0, 0.0);
@@ -1175,7 +1405,7 @@ ${transformCode.join('\n')}
   output.v_viewDir = vec3f(0.0, 0.0, 1.0);  // Looking at camera
   output.v_depth = 1.0;
 
-  output.position = vec4f(pos, 0.0, 1.0);
+  ${projectionCode}
   return output;
 }
 `
@@ -1204,6 +1434,7 @@ struct VertexOutput {
   @location(7) v_viewDir: vec3f,
   @location(8) v_depth: f32,
   @location(9) v_color: vec4f,
+  @location(10) v_instanceId: f32,
 };
 
 struct VertexUniforms {
@@ -1228,6 +1459,7 @@ fn main(input: VertexInput) -> VertexOutput {
   output.v_viewDir = vec3f(0.0, 0.0, 1.0);
   output.v_depth = 1.0;
   output.v_color = vec4f(1.0, 1.0, 1.0, 1.0);
+  output.v_instanceId = 0.0;
 
   output.position = vec4f(input.position.xy, 0.0, 1.0);
   return output;
