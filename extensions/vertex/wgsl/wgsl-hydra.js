@@ -57,7 +57,8 @@ const fragPrefix = `
 
      var output : VertexOutput;
      output.position = vec4<f32>( positions[vertexIndex], 0.0, 1.0);
-     output.texcoord = positions[vertexIndex] / 2.0 + 0.5; // positions are -1 to 1, texcoords are 0
+     // Pre-flip X so fragment shader's X-flip (for geometry) cancels out for fullscreen
+     output.texcoord = vec2<f32>(1.0 - (positions[vertexIndex].x / 2.0 + 0.5), positions[vertexIndex].y / 2.0 + 0.5);
      output.faceId = 0.0;
 
      // Default vertex data for fullscreen quad
