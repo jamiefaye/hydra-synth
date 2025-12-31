@@ -351,64 +351,187 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
 
   // Check for GPU instancing data from VertexSource
   let hasInstancing = false
+  let hasCpuInstancing = false  // CPU fallback when GPU instancing not available
   let instanceCount = 0
   let instanceOffsetBuffer = null
   let instanceIdBuffer = null
   let instanceRotationBuffer = null
   let instanceScaleBuffer = null
 
+  // Check if regl supports GPU instancing
+  const supportsInstancing = this.regl.hasExtension('ANGLE_instanced_arrays')
+
   if (vertexSource && vertexSource.instancePositions && vertexSource.instanceCount > 0) {
-    hasInstancing = true
+    const baseVertCount = vertexSource.vertices ? vertexSource.vertices.length / 3 : 0
     instanceCount = vertexSource.instanceCount
 
-    // Log instance setup info
-    const baseVerts = vertexSource.vertices ? vertexSource.vertices.length / 3 : 0
-    const totalVerts = baseVerts * instanceCount
-    console.log(`[hydra-vertex] Instancing: ${instanceCount} instances × ${baseVerts} vertices = ${totalVerts} total vertices`)
+    if (supportsInstancing) {
+      // GPU instancing path
+      hasInstancing = true
 
-    // Reshape instance positions to vec3 array
-    const offsetData = []
-    for (let i = 0; i < vertexSource.instancePositions.length; i += 3) {
-      offsetData.push([
-        vertexSource.instancePositions[i],
-        vertexSource.instancePositions[i + 1],
-        vertexSource.instancePositions[i + 2]
-      ])
-    }
-    instanceOffsetBuffer = this.regl.buffer(offsetData)
+      // Log instance setup info
+      const totalVerts = baseVertCount * instanceCount
+      console.log(`[hydra-vertex] GPU Instancing: ${instanceCount} instances × ${baseVertCount} vertices = ${totalVerts} total vertices`)
 
-    // Create instance ID buffer (gl_InstanceID not available in WebGL 1)
-    // Each instance gets its index: [0, 1, 2, 3, ...]
-    const idData = []
-    for (let i = 0; i < instanceCount; i++) {
-      idData.push([i])
-    }
-    instanceIdBuffer = this.regl.buffer(idData)
-
-    // Create instance rotation buffer if provided (vec3 euler angles)
-    if (vertexSource.instanceRotations) {
-      const rotData = []
-      for (let i = 0; i < vertexSource.instanceRotations.length; i += 3) {
-        rotData.push([
-          vertexSource.instanceRotations[i],
-          vertexSource.instanceRotations[i + 1],
-          vertexSource.instanceRotations[i + 2]
+      // Reshape instance positions to vec3 array
+      const offsetData = []
+      for (let i = 0; i < vertexSource.instancePositions.length; i += 3) {
+        offsetData.push([
+          vertexSource.instancePositions[i],
+          vertexSource.instancePositions[i + 1],
+          vertexSource.instancePositions[i + 2]
         ])
       }
-      instanceRotationBuffer = this.regl.buffer(rotData)
-    }
+      instanceOffsetBuffer = this.regl.buffer(offsetData)
 
-    // Create instance scale buffer if provided (vec3)
-    if (vertexSource.instanceScales) {
-      const scaleData = []
-      for (let i = 0; i < vertexSource.instanceScales.length; i += 3) {
-        scaleData.push([
-          vertexSource.instanceScales[i],
-          vertexSource.instanceScales[i + 1],
-          vertexSource.instanceScales[i + 2]
-        ])
+      // Create instance ID buffer (gl_InstanceID not available in WebGL 1)
+      // Each instance gets its index: [0, 1, 2, 3, ...]
+      const idData = []
+      for (let i = 0; i < instanceCount; i++) {
+        idData.push([i])
       }
-      instanceScaleBuffer = this.regl.buffer(scaleData)
+      instanceIdBuffer = this.regl.buffer(idData)
+
+      // Create instance rotation buffer if provided (vec3 euler angles)
+      if (vertexSource.instanceRotations) {
+        const rotData = []
+        for (let i = 0; i < vertexSource.instanceRotations.length; i += 3) {
+          rotData.push([
+            vertexSource.instanceRotations[i],
+            vertexSource.instanceRotations[i + 1],
+            vertexSource.instanceRotations[i + 2]
+          ])
+        }
+        instanceRotationBuffer = this.regl.buffer(rotData)
+      }
+
+      // Create instance scale buffer if provided (vec3)
+      if (vertexSource.instanceScales) {
+        const scaleData = []
+        for (let i = 0; i < vertexSource.instanceScales.length; i += 3) {
+          scaleData.push([
+            vertexSource.instanceScales[i],
+            vertexSource.instanceScales[i + 1],
+            vertexSource.instanceScales[i + 2]
+          ])
+        }
+        instanceScaleBuffer = this.regl.buffer(scaleData)
+      }
+    } else {
+      // CPU fallback: duplicate vertices with offsets baked in
+      console.log(`[hydra-vertex] CPU Instancing fallback: ${instanceCount} instances × ${baseVertCount} vertices = ${baseVertCount * instanceCount} total vertices`)
+
+      const origVerts = vertexSource.vertices
+      const origUvs = vertexSource.uvs
+      const origNormals = vertexSource.normals
+      const origFaceIds = vertexSource.faceIds
+      const positions = vertexSource.instancePositions
+
+      // Expand vertices: duplicate N times, apply offsets
+      const expandedVerts = new Float32Array(origVerts.length * instanceCount)
+      for (let inst = 0; inst < instanceCount; inst++) {
+        const ox = positions[inst * 3]
+        const oy = positions[inst * 3 + 1]
+        const oz = positions[inst * 3 + 2]
+        for (let v = 0; v < origVerts.length; v += 3) {
+          const idx = inst * origVerts.length + v
+          expandedVerts[idx] = origVerts[v] + ox
+          expandedVerts[idx + 1] = origVerts[v + 1] + oy
+          expandedVerts[idx + 2] = origVerts[v + 2] + oz
+        }
+      }
+
+      // Expand UVs: just duplicate N times
+      let expandedUvs = null
+      if (origUvs && origUvs.length > 0) {
+        expandedUvs = new Float32Array(origUvs.length * instanceCount)
+        for (let inst = 0; inst < instanceCount; inst++) {
+          expandedUvs.set(origUvs, inst * origUvs.length)
+        }
+      }
+
+      // Expand normals: just duplicate N times
+      let expandedNormals = null
+      if (origNormals && origNormals.length > 0) {
+        expandedNormals = new Float32Array(origNormals.length * instanceCount)
+        for (let inst = 0; inst < instanceCount; inst++) {
+          expandedNormals.set(origNormals, inst * origNormals.length)
+        }
+      }
+
+      // Expand faceIds: just duplicate N times
+      let expandedFaceIds = null
+      if (origFaceIds && origFaceIds.length > 0) {
+        expandedFaceIds = new Float32Array(origFaceIds.length * instanceCount)
+        for (let inst = 0; inst < instanceCount; inst++) {
+          expandedFaceIds.set(origFaceIds, inst * origFaceIds.length)
+        }
+      }
+
+      // Create per-vertex instance ID so _ix works
+      // Each vertex knows which instance it belongs to
+      const expandedInstanceIds = new Float32Array(baseVertCount * instanceCount)
+      for (let inst = 0; inst < instanceCount; inst++) {
+        for (let v = 0; v < baseVertCount; v++) {
+          expandedInstanceIds[inst * baseVertCount + v] = inst
+        }
+      }
+
+      // Update the vertexSource with expanded data
+      vertexSource.vertices = expandedVerts
+      if (expandedUvs) vertexSource.uvs = expandedUvs
+      if (expandedNormals) vertexSource.normals = expandedNormals
+      if (expandedFaceIds) vertexSource.faceIds = expandedFaceIds
+
+      // Store the per-vertex instance IDs for the shader
+      vertexSource._cpuInstanceIds = expandedInstanceIds
+
+      // Clear GPU instancing data - we've baked it into vertices
+      vertexSource.instancePositions = null
+      vertexSource.instanceCount = 0
+
+      // Update rawVerts to the expanded version
+      rawVerts = expandedVerts
+
+      // Recreate position buffer with expanded vertices
+      const verts = reshapeToVec3(rawVerts, has3D)
+      positionBuffer = this.regl.buffer(verts)
+      vertexCount = verts.length
+
+      // Recreate UV buffer if present
+      if (expandedUvs) {
+        hasExplicitUVs = true
+        const uvData = []
+        for (let i = 0; i < expandedUvs.length; i += 2) {
+          uvData.push([expandedUvs[i], expandedUvs[i + 1]])
+        }
+        uvBuffer = this.regl.buffer(uvData)
+      }
+
+      // Recreate normal buffer if present
+      if (expandedNormals) {
+        hasNormals = true
+        const normalData = []
+        for (let i = 0; i < expandedNormals.length; i += 3) {
+          normalData.push([expandedNormals[i], expandedNormals[i + 1], expandedNormals[i + 2]])
+        }
+        normalBuffer = this.regl.buffer(normalData)
+      }
+
+      // Recreate faceId buffer if present
+      if (expandedFaceIds) {
+        hasFaceIds = true
+        faceIdBuffer = this.regl.buffer(expandedFaceIds.map(id => [id]))
+      }
+
+      // Create per-vertex instanceId buffer (no divisor - regular per-vertex attribute)
+      instanceIdBuffer = this.regl.buffer(expandedInstanceIds.map(id => [id]))
+
+      // Mark that we're using CPU instancing (for shader generation)
+      hasCpuInstancing = true
+
+      // Reset instanceCount since we're not using GPU instancing
+      instanceCount = 0
     }
   }
 
@@ -499,6 +622,7 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         useTangents: hasTangents,
         useColors: hasColors,
         useInstancing: hasInstancing,
+        useCpuInstancing: hasCpuInstancing,
         useInstanceRotation: hasInstancing && !!instanceRotationBuffer,
         useInstanceScale: hasInstancing && !!instanceScaleBuffer
       })
@@ -512,13 +636,26 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         ? 'uv = texcoord;'
         : 'uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);'
       const faceIdCode = hasFaceIds ? 'v_faceId = faceId;' : 'v_faceId = 0.0;'
+
+      // Instancing support for Phase 3 style
+      // GPU instancing: needs instanceOffset and instanceId with divisor
+      // CPU instancing: only needs instanceId (per-vertex, offsets baked into vertices)
+      const instanceAttrDecl = hasInstancing
+        ? `attribute vec3 instanceOffset;
+      attribute float instanceId;`
+        : (hasCpuInstancing ? 'attribute float instanceId;' : '')
+      const instanceIdPassthrough = (hasInstancing || hasCpuInstancing) ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
+      const instanceOffsetCode = hasInstancing ? 'pos += instanceOffset.xy;' : ''
+
       vert = `
       precision ${this.precision} float;
       attribute vec3 position;
+      ${instanceAttrDecl}
       ${uvAttrDecl}
       ${faceIdAttrDecl}
       varying vec2 uv;
       varying float v_faceId;
+      varying float v_instanceId;
 
       // Vertex data for fragment shader
       varying vec3 v_position;
@@ -536,6 +673,7 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         // UV ${hasExplicitUVs ? 'from explicit attribute' : 'normalized to shape bounds'}
         ${uvCode}
         ${faceIdCode}
+        ${instanceIdPassthrough}
 
         // Apply transforms
         vec2 pos = position.xy * u_scale;
@@ -545,8 +683,9 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         float s = sin(u_rotation);
         pos = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
 
-        // Offset
+        // Offset (uniform offset + instance offset)
         pos += u_offset;
+        ${instanceOffsetCode}
 
         // Default vertex data for 2D geometry
         v_position = vec3(pos, 0.0);
@@ -567,19 +706,43 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         : 'uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);'
       const faceIdCode = hasFaceIds ? 'v_faceId = faceId;' : 'v_faceId = 0.0;'
       const normalCode = hasNormals ? 'v_normal = normalize(normal);' : 'v_normal = vec3(0.0, 0.0, 1.0);'
-      const positionCode = has3D ? 'v_position = position;' : 'v_position = vec3(position.xy, 0.0);'
+
+      // Instancing support for passthrough mode
+      // GPU instancing: needs instanceOffset and instanceId with divisor
+      // CPU instancing: only needs instanceId (per-vertex, offsets baked into vertices)
+      const instanceAttrDecl = hasInstancing
+        ? `attribute vec3 instanceOffset;
+      attribute float instanceId;`
+        : (hasCpuInstancing ? 'attribute float instanceId;' : '')
+      const instanceIdPassthrough = (hasInstancing || hasCpuInstancing) ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
+      const instanceOffsetCode = hasInstancing ? 'pos += instanceOffset;' : ''
+
+      // Position transform depends on whether we have instancing (need mutable pos) or not
+      const positionCode = has3D
+        ? (hasInstancing ? 'vec3 pos = position;' : 'v_position = position;')
+        : (hasInstancing ? 'vec3 pos = position;' : 'v_position = vec3(position.xy, 0.0);')
+      const finalPositionCode = hasInstancing ? 'v_position = pos;' : ''
+
       const glPositionCode = has3D
-        ? `float aspect = resolution.x / resolution.y;
-        gl_Position = vec4(position.x / aspect, position.y, position.z * 0.1, 1.0);`
-        : 'gl_Position = vec4(position.xy, 0.0, 1.0);'
+        ? (hasInstancing
+          ? `float aspect = resolution.x / resolution.y;
+        gl_Position = vec4(pos.x / aspect, pos.y, pos.z * 0.1, 1.0);`
+          : `float aspect = resolution.x / resolution.y;
+        gl_Position = vec4(position.x / aspect, position.y, position.z * 0.1, 1.0);`)
+        : (hasInstancing
+          ? 'gl_Position = vec4(pos.xy, 0.0, 1.0);'
+          : 'gl_Position = vec4(position.xy, 0.0, 1.0);')
+
       vert = `
       precision ${this.precision} float;
       attribute vec3 position;
+      ${instanceAttrDecl}
       ${uvAttrDecl}
       ${faceIdAttrDecl}
       ${normalAttrDecl}
       varying vec2 uv;
       varying float v_faceId;
+      varying float v_instanceId;
 
       // Vertex data for fragment shader
       varying vec3 v_position;
@@ -596,9 +759,14 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         // UV ${hasExplicitUVs ? 'from explicit attribute' : 'normalized to shape bounds'}
         ${uvCode}
         ${faceIdCode}
+        ${instanceIdPassthrough}
+
+        // Position with optional instancing offset
+        ${positionCode}
+        ${instanceOffsetCode}
+        ${finalPositionCode}
 
         // Vertex data
-        ${positionCode}
         ${normalCode}
         v_worldNormal = v_normal;
         v_viewDir = vec3(0.0, 0.0, 1.0);
@@ -660,6 +828,11 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         divisor: 1
       }
     }
+  }
+
+  // CPU instancing: instanceId as regular per-vertex attribute (no divisor)
+  if (hasCpuInstancing && instanceIdBuffer) {
+    attributes.instanceId = instanceIdBuffer
   }
 
   // Create the draw command

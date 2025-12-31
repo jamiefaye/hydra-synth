@@ -412,6 +412,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     useTangents = false,
     useColors = false,
     useInstancing = false,
+    useCpuInstancing = false,  // CPU fallback when GPU instancing not available
     useInstanceRotation = false,
     useInstanceScale = false
   } = options
@@ -438,17 +439,20 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
   const colorAttributeDecl = useColors ? 'attribute vec4 color;' : ''
   const colorPassthrough = useColors ? 'v_color = color;' : 'v_color = vec4(1.0, 1.0, 1.0, 1.0);'
 
-  // GPU instancing - per-instance offset and ID attributes, plus instance ID varying
-  // Note: WebGL 1 doesn't have gl_InstanceID, so we pass it as an attribute
-  let instanceAttributeDecl = useInstancing ? 'attribute vec3 instanceOffset;\nattribute float instanceId;' : ''
+  // Instancing attributes:
+  // GPU instancing: needs instanceOffset + instanceId (with divisor)
+  // CPU instancing: only needs instanceId (per-vertex, offsets baked into vertices)
+  let instanceAttributeDecl = useInstancing
+    ? 'attribute vec3 instanceOffset;\nattribute float instanceId;'
+    : (useCpuInstancing ? 'attribute float instanceId;' : '')
   if (useInstanceRotation) instanceAttributeDecl += '\nattribute vec3 instanceRotation;'
   if (useInstanceScale) instanceAttributeDecl += '\nattribute vec3 instanceScale;'
 
   const instanceIdVaryingDecl = 'varying float v_instanceId;'  // Always declare for fragment shader compatibility
-  const instanceIdPassthrough = useInstancing ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
+  const instanceIdPassthrough = (useInstancing || useCpuInstancing) ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
   // Define _ix local variable for shader expressions (e.g., rotateZ("_ix * 0.1"))
-  const ixDefCode = useInstancing ? 'float _ix = instanceId;' : 'float _ix = 0.0;'
-  const instanceOffsetCode = useInstancing ? 'pos += instanceOffset;' : ''
+  const ixDefCode = (useInstancing || useCpuInstancing) ? 'float _ix = instanceId;' : 'float _ix = 0.0;'
+  const instanceOffsetCode = useInstancing ? 'pos += instanceOffset;' : ''  // Only for GPU instancing
 
   // Per-instance rotation (applied before chain transforms)
   // Uses euler angles XYZ order
