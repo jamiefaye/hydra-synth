@@ -690,6 +690,11 @@ function createTick(hydra) {
     hydra.synth.time += dt * 0.001 * hydra.synth.speed
     hydra.synth.stats.fps = Math.round(1000 / dt)
 
+    // Update window.time for legacy global access (like vanilla Hydra does via sandbox.set)
+    if (hydra.makeGlobal && typeof window !== 'undefined') {
+      window.time = hydra.synth.time
+    }
+
     // Step generator function if yield timer elapsed
     if (hydra.generatorTick) hydra.generatorTick()
 

@@ -18,6 +18,9 @@
     },
     "./extensions/vertex/webgpu": {
       "import": "./extensions/vertex/index-webgpu.js"
+    },
+    "./extensions/inact": {
+      "import": "./extensions/inact/index.js"
     }
   },
   "unpkg": "./dist/hydra-synth.js",
