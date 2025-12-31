@@ -8432,6 +8432,7 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
   if (useInstanceScale) instanceAttributeDecl += "\nattribute vec3 instanceScale;";
   const instanceIdVaryingDecl = "varying float v_instanceId;";
   const instanceIdPassthrough = useInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+  const ixDefCode = useInstancing ? "float _ix = instanceId;" : "float _ix = 0.0;";
   const instanceOffsetCode = useInstancing ? "pos += instanceOffset;" : "";
   const instanceRotationCode = useInstanceRotation ? `
           // Per-instance rotation (euler XYZ)
@@ -8479,6 +8480,7 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
           ${faceIdPassthrough}
           ${colorPassthrough}
           ${instanceIdPassthrough}
+          ${ixDefCode}
 
           // Apply instance transforms if enabled
           vec3 pos = position;
@@ -8746,6 +8748,7 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${faceIdPassthrough}
       ${colorPassthrough}
       ${instanceIdPassthrough}
+      ${ixDefCode}
 
       // Apply transforms (3D)
       vec3 pos = position;
@@ -8814,6 +8817,7 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${faceIdPassthrough}
       ${colorPassthrough}
       ${instanceIdPassthrough}
+      ${ixDefCode}
 
       // Apply transforms (2D)
       vec2 pos = position.xy;

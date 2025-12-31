@@ -6896,6 +6896,7 @@
     if (useInstanceScale) instanceAttributeDecl += "\nattribute vec3 instanceScale;";
     const instanceIdVaryingDecl = "varying float v_instanceId;";
     const instanceIdPassthrough = useInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+    const ixDefCode = useInstancing ? "float _ix = instanceId;" : "float _ix = 0.0;";
     const instanceOffsetCode = useInstancing ? "pos += instanceOffset;" : "";
     const instanceRotationCode = useInstanceRotation ? `
           // Per-instance rotation (euler XYZ)
@@ -6943,6 +6944,7 @@
           ${faceIdPassthrough}
           ${colorPassthrough}
           ${instanceIdPassthrough}
+          ${ixDefCode}
 
           // Apply instance transforms if enabled
           vec3 pos = position;
@@ -7210,6 +7212,7 @@
       ${faceIdPassthrough}
       ${colorPassthrough}
       ${instanceIdPassthrough}
+      ${ixDefCode}
 
       // Apply transforms (3D)
       vec3 pos = position;
@@ -7278,6 +7281,7 @@
       ${faceIdPassthrough}
       ${colorPassthrough}
       ${instanceIdPassthrough}
+      ${ixDefCode}
 
       // Apply transforms (2D)
       vec2 pos = position.xy;

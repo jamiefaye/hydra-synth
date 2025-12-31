@@ -446,6 +446,8 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
 
   const instanceIdVaryingDecl = 'varying float v_instanceId;'  // Always declare for fragment shader compatibility
   const instanceIdPassthrough = useInstancing ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
+  // Define _ix local variable for shader expressions (e.g., rotateZ("_ix * 0.1"))
+  const ixDefCode = useInstancing ? 'float _ix = instanceId;' : 'float _ix = 0.0;'
   const instanceOffsetCode = useInstancing ? 'pos += instanceOffset;' : ''
 
   // Per-instance rotation (applied before chain transforms)
@@ -501,6 +503,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
           ${faceIdPassthrough}
           ${colorPassthrough}
           ${instanceIdPassthrough}
+          ${ixDefCode}
 
           // Apply instance transforms if enabled
           vec3 pos = position;
@@ -808,6 +811,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${faceIdPassthrough}
       ${colorPassthrough}
       ${instanceIdPassthrough}
+      ${ixDefCode}
 
       // Apply transforms (3D)
       vec3 pos = position;
@@ -876,6 +880,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${faceIdPassthrough}
       ${colorPassthrough}
       ${instanceIdPassthrough}
+      ${ixDefCode}
 
       // Apply transforms (2D)
       vec2 pos = position.xy;
