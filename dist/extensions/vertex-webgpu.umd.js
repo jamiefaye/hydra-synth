@@ -8419,6 +8419,8 @@
       useTangents = false,
       useColors = false,
       useInstancing = false,
+      useCpuInstancing = false,
+      // CPU fallback when GPU instancing not available
       useInstanceRotation = false,
       useInstanceScale = false
     } = options;
@@ -8431,12 +8433,12 @@
     const tangentAttributeDecl = useTangents ? "attribute vec4 tangent;" : "";
     const colorAttributeDecl = useColors ? "attribute vec4 color;" : "";
     const colorPassthrough = useColors ? "v_color = color;" : "v_color = vec4(1.0, 1.0, 1.0, 1.0);";
-    let instanceAttributeDecl = useInstancing ? "attribute vec3 instanceOffset;\nattribute float instanceId;" : "";
+    let instanceAttributeDecl = useInstancing ? "attribute vec3 instanceOffset;\nattribute float instanceId;" : useCpuInstancing ? "attribute float instanceId;" : "";
     if (useInstanceRotation) instanceAttributeDecl += "\nattribute vec3 instanceRotation;";
     if (useInstanceScale) instanceAttributeDecl += "\nattribute vec3 instanceScale;";
     const instanceIdVaryingDecl = "varying float v_instanceId;";
-    const instanceIdPassthrough = useInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
-    const ixDefCode = useInstancing ? "float _ix = instanceId;" : "float _ix = 0.0;";
+    const instanceIdPassthrough = useInstancing || useCpuInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+    const ixDefCode = useInstancing || useCpuInstancing ? "float _ix = instanceId;" : "float _ix = 0.0;";
     const instanceOffsetCode = useInstancing ? "pos += instanceOffset;" : "";
     const instanceRotationCode = useInstanceRotation ? `
           // Per-instance rotation (euler XYZ)
@@ -26110,52 +26112,136 @@ ${shaderInfo.glslFunctions.map((transform) => {
       }
     }
     let hasInstancing = false;
+    let hasCpuInstancing = false;
     let instanceCount = 0;
     let instanceOffsetBuffer = null;
     let instanceIdBuffer = null;
     let instanceRotationBuffer = null;
     let instanceScaleBuffer = null;
+    const supportsInstancing = this.regl.hasExtension("ANGLE_instanced_arrays");
     if (vertexSource && vertexSource.instancePositions && vertexSource.instanceCount > 0) {
-      hasInstancing = true;
+      const baseVertCount = vertexSource.vertices ? vertexSource.vertices.length / 3 : 0;
       instanceCount = vertexSource.instanceCount;
-      const baseVerts = vertexSource.vertices ? vertexSource.vertices.length / 3 : 0;
-      const totalVerts = baseVerts * instanceCount;
-      console.log(`[hydra-vertex] Instancing: ${instanceCount} instances × ${baseVerts} vertices = ${totalVerts} total vertices`);
-      const offsetData = [];
-      for (let i2 = 0; i2 < vertexSource.instancePositions.length; i2 += 3) {
-        offsetData.push([
-          vertexSource.instancePositions[i2],
-          vertexSource.instancePositions[i2 + 1],
-          vertexSource.instancePositions[i2 + 2]
-        ]);
-      }
-      instanceOffsetBuffer = this.regl.buffer(offsetData);
-      const idData = [];
-      for (let i2 = 0; i2 < instanceCount; i2++) {
-        idData.push([i2]);
-      }
-      instanceIdBuffer = this.regl.buffer(idData);
-      if (vertexSource.instanceRotations) {
-        const rotData = [];
-        for (let i2 = 0; i2 < vertexSource.instanceRotations.length; i2 += 3) {
-          rotData.push([
-            vertexSource.instanceRotations[i2],
-            vertexSource.instanceRotations[i2 + 1],
-            vertexSource.instanceRotations[i2 + 2]
+      if (supportsInstancing) {
+        hasInstancing = true;
+        const totalVerts = baseVertCount * instanceCount;
+        console.log(`[hydra-vertex] GPU Instancing: ${instanceCount} instances × ${baseVertCount} vertices = ${totalVerts} total vertices`);
+        const offsetData = [];
+        for (let i2 = 0; i2 < vertexSource.instancePositions.length; i2 += 3) {
+          offsetData.push([
+            vertexSource.instancePositions[i2],
+            vertexSource.instancePositions[i2 + 1],
+            vertexSource.instancePositions[i2 + 2]
           ]);
         }
-        instanceRotationBuffer = this.regl.buffer(rotData);
-      }
-      if (vertexSource.instanceScales) {
-        const scaleData = [];
-        for (let i2 = 0; i2 < vertexSource.instanceScales.length; i2 += 3) {
-          scaleData.push([
-            vertexSource.instanceScales[i2],
-            vertexSource.instanceScales[i2 + 1],
-            vertexSource.instanceScales[i2 + 2]
-          ]);
+        instanceOffsetBuffer = this.regl.buffer(offsetData);
+        const idData = [];
+        for (let i2 = 0; i2 < instanceCount; i2++) {
+          idData.push([i2]);
         }
-        instanceScaleBuffer = this.regl.buffer(scaleData);
+        instanceIdBuffer = this.regl.buffer(idData);
+        if (vertexSource.instanceRotations) {
+          const rotData = [];
+          for (let i2 = 0; i2 < vertexSource.instanceRotations.length; i2 += 3) {
+            rotData.push([
+              vertexSource.instanceRotations[i2],
+              vertexSource.instanceRotations[i2 + 1],
+              vertexSource.instanceRotations[i2 + 2]
+            ]);
+          }
+          instanceRotationBuffer = this.regl.buffer(rotData);
+        }
+        if (vertexSource.instanceScales) {
+          const scaleData = [];
+          for (let i2 = 0; i2 < vertexSource.instanceScales.length; i2 += 3) {
+            scaleData.push([
+              vertexSource.instanceScales[i2],
+              vertexSource.instanceScales[i2 + 1],
+              vertexSource.instanceScales[i2 + 2]
+            ]);
+          }
+          instanceScaleBuffer = this.regl.buffer(scaleData);
+        }
+      } else {
+        console.log(`[hydra-vertex] CPU Instancing fallback: ${instanceCount} instances × ${baseVertCount} vertices = ${baseVertCount * instanceCount} total vertices`);
+        const origVerts = vertexSource.vertices;
+        const origUvs = vertexSource.uvs;
+        const origNormals = vertexSource.normals;
+        const origFaceIds = vertexSource.faceIds;
+        const positions = vertexSource.instancePositions;
+        const expandedVerts = new Float32Array(origVerts.length * instanceCount);
+        for (let inst = 0; inst < instanceCount; inst++) {
+          const ox = positions[inst * 3];
+          const oy = positions[inst * 3 + 1];
+          const oz = positions[inst * 3 + 2];
+          for (let v2 = 0; v2 < origVerts.length; v2 += 3) {
+            const idx = inst * origVerts.length + v2;
+            expandedVerts[idx] = origVerts[v2] + ox;
+            expandedVerts[idx + 1] = origVerts[v2 + 1] + oy;
+            expandedVerts[idx + 2] = origVerts[v2 + 2] + oz;
+          }
+        }
+        let expandedUvs = null;
+        if (origUvs && origUvs.length > 0) {
+          expandedUvs = new Float32Array(origUvs.length * instanceCount);
+          for (let inst = 0; inst < instanceCount; inst++) {
+            expandedUvs.set(origUvs, inst * origUvs.length);
+          }
+        }
+        let expandedNormals = null;
+        if (origNormals && origNormals.length > 0) {
+          expandedNormals = new Float32Array(origNormals.length * instanceCount);
+          for (let inst = 0; inst < instanceCount; inst++) {
+            expandedNormals.set(origNormals, inst * origNormals.length);
+          }
+        }
+        let expandedFaceIds = null;
+        if (origFaceIds && origFaceIds.length > 0) {
+          expandedFaceIds = new Float32Array(origFaceIds.length * instanceCount);
+          for (let inst = 0; inst < instanceCount; inst++) {
+            expandedFaceIds.set(origFaceIds, inst * origFaceIds.length);
+          }
+        }
+        const expandedInstanceIds = new Float32Array(baseVertCount * instanceCount);
+        for (let inst = 0; inst < instanceCount; inst++) {
+          for (let v2 = 0; v2 < baseVertCount; v2++) {
+            expandedInstanceIds[inst * baseVertCount + v2] = inst;
+          }
+        }
+        vertexSource.vertices = expandedVerts;
+        if (expandedUvs) vertexSource.uvs = expandedUvs;
+        if (expandedNormals) vertexSource.normals = expandedNormals;
+        if (expandedFaceIds) vertexSource.faceIds = expandedFaceIds;
+        vertexSource._cpuInstanceIds = expandedInstanceIds;
+        vertexSource.instancePositions = null;
+        vertexSource.instanceCount = 0;
+        rawVerts = expandedVerts;
+        const verts = reshapeToVec3(rawVerts, has3D);
+        positionBuffer = this.regl.buffer(verts);
+        vertexCount = verts.length;
+        if (expandedUvs) {
+          hasExplicitUVs = true;
+          const uvData = [];
+          for (let i2 = 0; i2 < expandedUvs.length; i2 += 2) {
+            uvData.push([expandedUvs[i2], expandedUvs[i2 + 1]]);
+          }
+          uvBuffer = this.regl.buffer(uvData);
+        }
+        if (expandedNormals) {
+          hasNormals = true;
+          const normalData = [];
+          for (let i2 = 0; i2 < expandedNormals.length; i2 += 3) {
+            normalData.push([expandedNormals[i2], expandedNormals[i2 + 1], expandedNormals[i2 + 2]]);
+          }
+          normalBuffer = this.regl.buffer(normalData);
+        }
+        if (expandedFaceIds) {
+          hasFaceIds = true;
+          faceIdBuffer = this.regl.buffer(expandedFaceIds.map((id) => [id]));
+        }
+        instanceIdBuffer = this.regl.buffer(expandedInstanceIds.map((id) => [id]));
+        hasCpuInstancing = true;
+        instanceCount = 0;
       }
     }
     if (!rawVerts) {
@@ -26214,6 +26300,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
           useTangents: hasTangents,
           useColors: hasColors,
           useInstancing: hasInstancing,
+          useCpuInstancing: hasCpuInstancing,
           useInstanceRotation: hasInstancing && !!instanceRotationBuffer,
           useInstanceScale: hasInstancing && !!instanceScaleBuffer
         });
@@ -26224,13 +26311,19 @@ ${shaderInfo.glslFunctions.map((transform) => {
         const faceIdAttrDecl = hasFaceIds ? "attribute float faceId;" : "";
         const uvCode = hasExplicitUVs ? "uv = texcoord;" : "uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);";
         const faceIdCode = hasFaceIds ? "v_faceId = faceId;" : "v_faceId = 0.0;";
+        const instanceAttrDecl = hasInstancing ? `attribute vec3 instanceOffset;
+      attribute float instanceId;` : hasCpuInstancing ? "attribute float instanceId;" : "";
+        const instanceIdPassthrough = hasInstancing || hasCpuInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+        const instanceOffsetCode = hasInstancing ? "pos += instanceOffset.xy;" : "";
         vert = `
       precision ${this.precision} float;
       attribute vec3 position;
+      ${instanceAttrDecl}
       ${uvAttrDecl}
       ${faceIdAttrDecl}
       varying vec2 uv;
       varying float v_faceId;
+      varying float v_instanceId;
 
       // Vertex data for fragment shader
       varying vec3 v_position;
@@ -26248,6 +26341,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
         // UV ${hasExplicitUVs ? "from explicit attribute" : "normalized to shape bounds"}
         ${uvCode}
         ${faceIdCode}
+        ${instanceIdPassthrough}
 
         // Apply transforms
         vec2 pos = position.xy * u_scale;
@@ -26257,8 +26351,9 @@ ${shaderInfo.glslFunctions.map((transform) => {
         float s = sin(u_rotation);
         pos = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
 
-        // Offset
+        // Offset (uniform offset + instance offset)
         pos += u_offset;
+        ${instanceOffsetCode}
 
         // Default vertex data for 2D geometry
         v_position = vec3(pos, 0.0);
@@ -26276,17 +26371,25 @@ ${shaderInfo.glslFunctions.map((transform) => {
         const uvCode = hasExplicitUVs ? "uv = texcoord;" : "uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);";
         const faceIdCode = hasFaceIds ? "v_faceId = faceId;" : "v_faceId = 0.0;";
         const normalCode = hasNormals ? "v_normal = normalize(normal);" : "v_normal = vec3(0.0, 0.0, 1.0);";
-        const positionCode = has3D ? "v_position = position;" : "v_position = vec3(position.xy, 0.0);";
-        const glPositionCode = has3D ? `float aspect = resolution.x / resolution.y;
-        gl_Position = vec4(position.x / aspect, position.y, position.z * 0.1, 1.0);` : "gl_Position = vec4(position.xy, 0.0, 1.0);";
+        const instanceAttrDecl = hasInstancing ? `attribute vec3 instanceOffset;
+      attribute float instanceId;` : hasCpuInstancing ? "attribute float instanceId;" : "";
+        const instanceIdPassthrough = hasInstancing || hasCpuInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+        const instanceOffsetCode = hasInstancing ? "pos += instanceOffset;" : "";
+        const positionCode = has3D ? hasInstancing ? "vec3 pos = position;" : "v_position = position;" : hasInstancing ? "vec3 pos = position;" : "v_position = vec3(position.xy, 0.0);";
+        const finalPositionCode = hasInstancing ? "v_position = pos;" : "";
+        const glPositionCode = has3D ? hasInstancing ? `float aspect = resolution.x / resolution.y;
+        gl_Position = vec4(pos.x / aspect, pos.y, pos.z * 0.1, 1.0);` : `float aspect = resolution.x / resolution.y;
+        gl_Position = vec4(position.x / aspect, position.y, position.z * 0.1, 1.0);` : hasInstancing ? "gl_Position = vec4(pos.xy, 0.0, 1.0);" : "gl_Position = vec4(position.xy, 0.0, 1.0);";
         vert = `
       precision ${this.precision} float;
       attribute vec3 position;
+      ${instanceAttrDecl}
       ${uvAttrDecl}
       ${faceIdAttrDecl}
       ${normalAttrDecl}
       varying vec2 uv;
       varying float v_faceId;
+      varying float v_instanceId;
 
       // Vertex data for fragment shader
       varying vec3 v_position;
@@ -26303,9 +26406,14 @@ ${shaderInfo.glslFunctions.map((transform) => {
         // UV ${hasExplicitUVs ? "from explicit attribute" : "normalized to shape bounds"}
         ${uvCode}
         ${faceIdCode}
+        ${instanceIdPassthrough}
+
+        // Position with optional instancing offset
+        ${positionCode}
+        ${instanceOffsetCode}
+        ${finalPositionCode}
 
         // Vertex data
-        ${positionCode}
         ${normalCode}
         v_worldNormal = v_normal;
         v_viewDir = vec3(0.0, 0.0, 1.0);
@@ -26358,6 +26466,9 @@ ${shaderInfo.glslFunctions.map((transform) => {
           divisor: 1
         };
       }
+    }
+    if (hasCpuInstancing && instanceIdBuffer) {
+      attributes.instanceId = instanceIdBuffer;
     }
     const drawConfig = {
       frag: pass.frag,

@@ -26220,13 +26220,19 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
       const faceIdAttrDecl = hasFaceIds ? "attribute float faceId;" : "";
       const uvCode = hasExplicitUVs ? "uv = texcoord;" : "uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);";
       const faceIdCode = hasFaceIds ? "v_faceId = faceId;" : "v_faceId = 0.0;";
+      const instanceAttrDecl = hasInstancing ? `attribute vec3 instanceOffset;
+      attribute float instanceId;` : "";
+      const instanceIdPassthrough = hasInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+      const instanceOffsetCode = hasInstancing ? "pos += instanceOffset.xy;" : "";
       vert = `
       precision ${this.precision} float;
       attribute vec3 position;
+      ${instanceAttrDecl}
       ${uvAttrDecl}
       ${faceIdAttrDecl}
       varying vec2 uv;
       varying float v_faceId;
+      varying float v_instanceId;
 
       // Vertex data for fragment shader
       varying vec3 v_position;
@@ -26244,6 +26250,7 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
         // UV ${hasExplicitUVs ? "from explicit attribute" : "normalized to shape bounds"}
         ${uvCode}
         ${faceIdCode}
+        ${instanceIdPassthrough}
 
         // Apply transforms
         vec2 pos = position.xy * u_scale;
@@ -26253,8 +26260,9 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
         float s = sin(u_rotation);
         pos = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
 
-        // Offset
+        // Offset (uniform offset + instance offset)
         pos += u_offset;
+        ${instanceOffsetCode}
 
         // Default vertex data for 2D geometry
         v_position = vec3(pos, 0.0);
@@ -26272,17 +26280,25 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
       const uvCode = hasExplicitUVs ? "uv = texcoord;" : "uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);";
       const faceIdCode = hasFaceIds ? "v_faceId = faceId;" : "v_faceId = 0.0;";
       const normalCode = hasNormals ? "v_normal = normalize(normal);" : "v_normal = vec3(0.0, 0.0, 1.0);";
-      const positionCode = has3D ? "v_position = position;" : "v_position = vec3(position.xy, 0.0);";
-      const glPositionCode = has3D ? `float aspect = resolution.x / resolution.y;
-        gl_Position = vec4(position.x / aspect, position.y, position.z * 0.1, 1.0);` : "gl_Position = vec4(position.xy, 0.0, 1.0);";
+      const instanceAttrDecl = hasInstancing ? `attribute vec3 instanceOffset;
+      attribute float instanceId;` : "";
+      const instanceIdPassthrough = hasInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+      const instanceOffsetCode = hasInstancing ? "pos += instanceOffset;" : "";
+      const positionCode = has3D ? hasInstancing ? "vec3 pos = position;" : "v_position = position;" : hasInstancing ? "vec3 pos = position;" : "v_position = vec3(position.xy, 0.0);";
+      const finalPositionCode = hasInstancing ? "v_position = pos;" : "";
+      const glPositionCode = has3D ? hasInstancing ? `float aspect = resolution.x / resolution.y;
+        gl_Position = vec4(pos.x / aspect, pos.y, pos.z * 0.1, 1.0);` : `float aspect = resolution.x / resolution.y;
+        gl_Position = vec4(position.x / aspect, position.y, position.z * 0.1, 1.0);` : hasInstancing ? "gl_Position = vec4(pos.xy, 0.0, 1.0);" : "gl_Position = vec4(position.xy, 0.0, 1.0);";
       vert = `
       precision ${this.precision} float;
       attribute vec3 position;
+      ${instanceAttrDecl}
       ${uvAttrDecl}
       ${faceIdAttrDecl}
       ${normalAttrDecl}
       varying vec2 uv;
       varying float v_faceId;
+      varying float v_instanceId;
 
       // Vertex data for fragment shader
       varying vec3 v_position;
@@ -26299,9 +26315,14 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
         // UV ${hasExplicitUVs ? "from explicit attribute" : "normalized to shape bounds"}
         ${uvCode}
         ${faceIdCode}
+        ${instanceIdPassthrough}
+
+        // Position with optional instancing offset
+        ${positionCode}
+        ${instanceOffsetCode}
+        ${finalPositionCode}
 
         // Vertex data
-        ${positionCode}
         ${normalCode}
         v_worldNormal = v_normal;
         v_viewDir = vec3(0.0, 0.0, 1.0);
