@@ -7,8 +7,8 @@ Adds 3D vertex shader capabilities to [hydra-synth](https://hydra.ojack.xyz/), i
 ### WebGL Mode (works with vanilla hydra-synth)
 
 ```javascript
-// In hydra editor or your own setup
-await import('https://your-host.com/vertex/index.js')
+// On hydra.ojack.xyz
+await import('https://www.fentonia.com/hydra-extensions/vertex/index.js')
   .then(m => m.install(window.hydraSynth))
 
 // Now use 3D features
@@ -18,15 +18,23 @@ osc(10).out(o0, sphere().perspective(60).rotateY(() => time))
 ### WebGPU Mode (experimental, better performance)
 
 ```javascript
-import { createHydra } from 'hydra-vertex-extension'
+// On hydra.ojack.xyz - replaces existing hydra with WebGPU version
+const ext = await import('https://www.fentonia.com/hydra-extensions/vertex-webgpu/index.js')
+await ext.replaceHydra()
+
+// Same API, but with WebGPU backend
+osc(10).out(o0, sphere().perspective(60).rotateY(() => time))
+```
+
+For custom setups:
+
+```javascript
+import { createHydra } from 'hydra-synth/extensions/vertex/webgpu'
 
 const hydra = await createHydra({
   useWGSL: true,  // Enable WebGPU
   makeGlobal: true
 })
-
-// Same API as WebGL mode
-osc(10).out(o0, sphere().perspective(60).rotateY(() => time))
 ```
 
 ## Features
@@ -74,7 +82,47 @@ sphere()
   .scale(x, y, z)      // Scale geometry
   .translate(x, y, z)  // Move geometry
   .perspective(fov)    // Apply perspective projection
-  .grid(nx, ny, nz, spacing)  // Create grid of instances
+```
+
+### Instancing
+
+Efficiently render multiple copies of geometry:
+
+```javascript
+// Grid of spheres (3x3x1 = 9 instances)
+sphere(0.1).grid(3, 3, 1, 0.3)
+
+// Random scatter (20 instances)
+sphere(0.05).scatter(20)
+
+// Custom instance positions
+const positions = new Float32Array([0,0,0, 1,0,0, 0,1,0])  // 3 positions
+sphere(0.1).instances(positions)
+```
+
+Use `_ix` in shader expressions to access the instance index:
+
+```javascript
+// Each sphere gets a different hue based on its index
+osc(10).color("_ix/9.0", 0.5, 1).out(o0, sphere(0.1).grid(3,3,1))
+```
+
+### Shader Expressions
+
+Use string expressions for dynamic shader-level animation:
+
+```javascript
+// Rotate based on time (computed in shader)
+sphere().rotateY("time * 0.5")
+
+// Color based on shader variables
+solid("sin(time)", "v.normal.y", "_ix/10.0")
+
+// Available variables:
+// - time: current time
+// - _st: UV coordinates
+// - _ix: instance index
+// - v.position, v.normal, v.uv: vertex varyings
 ```
 
 ### Lighting Functions
@@ -151,6 +199,12 @@ Options:
 
 - **WebGL mode**: All modern browsers
 - **WebGPU mode**: Chrome 113+, Edge 113+, Firefox (behind flag)
+
+### Instancing Compatibility
+
+GPU instancing requires the `ANGLE_instanced_arrays` WebGL extension. If the host hydra-synth doesn't request this extension (e.g., vanilla hydra.ojack.xyz), the vertex extension automatically falls back to CPU-based instancing which duplicates vertices with offsets baked in. This is transparent to user code - `.grid()`, `.scatter()`, and `.instances()` work the same either way.
+
+A [PR has been submitted](https://github.com/hydra-synth/hydra-synth/pull/192) to add instancing support to the main hydra-synth repo.
 
 ## License
 
