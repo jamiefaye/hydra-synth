@@ -29,8 +29,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:vertex": "npm run build:vertex-webgl && npm run build:vertex-webgpu",
-    "build:vertex-webgl": "vite build --config vite.config.vertex.js",
-    "build:vertex-webgpu": "vite build --config vite.config.vertex-webgpu.js",
+    "build:vertex-webgl": "VERTEX_TARGET=webgl vite build --config vite.config.vertex.js",
+    "build:vertex-webgpu": "VERTEX_TARGET=webgpu vite build --config vite.config.vertex.js",
     "dev-budo": "budo ./dev/index.js --open --live --port 8000 -- -p esmify",
     "build-browserify": "browserify ./src/index.js -p esmify --standalone Hydra > dist/hydra-synth.js"
   },
