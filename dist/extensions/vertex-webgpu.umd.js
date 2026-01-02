@@ -9599,6 +9599,7 @@ fn main(input: VertexInput) -> VertexOutput {
    @group(0) @binding(2) var<uniform> mouse: vec2<f32>;
    @group(0) @binding(3) var<uniform> u_spriteUV: vec4<f32>;
    @group(0) @binding(4) var<uniform> u_spriteGrid: vec2<f32>;
+   @group(0) @binding(5) var<uniform> u_facesPerInstance: f32;
 `;
   const vertexShaderCode = vertexPrefix + `
     @vertex
@@ -9841,6 +9842,12 @@ fn main(input: VertexInput) -> VertexOutput {
             // Binding index "u_spriteGrid"
             visibility: GPUShaderStage.FRAGMENT,
             buffer: { type: "uniform" }
+          },
+          {
+            binding: 5,
+            // Binding index "u_facesPerInstance"
+            visibility: GPUShaderStage.FRAGMENT,
+            buffer: { type: "uniform" }
           }
         ]
       });
@@ -9879,6 +9886,13 @@ fn main(input: VertexInput) -> VertexOutput {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
       });
       this.spriteGridUniformValues = new Float32Array([1, 1]);
+      this.facesPerInstanceUniformBuffer = this.device.createBuffer({
+        label: "facesPerInstance uniform buffer",
+        size: 4,
+        // 1 x 32-bit float
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
+      this.facesPerInstanceUniformValues = new Float32Array([0]);
       this.sharedBindGroup = this.device.createBindGroup({
         label: "shared bind group",
         layout: this.sharedBindGroupLayout,
@@ -9905,6 +9919,10 @@ fn main(input: VertexInput) -> VertexOutput {
           {
             binding: 4,
             resource: { buffer: this.spriteGridUniformBuffer }
+          },
+          {
+            binding: 5,
+            resource: { buffer: this.facesPerInstanceUniformBuffer }
           }
         ]
       });
@@ -10240,12 +10258,16 @@ fn main(input: VertexInput) -> VertexOutput {
       this.createSamplerOrBuffersForSprite(spe);
       this.createSpriteBindGroup(spe);
     }
-    // Create per-sprite bind group with sprite-specific spriteGrid
+    // Create per-sprite bind group with sprite-specific spriteGrid and facesPerInstance
     createSpriteBindGroup(spe) {
       let cols = 1, rows = 1;
       if (spe.sprite && spe.sprite.cols && spe.sprite.rows) {
         cols = spe.sprite.cols;
         rows = spe.sprite.rows;
+      }
+      let facesPerInstance = 0;
+      if (spe.sprite && spe.sprite.facesPerInstance) {
+        facesPerInstance = spe.sprite.facesPerInstance;
       }
       spe.spriteGridBuffer = this.device.createBuffer({
         label: `spriteGrid_c${spe.chan}_s${spe.level}`,
@@ -10255,6 +10277,14 @@ fn main(input: VertexInput) -> VertexOutput {
       });
       const gridValues = new Float32Array([cols, rows]);
       this.device.queue.writeBuffer(spe.spriteGridBuffer, 0, gridValues);
+      spe.facesPerInstanceBuffer = this.device.createBuffer({
+        label: `facesPerInstance_c${spe.chan}_s${spe.level}`,
+        size: 4,
+        // 1 x 32-bit float
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
+      const fpiValues = new Float32Array([facesPerInstance]);
+      this.device.queue.writeBuffer(spe.facesPerInstanceBuffer, 0, fpiValues);
       spe.spriteBindGroup = this.device.createBindGroup({
         label: `spriteBindGroup_c${spe.chan}_s${spe.level}`,
         layout: this.sharedBindGroupLayout,
@@ -10263,7 +10293,9 @@ fn main(input: VertexInput) -> VertexOutput {
           { binding: 1, resource: { buffer: this.resolutionUniformBuffer } },
           { binding: 2, resource: { buffer: this.mouseUniformBuffer } },
           { binding: 3, resource: { buffer: this.spriteUVUniformBuffer } },
-          { binding: 4, resource: { buffer: spe.spriteGridBuffer } }
+          { binding: 4, resource: { buffer: spe.spriteGridBuffer } },
+          // Per-sprite!
+          { binding: 5, resource: { buffer: spe.facesPerInstanceBuffer } }
           // Per-sprite!
         ]
       });
@@ -10296,6 +10328,9 @@ fn main(input: VertexInput) -> VertexOutput {
           }
           if (spe.spriteGridBuffer) {
             spe.spriteGridBuffer.destroy();
+          }
+          if (spe.facesPerInstanceBuffer) {
+            spe.facesPerInstanceBuffer.destroy();
           }
         }
         rpe.sprites.clear();
@@ -25752,9 +25787,16 @@ ${shaderInfo.glslFunctions.map((transform) => {
     // Flip X to correct mirroring in WGSL
     let texcoord = vec2<f32>(1.0 - ourIn.texcoord.x, ourIn.texcoord.y);
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
-      // faceId maps to cell in row-major order (left-to-right, top-to-bottom)
-      let cellX = ourIn.faceId % u_spriteGrid.x;
-      let cellY = floor(ourIn.faceId / u_spriteGrid.x);
+      // Combine instanceId and faceId for unique sprites per instance
+      var spriteIndex: f32;
+      if (u_facesPerInstance > 0.0) {
+        spriteIndex = ourIn.v_instanceId * u_facesPerInstance + ourIn.faceId;
+      } else {
+        spriteIndex = ourIn.faceId;
+      }
+      // spriteIndex maps to cell in row-major order (left-to-right, top-to-bottom)
+      let cellX = spriteIndex % u_spriteGrid.x;
+      let cellY = floor(spriteIndex / u_spriteGrid.x);
       let cellSize = vec2<f32>(1.0 / u_spriteGrid.x, 1.0 / u_spriteGrid.y);
       st = texcoord * cellSize + vec2<f32>(cellX, cellY) * cellSize;
     } else {
@@ -25807,6 +25849,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
   uniform sampler2D prevBuffer;
   uniform vec4 u_spriteUV;  // x=uMin, y=vMin, z=uMax, w=vMax (fallback when no faceId)
   uniform vec2 u_spriteGrid;  // cols, rows for faceId-based sprite picking
+  uniform float u_facesPerInstance;  // faces per instance for unique sprites per instance
 
   ${Object.values(utilityGlsl).map((transform) => {
         return `
@@ -25824,9 +25867,13 @@ ${shaderInfo.glslFunctions.map((transform) => {
     vec2 st;
     // If using sprite grid (cols > 1 or rows > 1), use faceId to pick cell
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
-      // faceId maps to cell in row-major order (left-to-right, top-to-bottom)
-      float cellX = mod(v_faceId, u_spriteGrid.x);
-      float cellY = floor(v_faceId / u_spriteGrid.x);
+      // Combine instanceId and faceId for unique sprites per instance
+      float spriteIndex = (u_facesPerInstance > 0.0)
+        ? v_instanceId * u_facesPerInstance + v_faceId
+        : v_faceId;
+      // spriteIndex maps to cell in row-major order (left-to-right, top-to-bottom)
+      float cellX = mod(spriteIndex, u_spriteGrid.x);
+      float cellY = floor(spriteIndex / u_spriteGrid.x);
       vec2 cellSize = vec2(1.0 / u_spriteGrid.x, 1.0 / u_spriteGrid.y);
       st = uv * cellSize + vec2(cellX, cellY) * cellSize;
     } else {
@@ -26266,6 +26313,11 @@ ${shaderInfo.glslFunctions.map((transform) => {
       uniforms.u_spriteGrid = [sprite.cols, sprite.rows];
     } else {
       uniforms.u_spriteGrid = [1, 1];
+    }
+    if (sprite && sprite.facesPerInstance) {
+      uniforms.u_facesPerInstance = sprite.facesPerInstance;
+    } else {
+      uniforms.u_facesPerInstance = 0;
     }
     if (rawVerts) {
       uniforms.u_boundsMin = [bounds.minX, bounds.minY];

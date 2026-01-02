@@ -37,6 +37,7 @@ const fragPrefix = `
    @group(0) @binding(2) var<uniform> mouse: vec2<f32>;
    @group(0) @binding(3) var<uniform> u_spriteUV: vec4<f32>;
    @group(0) @binding(4) var<uniform> u_spriteGrid: vec2<f32>;
+   @group(0) @binding(5) var<uniform> u_facesPerInstance: f32;
 `;
 
 // ------------------------------------------------------------------------------
@@ -329,6 +330,11 @@ class wgslHydra {
      	  visibility: GPUShaderStage.FRAGMENT,
       	buffer: { type: "uniform" },
     	},
+    	{
+      	binding: 5, // Binding index "u_facesPerInstance"
+     	  visibility: GPUShaderStage.FRAGMENT,
+      	buffer: { type: "uniform" },
+    	},
   		],
 		});
 
@@ -374,6 +380,14 @@ class wgslHydra {
 		});
 		this.spriteGridUniformValues = new Float32Array([1, 1]); // Default: 1x1 grid
 
+// Create the shared uniform buffer for facesPerInstance (f32)
+		this.facesPerInstanceUniformBuffer = this.device.createBuffer({
+  			label: "facesPerInstance uniform buffer",
+  			size: 4, // 1 x 32-bit float
+  			usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+		});
+		this.facesPerInstanceUniformValues = new Float32Array([0]); // Default: 0 (disabled)
+
 		this.sharedBindGroup = this.device.createBindGroup({
 			 label: "shared bind group",
   	   layout: this.sharedBindGroupLayout,
@@ -397,6 +411,10 @@ class wgslHydra {
       {
       binding: 4,
       resource: { buffer: this.spriteGridUniformBuffer },
+    	},
+      {
+      binding: 5,
+      resource: { buffer: this.facesPerInstanceUniformBuffer },
     	}
      ],
 		});
@@ -796,13 +814,19 @@ class wgslHydra {
 		if (trace) console.timeStamp("spriteChain", "setupSpriteChain", undefined, "wgsl-hydra", "hydra", "secondary-light");
 	}
 
-	// Create per-sprite bind group with sprite-specific spriteGrid
+	// Create per-sprite bind group with sprite-specific spriteGrid and facesPerInstance
 	createSpriteBindGroup(spe) {
 		// Determine spriteGrid values for this sprite
 		let cols = 1, rows = 1;
 		if (spe.sprite && spe.sprite.cols && spe.sprite.rows) {
 			cols = spe.sprite.cols;
 			rows = spe.sprite.rows;
+		}
+
+		// Determine facesPerInstance value for this sprite
+		let facesPerInstance = 0;
+		if (spe.sprite && spe.sprite.facesPerInstance) {
+			facesPerInstance = spe.sprite.facesPerInstance;
 		}
 
 		// Create per-sprite spriteGrid buffer
@@ -814,7 +838,16 @@ class wgslHydra {
 		const gridValues = new Float32Array([cols, rows]);
 		this.device.queue.writeBuffer(spe.spriteGridBuffer, 0, gridValues);
 
-		// Create per-sprite bind group (same layout as shared, but with sprite-specific spriteGrid)
+		// Create per-sprite facesPerInstance buffer
+		spe.facesPerInstanceBuffer = this.device.createBuffer({
+			label: `facesPerInstance_c${spe.chan}_s${spe.level}`,
+			size: 4, // 1 x 32-bit float
+			usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+		});
+		const fpiValues = new Float32Array([facesPerInstance]);
+		this.device.queue.writeBuffer(spe.facesPerInstanceBuffer, 0, fpiValues);
+
+		// Create per-sprite bind group (same layout as shared, but with sprite-specific values)
 		spe.spriteBindGroup = this.device.createBindGroup({
 			label: `spriteBindGroup_c${spe.chan}_s${spe.level}`,
 			layout: this.sharedBindGroupLayout,
@@ -824,6 +857,7 @@ class wgslHydra {
 				{ binding: 2, resource: { buffer: this.mouseUniformBuffer } },
 				{ binding: 3, resource: { buffer: this.spriteUVUniformBuffer } },
 				{ binding: 4, resource: { buffer: spe.spriteGridBuffer } },  // Per-sprite!
+				{ binding: 5, resource: { buffer: spe.facesPerInstanceBuffer } },  // Per-sprite!
 			],
 		});
 	}
@@ -856,6 +890,9 @@ class wgslHydra {
 				}
 				if (spe.spriteGridBuffer) {
 					spe.spriteGridBuffer.destroy();
+				}
+				if (spe.facesPerInstanceBuffer) {
+					spe.facesPerInstanceBuffer.destroy();
 				}
 			}
 			rpe.sprites.clear();

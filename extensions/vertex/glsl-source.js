@@ -240,9 +240,16 @@ ${shaderInfo.glslFunctions.map((transform) => {
     // Flip X to correct mirroring in WGSL
     let texcoord = vec2<f32>(1.0 - ourIn.texcoord.x, ourIn.texcoord.y);
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
-      // faceId maps to cell in row-major order (left-to-right, top-to-bottom)
-      let cellX = ourIn.faceId % u_spriteGrid.x;
-      let cellY = floor(ourIn.faceId / u_spriteGrid.x);
+      // Combine instanceId and faceId for unique sprites per instance
+      var spriteIndex: f32;
+      if (u_facesPerInstance > 0.0) {
+        spriteIndex = ourIn.v_instanceId * u_facesPerInstance + ourIn.faceId;
+      } else {
+        spriteIndex = ourIn.faceId;
+      }
+      // spriteIndex maps to cell in row-major order (left-to-right, top-to-bottom)
+      let cellX = spriteIndex % u_spriteGrid.x;
+      let cellY = floor(spriteIndex / u_spriteGrid.x);
       let cellSize = vec2<f32>(1.0 / u_spriteGrid.x, 1.0 / u_spriteGrid.y);
       st = texcoord * cellSize + vec2<f32>(cellX, cellY) * cellSize;
     } else {
@@ -296,6 +303,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
   uniform sampler2D prevBuffer;
   uniform vec4 u_spriteUV;  // x=uMin, y=vMin, z=uMax, w=vMax (fallback when no faceId)
   uniform vec2 u_spriteGrid;  // cols, rows for faceId-based sprite picking
+  uniform float u_facesPerInstance;  // faces per instance for unique sprites per instance
 
   ${Object.values(utilityGlsl).map((transform) => {
     return `
@@ -313,9 +321,13 @@ ${shaderInfo.glslFunctions.map((transform) => {
     vec2 st;
     // If using sprite grid (cols > 1 or rows > 1), use faceId to pick cell
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
-      // faceId maps to cell in row-major order (left-to-right, top-to-bottom)
-      float cellX = mod(v_faceId, u_spriteGrid.x);
-      float cellY = floor(v_faceId / u_spriteGrid.x);
+      // Combine instanceId and faceId for unique sprites per instance
+      float spriteIndex = (u_facesPerInstance > 0.0)
+        ? v_instanceId * u_facesPerInstance + v_faceId
+        : v_faceId;
+      // spriteIndex maps to cell in row-major order (left-to-right, top-to-bottom)
+      float cellX = mod(spriteIndex, u_spriteGrid.x);
+      float cellY = floor(spriteIndex / u_spriteGrid.x);
       vec2 cellSize = vec2(1.0 / u_spriteGrid.x, 1.0 / u_spriteGrid.y);
       st = uv * cellSize + vec2(cellX, cellY) * cellSize;
     } else {

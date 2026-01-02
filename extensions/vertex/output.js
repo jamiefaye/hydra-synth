@@ -576,6 +576,14 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     uniforms.u_spriteGrid = [1, 1]
   }
 
+  // Add facesPerInstance uniform for unique sprites per instance
+  // Combines instanceId * facesPerInstance + faceId for sprite picking
+  if (sprite && sprite.facesPerInstance) {
+    uniforms.u_facesPerInstance = sprite.facesPerInstance
+  } else {
+    uniforms.u_facesPerInstance = 0  // Disabled by default
+  }
+
   // Add bounds uniforms for UV normalization (custom geometry only)
   if (rawVerts) {
     uniforms.u_boundsMin = [bounds.minX, bounds.minY]
