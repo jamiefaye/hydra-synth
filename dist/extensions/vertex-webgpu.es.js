@@ -25508,6 +25508,7 @@ async function createHydra$1({
     };
     hydra.synth.afterUpdate = (dt) => {
     };
+    hydra.synth.time = 0;
   }).bind(hydra);
   hydra.synth.update = (dt) => {
   };

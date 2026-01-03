@@ -25512,6 +25512,7 @@ fn main(input: VertexInput) -> VertexOutput {
       };
       hydra.synth.afterUpdate = (dt) => {
       };
+      hydra.synth.time = 0;
     }).bind(hydra);
     hydra.synth.update = (dt) => {
     };

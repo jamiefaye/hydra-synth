@@ -215,6 +215,8 @@ export async function createHydra({
     // Reset user callbacks (matches fork behavior)
     hydra.synth.update = (dt) => {}
     hydra.synth.afterUpdate = (dt) => {}
+    // Reset time so animations start fresh
+    hydra.synth.time = 0
   }.bind(hydra)
 
   hydra.synth.update = (dt) => {}
