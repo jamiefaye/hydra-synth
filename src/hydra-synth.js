@@ -164,6 +164,8 @@ class HydraRenderer {
     // this.synth.update = (dt) => {}
     this.sandbox.set('update', (dt) => {})
     this.sandbox.set('afterUpdate', (dt) => {})
+    // Reset time so animations start fresh
+    this.synth.time = 0
   }
 
   loadScript(url = "") {
