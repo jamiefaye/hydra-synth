@@ -1091,44 +1091,50 @@ function applySkinning(vertices, normals, joints, weights, skinningMatrices) {
   return { vertices: skinnedVerts, normals: skinnedNormals }
 }
 
-// Equilateral triangle centered at (centerX, centerY)
+// Equilateral triangle centered at (centerX, centerY) - 3D with z=0
 export function tri(size = 1.0, centerX = 0, centerY = 0) {
   const h = size * Math.sqrt(3) / 2
   const verts = [
-    centerX, centerY + h * 2/3,
-    centerX - size/2, centerY - h/3,
-    centerX + size/2, centerY - h/3
+    centerX, centerY + h * 2/3, 0,
+    centerX - size/2, centerY - h/3, 0,
+    centerX + size/2, centerY - h/3, 0
   ]
-  return new VertexSource(verts)
+  const vs = new VertexSource(verts)
+  vs.is3D = true
+  return vs
 }
 
-// Rectangle as two triangles
+// Rectangle as two triangles (3D with z=0)
 export function quad(width = 1.0, height = 1.0, centerX = 0, centerY = 0) {
   const hw = width / 2, hh = height / 2
   const verts = [
     // Triangle 1
-    centerX - hw, centerY - hh,
-    centerX + hw, centerY - hh,
-    centerX + hw, centerY + hh,
+    centerX - hw, centerY - hh, 0,
+    centerX + hw, centerY - hh, 0,
+    centerX + hw, centerY + hh, 0,
     // Triangle 2
-    centerX - hw, centerY - hh,
-    centerX + hw, centerY + hh,
-    centerX - hw, centerY + hh
+    centerX - hw, centerY - hh, 0,
+    centerX + hw, centerY + hh, 0,
+    centerX - hw, centerY + hh, 0
   ]
-  return new VertexSource(verts)
+  const vs = new VertexSource(verts)
+  vs.is3D = true
+  return vs
 }
 
-// Regular polygon with n sides (triangle fan from center)
+// Regular polygon with n sides (triangle fan from center) - 3D with z=0
 export function poly(sides, radius = 1.0, centerX = 0, centerY = 0) {
   const verts = []
   for (let i = 0; i < sides; i++) {
     const a1 = (i / sides) * Math.PI * 2 - Math.PI / 2
     const a2 = ((i + 1) / sides) * Math.PI * 2 - Math.PI / 2
-    verts.push(centerX, centerY)
-    verts.push(centerX + Math.cos(a1) * radius, centerY + Math.sin(a1) * radius)
-    verts.push(centerX + Math.cos(a2) * radius, centerY + Math.sin(a2) * radius)
+    verts.push(centerX, centerY, 0)
+    verts.push(centerX + Math.cos(a1) * radius, centerY + Math.sin(a1) * radius, 0)
+    verts.push(centerX + Math.cos(a2) * radius, centerY + Math.sin(a2) * radius, 0)
   }
-  return new VertexSource(verts)
+  const vs = new VertexSource(verts)
+  vs.is3D = true
+  return vs
 }
 
 // Circle approximation (polygon with many sides)

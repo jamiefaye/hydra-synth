@@ -8255,12 +8255,17 @@ function tri(size = 1, centerX = 0, centerY = 0) {
   const verts = [
     centerX,
     centerY + h * 2 / 3,
+    0,
     centerX - size / 2,
     centerY - h / 3,
+    0,
     centerX + size / 2,
-    centerY - h / 3
+    centerY - h / 3,
+    0
   ];
-  return new VertexSource(verts);
+  const vs = new VertexSource(verts);
+  vs.is3D = true;
+  return vs;
 }
 function quad(width = 1, height = 1, centerX = 0, centerY = 0) {
   const hw = width / 2, hh = height / 2;
@@ -8268,30 +8273,40 @@ function quad(width = 1, height = 1, centerX = 0, centerY = 0) {
     // Triangle 1
     centerX - hw,
     centerY - hh,
+    0,
     centerX + hw,
     centerY - hh,
+    0,
     centerX + hw,
     centerY + hh,
+    0,
     // Triangle 2
     centerX - hw,
     centerY - hh,
+    0,
     centerX + hw,
     centerY + hh,
+    0,
     centerX - hw,
-    centerY + hh
+    centerY + hh,
+    0
   ];
-  return new VertexSource(verts);
+  const vs = new VertexSource(verts);
+  vs.is3D = true;
+  return vs;
 }
 function poly(sides, radius = 1, centerX = 0, centerY = 0) {
   const verts = [];
   for (let i = 0; i < sides; i++) {
     const a1 = i / sides * Math.PI * 2 - Math.PI / 2;
     const a2 = (i + 1) / sides * Math.PI * 2 - Math.PI / 2;
-    verts.push(centerX, centerY);
-    verts.push(centerX + Math.cos(a1) * radius, centerY + Math.sin(a1) * radius);
-    verts.push(centerX + Math.cos(a2) * radius, centerY + Math.sin(a2) * radius);
+    verts.push(centerX, centerY, 0);
+    verts.push(centerX + Math.cos(a1) * radius, centerY + Math.sin(a1) * radius, 0);
+    verts.push(centerX + Math.cos(a2) * radius, centerY + Math.sin(a2) * radius, 0);
   }
-  return new VertexSource(verts);
+  const vs = new VertexSource(verts);
+  vs.is3D = true;
+  return vs;
 }
 function circle(radius = 1, centerX = 0, centerY = 0, segments = 32) {
   return poly(segments, radius, centerX, centerY);
