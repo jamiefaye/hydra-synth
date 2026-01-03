@@ -8994,6 +8994,8 @@
     explode(options = {}) {
       const defaults = {
         progress: 0,
+        delay: 0,
+        // Delay before explosion starts (fuse time)
         velocity: 2,
         velocityVariation: 0.3,
         gravity: [0, -1, 0],
@@ -9295,6 +9297,7 @@
             return name;
           };
           const timeGlsl = getExplodeGlsl(args.progress, `u_explodeTime_${suffix}`);
+          const delayGlsl = getExplodeGlsl(args.delay, `u_explodeDelay_${suffix}`);
           const velocityGlsl = getExplodeGlsl(args.velocity, `u_explodeVelocity_${suffix}`);
           const spinGlsl = getExplodeGlsl(args.spin, `u_explodeSpin_${suffix}`);
           const dragGlsl = getExplodeGlsl(args.drag, `u_explodeDrag_${suffix}`);
@@ -9309,6 +9312,7 @@
           // === Explosion Physics ===
           {
             float explodeTime = ${timeGlsl};
+            float explodeDelay = ${delayGlsl};
             float velocity = ${velocityGlsl};
             float spin = ${spinGlsl};
             float drag = ${dragGlsl};
@@ -9317,9 +9321,9 @@
             vec3 origin = u_explodeOrigin_${suffix};
             float velVar = u_explodeVelVar_${suffix};
 
-            // Shock wave timing: fragments start moving when shock reaches them
+            // Delay (fuse time) + shock wave timing
             float shockArrival = fragmentDistance / shockSpeed;
-            float localTime = max(0.0, explodeTime - shockArrival);
+            float localTime = max(0.0, explodeTime - explodeDelay - shockArrival);
 
             if (localTime > 0.0) {
               // Hash functions for per-fragment randomness
@@ -9722,6 +9726,7 @@
               return `vtx.${name}`;
             };
             const timeWgsl = getExplodeWgsl(args.progress, `u_explodeTime_${suffix}`);
+            const delayWgsl = getExplodeWgsl(args.delay, `u_explodeDelay_${suffix}`);
             const velocityWgsl = getExplodeWgsl(args.velocity, `u_explodeVelocity_${suffix}`);
             const spinWgsl = getExplodeWgsl(args.spin, `u_explodeSpin_${suffix}`);
             const dragWgsl = getExplodeWgsl(args.drag, `u_explodeDrag_${suffix}`);
@@ -9733,6 +9738,7 @@
       // === Explosion Physics ===
       {
         let explodeTime = ${timeWgsl};
+        let explodeDelay = ${delayWgsl};
         let velocity = ${velocityWgsl};
         let spin = ${spinWgsl};
         let drag = ${dragWgsl};
@@ -9746,9 +9752,9 @@
         let fragmentSeed = input.fragmentSeed;
         let fragmentDistance = input.fragmentDistance;
 
-        // Shock wave timing: fragments start moving when shock reaches them
+        // Delay (fuse time) + shock wave timing
         let shockArrival = fragmentDistance / shockSpeed;
-        let localTime = max(0.0, explodeTime - shockArrival);
+        let localTime = max(0.0, explodeTime - explodeDelay - shockArrival);
 
         if (localTime > 0.0) {
           // Hash functions for per-fragment randomness
