@@ -69,3 +69,4 @@ typings/
 # pnpm lock file
 pnpm-lock.yaml
 public/
+dist/extensions/*/UltimateFoodPack/

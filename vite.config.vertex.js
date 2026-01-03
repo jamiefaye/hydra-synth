@@ -8,17 +8,20 @@ const configs = {
   webgl: {
     entry: path.resolve(__dirname, 'extensions/vertex/index.js'),
     name: 'HydraVertexExtension',
-    fileName: (format) => `vertex-webgl.${format}.js`
+    outDir: 'dist/extensions/vertex',
+    fileName: (format) => format === 'es' ? 'index.js' : `index.${format}.js`
   },
   webgpu: {
     entry: path.resolve(__dirname, 'extensions/vertex/index-webgpu.js'),
     name: 'HydraVertexExtensionWebGPU',
-    fileName: (format) => `vertex-webgpu.${format}.js`
+    outDir: 'dist/extensions/vertex-webgpu',
+    fileName: (format) => format === 'es' ? 'index.js' : `index.${format}.js`
   },
   inact: {
     entry: path.resolve(__dirname, 'extensions/inact/index.js'),
     name: 'HydraInActExtension',
-    fileName: (format) => `inact.${format}.js`
+    outDir: 'dist/extensions/inact',
+    fileName: (format) => format === 'es' ? 'index.js' : `index.${format}.js`
   }
 }
 
@@ -28,8 +31,8 @@ export default defineConfig({
   build: {
     minify: false,
     sourcemap: true,
-    outDir: 'dist/extensions',
-    emptyOutDir: false,  // Don't clear between builds
+    outDir: config.outDir,
+    emptyOutDir: true,  // Clear target dir for clean builds
     lib: {
       entry: config.entry,
       name: config.name,
