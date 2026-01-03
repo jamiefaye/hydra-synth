@@ -104,18 +104,20 @@ class OutputWgsl {
       rawVerts = vertexData
     }
 
-    // Check for explicit UVs, faceIds, normals, tangents, and colors
+    // Check for explicit UVs, faceIds, normals, tangents, colors, and fragments
     let hasExplicitUVs = false
     let hasFaceIds = false
     let hasNormals = false
     let hasTangents = false
     let hasColors = false
+    let hasFragments = false
     if (vertexSource) {
       hasExplicitUVs = vertexSource.uvs && vertexSource.uvs.length > 0
       hasFaceIds = vertexSource.faceIds && vertexSource.faceIds.length > 0
       hasNormals = vertexSource.normals && vertexSource.normals.length > 0
       hasTangents = vertexSource.tangents && vertexSource.tangents.length > 0
       hasColors = vertexSource.colors && vertexSource.colors.length > 0
+      hasFragments = vertexSource.isFragmentized === true
     }
 
     // Check for GPU instancing
@@ -159,7 +161,8 @@ class OutputWgsl {
           useColors: hasColors,
           useInstancing: hasInstancing,
           useInstanceRotation: hasInstanceRotation,
-          useInstanceScale: hasInstanceScale
+          useInstanceScale: hasInstanceScale,
+          useFragments: hasFragments
         })
         vertexWgsl = generated.wgsl
         vertexUniforms = [...boundsUniforms, ...generated.uniforms]
@@ -241,6 +244,11 @@ class OutputWgsl {
       instancePositions: vertexSource?.instancePositions,
       instanceRotations: vertexSource?.instanceRotations,
       instanceScales: vertexSource?.instanceScales,
+      // Fragment data for explosion effect
+      hasFragments,
+      fragmentCenters: vertexSource?.fragmentCenters,
+      fragmentSeeds: vertexSource?.fragmentSeeds,
+      fragmentDistances: vertexSource?.fragmentDistances,
       sprite,
       animation
     })

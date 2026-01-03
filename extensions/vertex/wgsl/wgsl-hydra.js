@@ -493,6 +493,7 @@ class wgslHydra {
 		const { uniforms, fragShader, vertexWgsl, vertexUniforms, rawVerts, blendMode, primitive, has3D,
 			hasExplicitUVs, hasFaceIds, hasNormals, hasTangents, hasColors, uvs, faceIds, normals, tangents, colors,
 			hasInstancing, hasInstanceRotation, hasInstanceScale, instanceCount, instancePositions, instanceRotations, instanceScales,
+			hasFragments, fragmentCenters, fragmentSeeds, fragmentDistances,
 			sprite, animation } = config;
 
 		const rpe = this.renderPassInfo[chan];
@@ -518,6 +519,7 @@ class wgslHydra {
 		spe.hasInstancing = hasInstancing || false;
 		spe.hasInstanceRotation = hasInstanceRotation || false;
 		spe.hasInstanceScale = hasInstanceScale || false;
+		spe.hasFragments = hasFragments || false;
 		spe.instanceCount = instanceCount || 1;
 		spe.sprite = sprite || null;
 		spe.animation = animation || null;
@@ -637,6 +639,42 @@ class wgslHydra {
 					usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
 				});
 				this.device.queue.writeBuffer(spe.instanceScaleBuffer, 0, instanceScales);
+			}
+
+			// Create fragment buffers for explosion effect
+			if (spe.hasFragments) {
+				// Fragment center buffer (vec3 per vertex)
+				if (fragmentCenters && fragmentCenters.length > 0) {
+					const centerData = new Float32Array(fragmentCenters);
+					spe.fragmentCenterBuffer = this.device.createBuffer({
+						label: `fragmentCenterBuf_c${chan}_s${spriteLevel}`,
+						size: centerData.byteLength,
+						usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+					});
+					this.device.queue.writeBuffer(spe.fragmentCenterBuffer, 0, centerData);
+				}
+
+				// Fragment seed buffer (float per vertex)
+				if (fragmentSeeds && fragmentSeeds.length > 0) {
+					const seedData = new Float32Array(fragmentSeeds);
+					spe.fragmentSeedBuffer = this.device.createBuffer({
+						label: `fragmentSeedBuf_c${chan}_s${spriteLevel}`,
+						size: seedData.byteLength,
+						usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+					});
+					this.device.queue.writeBuffer(spe.fragmentSeedBuffer, 0, seedData);
+				}
+
+				// Fragment distance buffer (float per vertex)
+				if (fragmentDistances && fragmentDistances.length > 0) {
+					const distData = new Float32Array(fragmentDistances);
+					spe.fragmentDistanceBuffer = this.device.createBuffer({
+						label: `fragmentDistanceBuf_c${chan}_s${spriteLevel}`,
+						size: distData.byteLength,
+						usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+					});
+					this.device.queue.writeBuffer(spe.fragmentDistanceBuffer, 0, distData);
+				}
 			}
 
 			// Setup vertex uniform buffer if needed
@@ -790,6 +828,45 @@ class wgslHydra {
 				});
 			}
 
+			// Add fragment buffer layouts for explosion effect
+			if (spe.hasFragments) {
+				// Fragment center buffer (vec3 per vertex) - location 10
+				if (spe.fragmentCenterBuffer) {
+					bufferLayouts.push({
+						arrayStride: 12, // 3 floats * 4 bytes (vec3)
+						attributes: [{
+							shaderLocation: 10,
+							offset: 0,
+							format: 'float32x3'
+						}]
+					});
+				}
+
+				// Fragment seed buffer (float per vertex) - location 11
+				if (spe.fragmentSeedBuffer) {
+					bufferLayouts.push({
+						arrayStride: 4, // 1 float * 4 bytes
+						attributes: [{
+							shaderLocation: 11,
+							offset: 0,
+							format: 'float32'
+						}]
+					});
+				}
+
+				// Fragment distance buffer (float per vertex) - location 12
+				if (spe.fragmentDistanceBuffer) {
+					bufferLayouts.push({
+						arrayStride: 4, // 1 float * 4 bytes
+						attributes: [{
+							shaderLocation: 12,
+							offset: 0,
+							format: 'float32'
+						}]
+					});
+				}
+			}
+
 			pipelineDescriptor.vertex.buffers = bufferLayouts;
 		}
 
@@ -893,6 +970,26 @@ class wgslHydra {
 				}
 				if (spe.facesPerInstanceBuffer) {
 					spe.facesPerInstanceBuffer.destroy();
+				}
+				// Instance buffers
+				if (spe.instanceOffsetBuffer) {
+					spe.instanceOffsetBuffer.destroy();
+				}
+				if (spe.instanceRotationBuffer) {
+					spe.instanceRotationBuffer.destroy();
+				}
+				if (spe.instanceScaleBuffer) {
+					spe.instanceScaleBuffer.destroy();
+				}
+				// Fragment buffers for explosion effect
+				if (spe.fragmentCenterBuffer) {
+					spe.fragmentCenterBuffer.destroy();
+				}
+				if (spe.fragmentSeedBuffer) {
+					spe.fragmentSeedBuffer.destroy();
+				}
+				if (spe.fragmentDistanceBuffer) {
+					spe.fragmentDistanceBuffer.destroy();
 				}
 			}
 			rpe.sprites.clear();
@@ -1322,6 +1419,18 @@ class wgslHydra {
 						// Set instance scale buffer if per-instance scales
 						if (spe.hasInstanceScale && spe.instanceScaleBuffer) {
 							passEncoder.setVertexBuffer(slot++, spe.instanceScaleBuffer);
+						}
+						// Set fragment buffers for explosion effect
+						if (spe.hasFragments) {
+							if (spe.fragmentCenterBuffer) {
+								passEncoder.setVertexBuffer(slot++, spe.fragmentCenterBuffer);
+							}
+							if (spe.fragmentSeedBuffer) {
+								passEncoder.setVertexBuffer(slot++, spe.fragmentSeedBuffer);
+							}
+							if (spe.fragmentDistanceBuffer) {
+								passEncoder.setVertexBuffer(slot++, spe.fragmentDistanceBuffer);
+							}
 						}
 						// Draw with instance count
 						passEncoder.draw(spe.vertexCount, spe.instanceCount);

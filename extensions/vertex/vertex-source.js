@@ -2,7 +2,7 @@
 // Usage: tri(0.3).rotate(() => time).scale(0.5)
 // Then pass to out(): osc(10).out(o0, tri(0.3).rotate(0.5), 1)
 
-import { extractSkeletonFromGltf, extractAnimationsFromGltf, computeSkinningMatrices, applySkinning } from './geometry.js'
+import { extractSkeletonFromGltf, extractAnimationsFromGltf, computeSkinningMatrices, applySkinning, subdivideTriangles, computeTriangleCenters, kMeansClustering, randomClustering, computeFragmentData } from './geometry.js'
 import { parseShaderExpr } from '../../src/shader-expr/index.js'
 
 // Create a uniform accessor function that handles static values and lambdas
@@ -399,6 +399,133 @@ class VertexSource {
     }
     return this._animations.map(a => ({ name: a.name, duration: a.duration }))
   }
+
+  // ========== Fragment/Explosion ==========
+
+  // Subdivide: split large triangles into smaller ones for better fragment sizes
+  // Uses midpoint subdivision on edges longer than maxEdgeLength
+  // Options:
+  //   maxEdgeLength: maximum edge length before subdivision (default: 0.2)
+  //   maxIterations: maximum subdivision passes (default: 3)
+  // Returns this for chaining
+  subdivide(options = {}) {
+    const { maxEdgeLength = 0.2, maxIterations = 3 } = options
+
+    // Only works on 3D geometry
+    if (!this.is3D) {
+      console.warn('subdivide() requires 3D geometry')
+      return this
+    }
+
+    const result = subdivideTriangles(this.vertices, {
+      maxEdgeLength,
+      maxIterations,
+      uvs: this.uvs,
+      normals: this.normals,
+      colors: this.colors,
+      faceIds: this.faceIds
+    })
+
+    // Update geometry with subdivided data
+    this.vertices = result.vertices
+    if (result.uvs) this.uvs = result.uvs
+    if (result.normals) this.normals = result.normals
+    if (result.colors) this.colors = result.colors
+    if (result.faceIds) this.faceIds = result.faceIds
+
+    return this
+  }
+
+  // Prepare geometry for explosion by computing per-fragment data
+  // Options:
+  //   groupSize: target triangles per fragment (default 1 = each triangle is a fragment)
+  //   groupMethod: 'spatial' (k-means clustering) or 'random' (default 'spatial')
+  //   seed: random seed for reproducibility (default 0)
+  //   shockOrigin: center of explosion for distance calculation (default [0,0,0])
+  fragmentize(options = {}) {
+    const {
+      groupSize = 1,
+      groupMethod = 'spatial',
+      seed = 0,
+      shockOrigin = [0, 0, 0]
+    } = options
+
+    // Only works on 3D geometry
+    if (!this.is3D) {
+      console.warn('fragmentize() requires 3D geometry')
+      return this
+    }
+
+    const triangleCount = Math.floor(this.vertices.length / 9)
+    if (triangleCount === 0) {
+      console.warn('fragmentize() called on empty geometry')
+      return this
+    }
+
+    // Determine number of fragments
+    const targetFragments = Math.max(1, Math.ceil(triangleCount / groupSize))
+
+    // Compute triangle centers for clustering
+    const centers = computeTriangleCenters(this.vertices)
+
+    // Cluster triangles into fragments
+    let assignments
+    if (groupMethod === 'random') {
+      assignments = randomClustering(triangleCount, targetFragments, seed)
+    } else {
+      // Default: spatial clustering
+      assignments = kMeansClustering(centers, targetFragments, seed)
+    }
+
+    // Compute per-vertex fragment attributes
+    const fragData = computeFragmentData(this.vertices, assignments, { shockOrigin })
+
+    // Store fragment data on this VertexSource
+    this.fragmentCenters = fragData.fragmentCenters
+    this.fragmentNormals = fragData.fragmentNormals
+    this.fragmentSeeds = fragData.fragmentSeeds
+    this.fragmentDistances = fragData.fragmentDistances
+    this.isFragmentized = true
+    this._fragmentCount = fragData.fragmentCount
+
+    console.log(`[hydra-vertex] Fragmentized: ${triangleCount} triangles → ${fragData.fragmentCount} fragments`)
+
+    return this
+  }
+
+  // Explosion transform - animates fragments flying outward
+  // Options:
+  //   time: explosion progress (0 = start, number/function/expression)
+  //   velocity: initial outward velocity (default 2.0)
+  //   velocityVariation: per-fragment velocity randomness 0-1 (default 0.3)
+  //   gravity: gravity vector [x, y, z] (default [0, -1, 0])
+  //   spin: fragment rotation speed (default 0.5)
+  //   spinAxisVariation: spin axis randomness 0-1 (default 1.0)
+  //   drag: air resistance (default 0.0)
+  //   shockSpeed: shock wave propagation speed (default Infinity = instant)
+  //   shockOrigin: explosion origin point (default [0, 0, 0])
+  explode(options = {}) {
+    const defaults = {
+      time: 0,
+      velocity: 2.0,
+      velocityVariation: 0.3,
+      gravity: [0, -1, 0],
+      spin: 0.5,
+      spinAxisVariation: 1.0,
+      drag: 0.0,
+      shockSpeed: 1e10,  // Very large = nearly instant
+      shockOrigin: [0, 0, 0]
+    }
+
+    const args = { ...defaults, ...options }
+
+    // Auto-fragmentize if not already done
+    if (!this.isFragmentized) {
+      this.fragmentize({ shockOrigin: args.shockOrigin })
+    }
+
+    return this._addTransform('explode', args)
+  }
 }
 
 // Generate vertex shader GLSL from transforms
@@ -414,7 +541,8 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     useInstancing = false,
     useCpuInstancing = false,  // CPU fallback when GPU instancing not available
     useInstanceRotation = false,
-    useInstanceScale = false
+    useInstanceScale = false,
+    useFragments = false  // Fragment data for explosion effects
   } = options
 
   // UV source code - either from attribute or computed from bounds
@@ -447,6 +575,11 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     : (useCpuInstancing ? 'attribute float instanceId;' : '')
   if (useInstanceRotation) instanceAttributeDecl += '\nattribute vec3 instanceRotation;'
   if (useInstanceScale) instanceAttributeDecl += '\nattribute vec3 instanceScale;'
+
+  // Fragment attributes for explosion effects
+  const fragmentAttributeDecl = useFragments
+    ? 'attribute vec3 fragmentCenter;\nattribute float fragmentSeed;\nattribute float fragmentDistance;'
+    : ''
 
   const instanceIdVaryingDecl = 'varying float v_instanceId;'  // Always declare for fragment shader compatibility
   const instanceIdPassthrough = (useInstancing || useCpuInstancing) ? 'v_instanceId = instanceId;' : 'v_instanceId = 0.0;'
@@ -724,6 +857,96 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
         ])
         break
       }
+
+      case 'explode': {
+        // Explosion physics - fragments fly outward with ballistic trajectory
+        const args = transform.args
+
+        // Time uniform (can be number, function, or shader expression)
+        const getExplodeGlsl = (val, name, type = 'float') => {
+          if (typeof val === 'string') {
+            const expr = parseShaderExpr(val)
+            if (expr) return expr.toGLSL()
+          }
+          uniformDecls.push(`uniform ${type} ${name};`)
+          uniforms[name] = makeUniformAccessor(val)
+          return name
+        }
+
+        const timeGlsl = getExplodeGlsl(args.time, `u_explodeTime_${suffix}`)
+        const velocityGlsl = getExplodeGlsl(args.velocity, `u_explodeVelocity_${suffix}`)
+        const spinGlsl = getExplodeGlsl(args.spin, `u_explodeSpin_${suffix}`)
+        const dragGlsl = getExplodeGlsl(args.drag, `u_explodeDrag_${suffix}`)
+        const shockSpeedGlsl = getExplodeGlsl(args.shockSpeed, `u_explodeShockSpeed_${suffix}`)
+
+        // Gravity and origin as vec3 uniforms
+        uniformDecls.push(`uniform vec3 u_explodeGravity_${suffix};`)
+        uniforms[`u_explodeGravity_${suffix}`] = makeUniformAccessor(args.gravity)
+        uniformDecls.push(`uniform vec3 u_explodeOrigin_${suffix};`)
+        uniforms[`u_explodeOrigin_${suffix}`] = makeUniformAccessor(args.shockOrigin)
+        uniformDecls.push(`uniform float u_explodeVelVar_${suffix};`)
+        uniforms[`u_explodeVelVar_${suffix}`] = makeUniformAccessor(args.velocityVariation)
+
+        transformCode.push(`
+          // === Explosion Physics ===
+          {
+            float explodeTime = ${timeGlsl};
+            float velocity = ${velocityGlsl};
+            float spin = ${spinGlsl};
+            float drag = ${dragGlsl};
+            float shockSpeed = ${shockSpeedGlsl};
+            vec3 gravity = u_explodeGravity_${suffix};
+            vec3 origin = u_explodeOrigin_${suffix};
+            float velVar = u_explodeVelVar_${suffix};
+
+            // Shock wave timing: fragments start moving when shock reaches them
+            float shockArrival = fragmentDistance / shockSpeed;
+            float localTime = max(0.0, explodeTime - shockArrival);
+
+            if (localTime > 0.0) {
+              // Hash functions for per-fragment randomness
+              float h1 = fract(sin(fragmentSeed * 12.9898) * 43758.5453);
+              float h2 = fract(sin(fragmentSeed * 78.233) * 43758.5453);
+              float h3 = fract(sin(fragmentSeed * 45.164) * 43758.5453);
+              vec3 randDir = normalize(vec3(h1 - 0.5, h2 - 0.5, h3 - 0.5));
+
+              // Per-fragment velocity variation
+              float velocityMult = 1.0 - velVar + 2.0 * velVar * h1;
+
+              // Explosion direction: outward from fragment center + random component
+              vec3 outDir = normalize(fragmentCenter - origin);
+              vec3 initVel = (outDir + randDir * 0.3) * velocity * velocityMult;
+
+              // Ballistic trajectory with optional drag
+              vec3 displacement;
+              if (drag > 0.001) {
+                float dragFactor = exp(-drag * localTime);
+                displacement = initVel * (1.0 - dragFactor) / drag + 0.5 * gravity * localTime * localTime;
+              } else {
+                displacement = initVel * localTime + 0.5 * gravity * localTime * localTime;
+              }
+
+              // Spin: rotate around random axis
+              float angle = spin * localTime * (0.5 + h2);
+              vec3 spinAxis = normalize(vec3(h1 - 0.5, h2 - 0.5, h3 - 0.5) + vec3(0.001));
+
+              // Rodrigues rotation formula
+              vec3 localPos = pos - fragmentCenter;
+              float c = cos(angle);
+              float s = sin(angle);
+              vec3 rotatedPos = localPos * c + cross(spinAxis, localPos) * s + spinAxis * dot(spinAxis, localPos) * (1.0 - c);
+
+              pos = rotatedPos + fragmentCenter + displacement;
+
+              // Also rotate normal
+              nrm = nrm * c + cross(spinAxis, nrm) * s + spinAxis * dot(spinAxis, nrm) * (1.0 - c);
+            }
+          }`)
+
+        // Mark that we're using fragment data (will be used to add attribute declarations)
+        vertexSource._hasExplodeTransform = true
+        break
+      }
     }
   })
 
@@ -784,6 +1007,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
     precision ${precision} float;
     attribute vec3 position;
     ${instanceAttributeDecl}
+    ${fragmentAttributeDecl}
     ${uvAttributeDecl}
     ${faceIdAttributeDecl}
     ${normalAttributeDecl}
@@ -817,6 +1041,9 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${instanceIdPassthrough}
       ${ixDefCode}
 
+      // Model space normal (raw from vertex buffer, needed early for explosion)
+      ${normalInit}
+
       // Apply transforms (3D)
       vec3 pos = position;
       ${instanceScaleCode}
@@ -827,8 +1054,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
       // Compute vertex data for fragment shader
       v_position = pos;
 
-      // Model space normal (raw from vertex buffer)
-      ${normalInit}
+      // Store final normal (may have been modified by explosion)
       v_normal = nrm;
 
       // World space normal (after rotation transforms)
@@ -926,7 +1152,8 @@ export function generateVertexWgsl(vertexSource, options = {}) {
     useColors = false,
     useInstancing = false,
     useInstanceRotation = false,
-    useInstanceScale = false
+    useInstanceScale = false,
+    useFragments = false
   } = options
 
   // Collect uniforms and build transform code
@@ -1114,6 +1341,97 @@ export function generateVertexWgsl(vertexSource, options = {}) {
           uniforms.push({ name: perspectiveUniform, type: 'vec3f', value: [transform.args.fov, transform.args.near, transform.args.far] })
           break
         }
+
+        case 'explode': {
+          // Explosion physics - fragments fly outward with ballistic trajectory
+          const args = transform.args
+
+          // Helper for WGSL shader expressions
+          const getExplodeWgsl = (val, name, type = 'f32') => {
+            if (typeof val === 'string') {
+              const expr = parseShaderExpr(val)
+              if (expr) return expr.toWGSL()
+            }
+            uniforms.push({ name, type, value: val })
+            return `vtx.${name}`
+          }
+
+          const timeWgsl = getExplodeWgsl(args.time, `u_explodeTime_${suffix}`)
+          const velocityWgsl = getExplodeWgsl(args.velocity, `u_explodeVelocity_${suffix}`)
+          const spinWgsl = getExplodeWgsl(args.spin, `u_explodeSpin_${suffix}`)
+          const dragWgsl = getExplodeWgsl(args.drag, `u_explodeDrag_${suffix}`)
+          const shockSpeedWgsl = getExplodeWgsl(args.shockSpeed, `u_explodeShockSpeed_${suffix}`)
+
+          // Gravity and origin as vec3 uniforms
+          uniforms.push({ name: `u_explodeGravity_${suffix}`, type: 'vec3f', value: args.gravity })
+          uniforms.push({ name: `u_explodeOrigin_${suffix}`, type: 'vec3f', value: args.shockOrigin })
+          uniforms.push({ name: `u_explodeVelVar_${suffix}`, type: 'f32', value: args.velocityVariation })
+
+          transformCode.push(`
+      // === Explosion Physics ===
+      {
+        let explodeTime = ${timeWgsl};
+        let velocity = ${velocityWgsl};
+        let spin = ${spinWgsl};
+        let drag = ${dragWgsl};
+        let shockSpeed = ${shockSpeedWgsl};
+        let gravity = vtx.u_explodeGravity_${suffix};
+        let origin = vtx.u_explodeOrigin_${suffix};
+        let velVar = vtx.u_explodeVelVar_${suffix};
+
+        // Fragment attributes
+        let fragmentCenter = input.fragmentCenter;
+        let fragmentSeed = input.fragmentSeed;
+        let fragmentDistance = input.fragmentDistance;
+
+        // Shock wave timing: fragments start moving when shock reaches them
+        let shockArrival = fragmentDistance / shockSpeed;
+        let localTime = max(0.0, explodeTime - shockArrival);
+
+        if (localTime > 0.0) {
+          // Hash functions for per-fragment randomness
+          let h1 = fract(sin(fragmentSeed * 12.9898) * 43758.5453);
+          let h2 = fract(sin(fragmentSeed * 78.233) * 43758.5453);
+          let h3 = fract(sin(fragmentSeed * 45.164) * 43758.5453);
+          let randDir = normalize(vec3f(h1 - 0.5, h2 - 0.5, h3 - 0.5));
+
+          // Per-fragment velocity variation
+          let velocityMult = 1.0 - velVar + 2.0 * velVar * h1;
+
+          // Explosion direction: outward from fragment center + random component
+          let outDir = normalize(fragmentCenter - origin);
+          let initVel = (outDir + randDir * 0.3) * velocity * velocityMult;
+
+          // Ballistic trajectory with optional drag
+          var displacement: vec3f;
+          if (drag > 0.001) {
+            let dragFactor = exp(-drag * localTime);
+            displacement = initVel * (1.0 - dragFactor) / drag + 0.5 * gravity * localTime * localTime;
+          } else {
+            displacement = initVel * localTime + 0.5 * gravity * localTime * localTime;
+          }
+
+          // Spin: rotate around random axis
+          let angle = spin * localTime * (0.5 + h2);
+          let spinAxis = normalize(vec3f(h1 - 0.5, h2 - 0.5, h3 - 0.5) + vec3f(0.001));
+
+          // Rodrigues rotation formula
+          let localPos = pos - fragmentCenter;
+          let c = cos(angle);
+          let s = sin(angle);
+          let rotatedPos = localPos * c + cross(spinAxis, localPos) * s + spinAxis * dot(spinAxis, localPos) * (1.0 - c);
+
+          pos = rotatedPos + fragmentCenter + displacement;
+
+          // Also rotate normal
+          nrm = nrm * c + cross(spinAxis, nrm) * s + spinAxis * dot(spinAxis, nrm) * (1.0 - c);
+        }
+      }`)
+
+          // Mark that we're using fragment data
+          vertexSource._hasExplodeTransform = true
+          break
+        }
       }
     })
   }
@@ -1157,6 +1475,13 @@ ${allUniformFields.join('\n')}
   }
   if (useInstanceScale) {
     inputFields.push('  @location(8) instanceScale: vec3f,')
+  }
+
+  // Fragment attributes for explosion effect
+  if (useFragments) {
+    inputFields.push('  @location(10) fragmentCenter: vec3f,')
+    inputFields.push('  @location(11) fragmentSeed: f32,')
+    inputFields.push('  @location(12) fragmentDistance: f32,')
   }
 
   // Build vertex output struct
@@ -1308,6 +1633,9 @@ ${fnSignature} {
   // Define _ix for shader expressions
   ${ixDefCode}
 
+  // Initialize normal before transforms (explosion physics may modify it)
+  ${normalInit}
+
   // Apply transforms (3D)
   var pos = input.position;
   ${instanceScaleCode}
@@ -1318,8 +1646,7 @@ ${transformCode.join('\n')}
   // Compute vertex data for fragment shader
   output.v_position = pos;
 
-  // Model space normal (raw from vertex buffer)
-  ${normalInit}
+  // Model space normal (after transforms that may have modified it)
   output.v_normal = nrm;
 
   // World space normal (after rotation transforms)

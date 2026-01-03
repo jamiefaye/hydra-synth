@@ -14,7 +14,7 @@
   <body>
     <div id="status">Loading...</div>
     <div id="controls">
-      Press 1-4 to switch patterns
+      Press 1-6 to switch patterns (5 = sphere, 6 = bottle)
     </div>
     <script type="module">
       // Test: Core hydra-synth + vertex extension install()
@@ -51,8 +51,21 @@
           console.log('Renderer capabilities:', hydra.renderer.capabilities)
           status.textContent = `Core + Vertex Extension (${hydra.renderer.capabilities.name})`
 
-          // Test 2D pattern first
-          osc(10, 0.1, 1).out(o0)
+          // Start with exploding sphere demo
+          osc(10, 0.1, 1.5).out(o0,
+            sphere(0.4, 32)
+              .subdivide({ maxEdgeLength: 0.15 })
+              .fragmentize({ groupSize: 2, groupMethod: 'spatial' })
+              .explode({
+                time: () => (time % 4),  // Loop every 4 seconds
+                velocity: 1.5,
+                gravity: [0, 0.5, 0],  // Positive Y = down in this coord system
+                spin: 2.0,
+                shockSpeed: 3.0
+              })
+              .perspective(60)
+              .rotateY(() => time * 0.2)
+          )
 
           // Keyboard controls
           document.addEventListener('keydown', (e) => {
@@ -77,11 +90,51 @@
                 noise(5).colorama(0.5).out(o0, cube().perspective(60).rotateX(() => time * 0.5).rotateY(() => time))
                 status.textContent = 'Pattern 4: textured cube (3D)'
                 break
+              case '5':
+                // 3D - exploding sphere
+                osc(10, 0.1, 1.5).out(o0,
+                  sphere(0.4, 32)
+                    .subdivide({ maxEdgeLength: 0.15 })
+                    .fragmentize({ groupSize: 2, groupMethod: 'spatial' })
+                    .explode({
+                      time: () => (time % 4),  // Loop every 4 seconds
+                      velocity: 1.5,
+                      gravity: [0, 0.5, 0],  // Positive Y = down
+                      spin: 2.0,
+                      shockSpeed: 3.0
+                    })
+                    .perspective(60)
+                    .rotateY(() => time * 0.2)
+                )
+                status.textContent = 'Pattern 5: exploding sphere (3D)'
+                break
+              case '6':
+                // 3D - exploding bottle model
+                status.textContent = 'Loading bottle...'
+                loadGlb('/UltimateFoodPack/Bottle.glb').then(bottle => {
+                  osc(5, 0.1, 1).out(o0,
+                    bottle
+                      .subdivide({ maxEdgeLength: 0.1 })
+                      .fragmentize({ groupSize: 3, groupMethod: 'spatial' })
+                      .explode({
+                        time: () => Math.max(0, (time % 7) - 2),  // 2s delay, 5s explosion, 7s loop
+                        velocity: 1.2,
+                        gravity: [0, 0.8, 0],
+                        spin: 1.5,
+                        shockSpeed: 4.0
+                      })
+                      .rotateX(Math.PI / 2)  // Rotate bottle upright
+                      .perspective(60)
+                      .rotateY(() => time * 0.3)
+                  )
+                  status.textContent = 'Pattern 6: exploding bottle (3D)'
+                })
+                break
             }
           })
 
           console.log('Hydra + Vertex initialized successfully')
-          status.textContent += ' - Press 1-4 (1-2: 2D, 3-4: 3D)'
+          status.textContent += ' - Press 1-6 (5: sphere explosion, 6: bottle explosion)'
 
         } catch (e) {
           console.error('Error:', e)

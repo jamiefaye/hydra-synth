@@ -1589,3 +1589,647 @@ export function cone(radius = 0.3, height = 1, radialSegments = 32, caps = true)
   vs.is3D = true
   return vs
 }
+
+// ============================================================================
+// Fragment/Explosion Utilities
+// ============================================================================
+
+// Seeded pseudo-random number generator (LCG)
+function seededRandom(seed) {
+  let state = seed
+  return () => {
+    state = (state * 1103515245 + 12345) & 0x7fffffff
+    return state / 0x7fffffff
+  }
+}
+
+// Subdivide triangles with edges longer than maxEdgeLength
+// Uses midpoint subdivision: splits each large triangle into up to 4 smaller triangles
+// Options:
+//   maxEdgeLength: maximum edge length before subdivision (default: 0.2)
+//   maxIterations: maximum subdivision passes (default: 3)
+// Returns object with subdivided vertices, uvs, normals, colors, faceIds (all as Float32Arrays)
+export function subdivideTriangles(vertices, options = {}) {
+  const {
+    maxEdgeLength = 0.2,
+    maxIterations = 3,
+    uvs = null,
+    normals = null,
+    colors = null,
+    faceIds = null
+  } = options
+
+  // Helper to compute edge length squared
+  const edgeLengthSq = (v1, v2) => {
+    const dx = v2[0] - v1[0]
+    const dy = v2[1] - v1[1]
+    const dz = v2[2] - v1[2]
+    return dx * dx + dy * dy + dz * dz
+  }
+
+  // Helper to interpolate between two values
+  const lerp = (a, b, t) => a + (b - a) * t
+
+  // Helper to interpolate vec2
+  const lerpVec2 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t)]
+
+  // Helper to interpolate vec3
+  const lerpVec3 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)]
+
+  // Helper to interpolate vec4
+  const lerpVec4 = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t), lerp(a[3], b[3], t)]
+
+  // Helper to normalize vec3
+  const normalize = (v) => {
+    const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+    if (len < 0.0001) return [0, 0, 1]
+    return [v[0] / len, v[1] / len, v[2] / len]
+  }
+
+  const maxLenSq = maxEdgeLength * maxEdgeLength
+
+  // Convert flat arrays to triangle arrays for easier processing
+  let tris = []
+  const triangleCount = Math.floor(vertices.length / 9)
+
+  for (let i = 0; i < triangleCount; i++) {
+    const base = i * 9
+    const tri = {
+      v: [
+        [vertices[base], vertices[base + 1], vertices[base + 2]],
+        [vertices[base + 3], vertices[base + 4], vertices[base + 5]],
+        [vertices[base + 6], vertices[base + 7], vertices[base + 8]]
+      ]
+    }
+
+    if (uvs && uvs.length >= (i + 1) * 6) {
+      const uvBase = i * 6
+      tri.uv = [
+        [uvs[uvBase], uvs[uvBase + 1]],
+        [uvs[uvBase + 2], uvs[uvBase + 3]],
+        [uvs[uvBase + 4], uvs[uvBase + 5]]
+      ]
+    }
+
+    if (normals && normals.length >= (i + 1) * 9) {
+      const nBase = i * 9
+      tri.n = [
+        [normals[nBase], normals[nBase + 1], normals[nBase + 2]],
+        [normals[nBase + 3], normals[nBase + 4], normals[nBase + 5]],
+        [normals[nBase + 6], normals[nBase + 7], normals[nBase + 8]]
+      ]
+    }
+
+    if (colors && colors.length >= (i + 1) * 12) {
+      const cBase = i * 12
+      tri.c = [
+        [colors[cBase], colors[cBase + 1], colors[cBase + 2], colors[cBase + 3]],
+        [colors[cBase + 4], colors[cBase + 5], colors[cBase + 6], colors[cBase + 7]],
+        [colors[cBase + 8], colors[cBase + 9], colors[cBase + 10], colors[cBase + 11]]
+      ]
+    }
+
+    if (faceIds && faceIds.length >= (i + 1) * 3) {
+      tri.faceId = faceIds[i * 3]  // Same for all 3 vertices
+    }
+
+    tris.push(tri)
+  }
+
+  // Iteratively subdivide
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const newTris = []
+    let didSubdivide = false
+
+    for (const tri of tris) {
+      const [v0, v1, v2] = tri.v
+      const e01 = edgeLengthSq(v0, v1)
+      const e12 = edgeLengthSq(v1, v2)
+      const e20 = edgeLengthSq(v2, v0)
+
+      const split01 = e01 > maxLenSq
+      const split12 = e12 > maxLenSq
+      const split20 = e20 > maxLenSq
+
+      if (!split01 && !split12 && !split20) {
+        // No subdivision needed
+        newTris.push(tri)
+        continue
+      }
+
+      didSubdivide = true
+
+      // Compute midpoints for edges that need splitting
+      const m01 = split01 ? lerpVec3(v0, v1, 0.5) : null
+      const m12 = split12 ? lerpVec3(v1, v2, 0.5) : null
+      const m20 = split20 ? lerpVec3(v2, v0, 0.5) : null
+
+      // Interpolate other attributes at midpoints
+      const uv01 = tri.uv && split01 ? lerpVec2(tri.uv[0], tri.uv[1], 0.5) : null
+      const uv12 = tri.uv && split12 ? lerpVec2(tri.uv[1], tri.uv[2], 0.5) : null
+      const uv20 = tri.uv && split20 ? lerpVec2(tri.uv[2], tri.uv[0], 0.5) : null
+
+      const n01 = tri.n && split01 ? normalize(lerpVec3(tri.n[0], tri.n[1], 0.5)) : null
+      const n12 = tri.n && split12 ? normalize(lerpVec3(tri.n[1], tri.n[2], 0.5)) : null
+      const n20 = tri.n && split20 ? normalize(lerpVec3(tri.n[2], tri.n[0], 0.5)) : null
+
+      const c01 = tri.c && split01 ? lerpVec4(tri.c[0], tri.c[1], 0.5) : null
+      const c12 = tri.c && split12 ? lerpVec4(tri.c[1], tri.c[2], 0.5) : null
+      const c20 = tri.c && split20 ? lerpVec4(tri.c[2], tri.c[0], 0.5) : null
+
+      // Helper to create a new triangle
+      const makeTri = (verts, uvArr, nArr, cArr) => {
+        const t = { v: verts }
+        if (uvArr) t.uv = uvArr
+        if (nArr) t.n = nArr
+        if (cArr) t.c = cArr
+        if (tri.faceId !== undefined) t.faceId = tri.faceId
+        return t
+      }
+
+      // Split patterns based on which edges need subdivision
+      const splitCount = (split01 ? 1 : 0) + (split12 ? 1 : 0) + (split20 ? 1 : 0)
+
+      if (splitCount === 3) {
+        // All edges split - 4 triangles
+        newTris.push(makeTri(
+          [v0, m01, m20],
+          tri.uv ? [tri.uv[0], uv01, uv20] : null,
+          tri.n ? [tri.n[0], n01, n20] : null,
+          tri.c ? [tri.c[0], c01, c20] : null
+        ))
+        newTris.push(makeTri(
+          [m01, v1, m12],
+          tri.uv ? [uv01, tri.uv[1], uv12] : null,
+          tri.n ? [n01, tri.n[1], n12] : null,
+          tri.c ? [c01, tri.c[1], c12] : null
+        ))
+        newTris.push(makeTri(
+          [m20, m12, v2],
+          tri.uv ? [uv20, uv12, tri.uv[2]] : null,
+          tri.n ? [n20, n12, tri.n[2]] : null,
+          tri.c ? [c20, c12, tri.c[2]] : null
+        ))
+        newTris.push(makeTri(
+          [m01, m12, m20],
+          tri.uv ? [uv01, uv12, uv20] : null,
+          tri.n ? [n01, n12, n20] : null,
+          tri.c ? [c01, c12, c20] : null
+        ))
+      } else if (splitCount === 2) {
+        // Two edges split - 3 triangles
+        if (!split01) {
+          // Split e12 and e20
+          newTris.push(makeTri(
+            [v0, v1, m12],
+            tri.uv ? [tri.uv[0], tri.uv[1], uv12] : null,
+            tri.n ? [tri.n[0], tri.n[1], n12] : null,
+            tri.c ? [tri.c[0], tri.c[1], c12] : null
+          ))
+          newTris.push(makeTri(
+            [v0, m12, m20],
+            tri.uv ? [tri.uv[0], uv12, uv20] : null,
+            tri.n ? [tri.n[0], n12, n20] : null,
+            tri.c ? [tri.c[0], c12, c20] : null
+          ))
+          newTris.push(makeTri(
+            [m20, m12, v2],
+            tri.uv ? [uv20, uv12, tri.uv[2]] : null,
+            tri.n ? [n20, n12, tri.n[2]] : null,
+            tri.c ? [c20, c12, tri.c[2]] : null
+          ))
+        } else if (!split12) {
+          // Split e01 and e20
+          newTris.push(makeTri(
+            [v0, m01, m20],
+            tri.uv ? [tri.uv[0], uv01, uv20] : null,
+            tri.n ? [tri.n[0], n01, n20] : null,
+            tri.c ? [tri.c[0], c01, c20] : null
+          ))
+          newTris.push(makeTri(
+            [m01, v1, m20],
+            tri.uv ? [uv01, tri.uv[1], uv20] : null,
+            tri.n ? [n01, tri.n[1], n20] : null,
+            tri.c ? [c01, tri.c[1], c20] : null
+          ))
+          newTris.push(makeTri(
+            [m20, v1, v2],
+            tri.uv ? [uv20, tri.uv[1], tri.uv[2]] : null,
+            tri.n ? [n20, tri.n[1], tri.n[2]] : null,
+            tri.c ? [c20, tri.c[1], tri.c[2]] : null
+          ))
+        } else {
+          // Split e01 and e12
+          newTris.push(makeTri(
+            [v0, m01, v2],
+            tri.uv ? [tri.uv[0], uv01, tri.uv[2]] : null,
+            tri.n ? [tri.n[0], n01, tri.n[2]] : null,
+            tri.c ? [tri.c[0], c01, tri.c[2]] : null
+          ))
+          newTris.push(makeTri(
+            [m01, v1, m12],
+            tri.uv ? [uv01, tri.uv[1], uv12] : null,
+            tri.n ? [n01, tri.n[1], n12] : null,
+            tri.c ? [c01, tri.c[1], c12] : null
+          ))
+          newTris.push(makeTri(
+            [m01, m12, v2],
+            tri.uv ? [uv01, uv12, tri.uv[2]] : null,
+            tri.n ? [n01, n12, tri.n[2]] : null,
+            tri.c ? [c01, c12, tri.c[2]] : null
+          ))
+        }
+      } else {
+        // One edge split - 2 triangles
+        if (split01) {
+          newTris.push(makeTri(
+            [v0, m01, v2],
+            tri.uv ? [tri.uv[0], uv01, tri.uv[2]] : null,
+            tri.n ? [tri.n[0], n01, tri.n[2]] : null,
+            tri.c ? [tri.c[0], c01, tri.c[2]] : null
+          ))
+          newTris.push(makeTri(
+            [m01, v1, v2],
+            tri.uv ? [uv01, tri.uv[1], tri.uv[2]] : null,
+            tri.n ? [n01, tri.n[1], tri.n[2]] : null,
+            tri.c ? [c01, tri.c[1], tri.c[2]] : null
+          ))
+        } else if (split12) {
+          newTris.push(makeTri(
+            [v0, v1, m12],
+            tri.uv ? [tri.uv[0], tri.uv[1], uv12] : null,
+            tri.n ? [tri.n[0], tri.n[1], n12] : null,
+            tri.c ? [tri.c[0], tri.c[1], c12] : null
+          ))
+          newTris.push(makeTri(
+            [v0, m12, v2],
+            tri.uv ? [tri.uv[0], uv12, tri.uv[2]] : null,
+            tri.n ? [tri.n[0], n12, tri.n[2]] : null,
+            tri.c ? [tri.c[0], c12, tri.c[2]] : null
+          ))
+        } else {
+          newTris.push(makeTri(
+            [v0, v1, m20],
+            tri.uv ? [tri.uv[0], tri.uv[1], uv20] : null,
+            tri.n ? [tri.n[0], tri.n[1], n20] : null,
+            tri.c ? [tri.c[0], tri.c[1], c20] : null
+          ))
+          newTris.push(makeTri(
+            [m20, v1, v2],
+            tri.uv ? [uv20, tri.uv[1], tri.uv[2]] : null,
+            tri.n ? [n20, tri.n[1], tri.n[2]] : null,
+            tri.c ? [c20, tri.c[1], tri.c[2]] : null
+          ))
+        }
+      }
+    }
+
+    tris = newTris
+
+    // Early exit if no subdivisions occurred
+    if (!didSubdivide) break
+  }
+
+  // Convert back to flat arrays
+  const outVertices = new Float32Array(tris.length * 9)
+  const outUvs = tris[0]?.uv ? new Float32Array(tris.length * 6) : null
+  const outNormals = tris[0]?.n ? new Float32Array(tris.length * 9) : null
+  const outColors = tris[0]?.c ? new Float32Array(tris.length * 12) : null
+  const outFaceIds = tris[0]?.faceId !== undefined ? new Float32Array(tris.length * 3) : null
+
+  for (let i = 0; i < tris.length; i++) {
+    const tri = tris[i]
+    const vBase = i * 9
+    for (let j = 0; j < 3; j++) {
+      outVertices[vBase + j * 3] = tri.v[j][0]
+      outVertices[vBase + j * 3 + 1] = tri.v[j][1]
+      outVertices[vBase + j * 3 + 2] = tri.v[j][2]
+    }
+
+    if (outUvs && tri.uv) {
+      const uvBase = i * 6
+      for (let j = 0; j < 3; j++) {
+        outUvs[uvBase + j * 2] = tri.uv[j][0]
+        outUvs[uvBase + j * 2 + 1] = tri.uv[j][1]
+      }
+    }
+
+    if (outNormals && tri.n) {
+      const nBase = i * 9
+      for (let j = 0; j < 3; j++) {
+        outNormals[nBase + j * 3] = tri.n[j][0]
+        outNormals[nBase + j * 3 + 1] = tri.n[j][1]
+        outNormals[nBase + j * 3 + 2] = tri.n[j][2]
+      }
+    }
+
+    if (outColors && tri.c) {
+      const cBase = i * 12
+      for (let j = 0; j < 3; j++) {
+        outColors[cBase + j * 4] = tri.c[j][0]
+        outColors[cBase + j * 4 + 1] = tri.c[j][1]
+        outColors[cBase + j * 4 + 2] = tri.c[j][2]
+        outColors[cBase + j * 4 + 3] = tri.c[j][3]
+      }
+    }
+
+    if (outFaceIds && tri.faceId !== undefined) {
+      const fBase = i * 3
+      outFaceIds[fBase] = tri.faceId
+      outFaceIds[fBase + 1] = tri.faceId
+      outFaceIds[fBase + 2] = tri.faceId
+    }
+  }
+
+  return {
+    vertices: outVertices,
+    uvs: outUvs,
+    normals: outNormals,
+    colors: outColors,
+    faceIds: outFaceIds,
+    triangleCount: tris.length
+  }
+}
+
+// Compute center of each triangle (3 vertices per triangle)
+// Returns Float32Array of vec3 centers (one per triangle)
+export function computeTriangleCenters(vertices) {
+  const triangleCount = Math.floor(vertices.length / 9)  // 3 verts * 3 coords
+  const centers = new Float32Array(triangleCount * 3)
+
+  for (let i = 0; i < triangleCount; i++) {
+    const base = i * 9
+    const cx = (vertices[base] + vertices[base + 3] + vertices[base + 6]) / 3
+    const cy = (vertices[base + 1] + vertices[base + 4] + vertices[base + 7]) / 3
+    const cz = (vertices[base + 2] + vertices[base + 5] + vertices[base + 8]) / 3
+    centers[i * 3] = cx
+    centers[i * 3 + 1] = cy
+    centers[i * 3 + 2] = cz
+  }
+
+  return centers
+}
+
+// Compute flat normal for each triangle (cross product of edges)
+// Returns Float32Array of vec3 normals (one per triangle)
+export function computeTriangleNormals(vertices) {
+  const triangleCount = Math.floor(vertices.length / 9)
+  const normals = new Float32Array(triangleCount * 3)
+
+  for (let i = 0; i < triangleCount; i++) {
+    const base = i * 9
+    // Get triangle vertices
+    const v0x = vertices[base], v0y = vertices[base + 1], v0z = vertices[base + 2]
+    const v1x = vertices[base + 3], v1y = vertices[base + 4], v1z = vertices[base + 5]
+    const v2x = vertices[base + 6], v2y = vertices[base + 7], v2z = vertices[base + 8]
+
+    // Edge vectors
+    const e1x = v1x - v0x, e1y = v1y - v0y, e1z = v1z - v0z
+    const e2x = v2x - v0x, e2y = v2y - v0y, e2z = v2z - v0z
+
+    // Cross product
+    let nx = e1y * e2z - e1z * e2y
+    let ny = e1z * e2x - e1x * e2z
+    let nz = e1x * e2y - e1y * e2x
+
+    // Normalize
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz)
+    if (len > 0) {
+      nx /= len
+      ny /= len
+      nz /= len
+    } else {
+      // Degenerate triangle, default to up
+      nx = 0
+      ny = 1
+      nz = 0
+    }
+
+    normals[i * 3] = nx
+    normals[i * 3 + 1] = ny
+    normals[i * 3 + 2] = nz
+  }
+
+  return normals
+}
+
+// K-means++ clustering of triangle centers
+// Returns Uint16Array of cluster assignments (one per triangle)
+export function kMeansClustering(centers, k, seed = 0, maxIterations = 20) {
+  const n = centers.length / 3  // Number of triangles
+  if (k >= n) {
+    // Each triangle is its own cluster
+    return new Uint16Array(n).map((_, i) => i)
+  }
+
+  const rand = seededRandom(seed)
+  const assignments = new Uint16Array(n)
+  const centroids = new Float32Array(k * 3)
+
+  // K-means++ initialization: pick first centroid randomly
+  const first = Math.floor(rand() * n)
+  centroids[0] = centers[first * 3]
+  centroids[1] = centers[first * 3 + 1]
+  centroids[2] = centers[first * 3 + 2]
+
+  // Pick remaining centroids with probability proportional to distance squared
+  for (let c = 1; c < k; c++) {
+    // Compute distances to nearest centroid for each point
+    const distances = new Float32Array(n)
+    let totalDist = 0
+
+    for (let i = 0; i < n; i++) {
+      let minDist = Infinity
+      const px = centers[i * 3], py = centers[i * 3 + 1], pz = centers[i * 3 + 2]
+
+      for (let j = 0; j < c; j++) {
+        const dx = px - centroids[j * 3]
+        const dy = py - centroids[j * 3 + 1]
+        const dz = pz - centroids[j * 3 + 2]
+        const dist = dx * dx + dy * dy + dz * dz
+        if (dist < minDist) minDist = dist
+      }
+
+      distances[i] = minDist
+      totalDist += minDist
+    }
+
+    // Pick next centroid with probability proportional to distance squared
+    let target = rand() * totalDist
+    let selected = 0
+    for (let i = 0; i < n; i++) {
+      target -= distances[i]
+      if (target <= 0) {
+        selected = i
+        break
+      }
+    }
+
+    centroids[c * 3] = centers[selected * 3]
+    centroids[c * 3 + 1] = centers[selected * 3 + 1]
+    centroids[c * 3 + 2] = centers[selected * 3 + 2]
+  }
+
+  // K-means iterations
+  const counts = new Uint32Array(k)
+  const sums = new Float32Array(k * 3)
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    // Assign each point to nearest centroid
+    for (let i = 0; i < n; i++) {
+      let minDist = Infinity
+      let bestC = 0
+      const px = centers[i * 3], py = centers[i * 3 + 1], pz = centers[i * 3 + 2]
+
+      for (let c = 0; c < k; c++) {
+        const dx = px - centroids[c * 3]
+        const dy = py - centroids[c * 3 + 1]
+        const dz = pz - centroids[c * 3 + 2]
+        const dist = dx * dx + dy * dy + dz * dz
+        if (dist < minDist) {
+          minDist = dist
+          bestC = c
+        }
+      }
+
+      assignments[i] = bestC
+    }
+
+    // Update centroids
+    counts.fill(0)
+    sums.fill(0)
+
+    for (let i = 0; i < n; i++) {
+      const c = assignments[i]
+      counts[c]++
+      sums[c * 3] += centers[i * 3]
+      sums[c * 3 + 1] += centers[i * 3 + 1]
+      sums[c * 3 + 2] += centers[i * 3 + 2]
+    }
+
+    for (let c = 0; c < k; c++) {
+      if (counts[c] > 0) {
+        centroids[c * 3] = sums[c * 3] / counts[c]
+        centroids[c * 3 + 1] = sums[c * 3 + 1] / counts[c]
+        centroids[c * 3 + 2] = sums[c * 3 + 2] / counts[c]
+      }
+    }
+  }
+
+  return assignments
+}
+
+// Random assignment of triangles to clusters
+export function randomClustering(triangleCount, k, seed = 0) {
+  const rand = seededRandom(seed)
+  const assignments = new Uint16Array(triangleCount)
+  for (let i = 0; i < triangleCount; i++) {
+    assignments[i] = Math.floor(rand() * k)
+  }
+  return assignments
+}
+
+// Compute fragment data from triangle clustering
+// Returns object with per-vertex fragment attributes
+export function computeFragmentData(vertices, triangleAssignments, options = {}) {
+  const { shockOrigin = [0, 0, 0] } = options
+  const triangleCount = triangleAssignments.length
+  const vertexCount = triangleCount * 3
+
+  // Compute triangle centers and normals
+  const triCenters = computeTriangleCenters(vertices)
+  const triNormals = computeTriangleNormals(vertices)
+
+  // Find unique fragment IDs and compute fragment data
+  const fragmentIds = new Set(triangleAssignments)
+  const fragmentCount = fragmentIds.size
+
+  // Compute fragment centers (average of member triangle centers)
+  const fragmentCenterSums = new Map()
+  const fragmentNormalSums = new Map()
+  const fragmentCounts = new Map()
+
+  for (const fid of fragmentIds) {
+    fragmentCenterSums.set(fid, [0, 0, 0])
+    fragmentNormalSums.set(fid, [0, 0, 0])
+    fragmentCounts.set(fid, 0)
+  }
+
+  for (let i = 0; i < triangleCount; i++) {
+    const fid = triangleAssignments[i]
+    const center = fragmentCenterSums.get(fid)
+    const normal = fragmentNormalSums.get(fid)
+    center[0] += triCenters[i * 3]
+    center[1] += triCenters[i * 3 + 1]
+    center[2] += triCenters[i * 3 + 2]
+    normal[0] += triNormals[i * 3]
+    normal[1] += triNormals[i * 3 + 1]
+    normal[2] += triNormals[i * 3 + 2]
+    fragmentCounts.set(fid, fragmentCounts.get(fid) + 1)
+  }
+
+  // Normalize fragment centers and normals
+  const fragmentCenters = new Map()
+  const fragmentNormals = new Map()
+
+  for (const fid of fragmentIds) {
+    const count = fragmentCounts.get(fid)
+    const center = fragmentCenterSums.get(fid)
+    fragmentCenters.set(fid, [center[0] / count, center[1] / count, center[2] / count])
+
+    const normal = fragmentNormalSums.get(fid)
+    const len = Math.sqrt(normal[0] ** 2 + normal[1] ** 2 + normal[2] ** 2)
+    if (len > 0) {
+      fragmentNormals.set(fid, [normal[0] / len, normal[1] / len, normal[2] / len])
+    } else {
+      fragmentNormals.set(fid, [0, 1, 0])
+    }
+  }
+
+  // Generate per-fragment seeds
+  const rand = seededRandom(42)
+  const fragmentSeeds = new Map()
+  for (const fid of fragmentIds) {
+    fragmentSeeds.set(fid, rand())
+  }
+
+  // Build per-vertex arrays
+  const outFragmentCenters = new Float32Array(vertexCount * 3)
+  const outFragmentNormals = new Float32Array(vertexCount * 3)
+  const outFragmentSeeds = new Float32Array(vertexCount)
+  const outFragmentDistances = new Float32Array(vertexCount)
+
+  for (let tri = 0; tri < triangleCount; tri++) {
+    const fid = triangleAssignments[tri]
+    const center = fragmentCenters.get(fid)
+    const normal = fragmentNormals.get(fid)
+    const seed = fragmentSeeds.get(fid)
+
+    // Distance from fragment center to shock origin
+    const dx = center[0] - shockOrigin[0]
+    const dy = center[1] - shockOrigin[1]
+    const dz = center[2] - shockOrigin[2]
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    // Store for all 3 vertices of this triangle
+    for (let v = 0; v < 3; v++) {
+      const vi = tri * 3 + v
+      outFragmentCenters[vi * 3] = center[0]
+      outFragmentCenters[vi * 3 + 1] = center[1]
+      outFragmentCenters[vi * 3 + 2] = center[2]
+      outFragmentNormals[vi * 3] = normal[0]
+      outFragmentNormals[vi * 3 + 1] = normal[1]
+      outFragmentNormals[vi * 3 + 2] = normal[2]
+      outFragmentSeeds[vi] = seed
+      outFragmentDistances[vi] = distance
+    }
+  }
+
+  return {
+    fragmentCenters: outFragmentCenters,
+    fragmentNormals: outFragmentNormals,
+    fragmentSeeds: outFragmentSeeds,
+    fragmentDistances: outFragmentDistances,
+    fragmentCount
+  }
+}

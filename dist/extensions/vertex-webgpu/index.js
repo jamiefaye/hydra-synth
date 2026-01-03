@@ -8415,6 +8415,8 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
     useTangents = false,
     useColors = false,
     useInstancing = false,
+    useCpuInstancing = false,
+    // CPU fallback when GPU instancing not available
     useInstanceRotation = false,
     useInstanceScale = false
   } = options;
@@ -8427,12 +8429,12 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
   const tangentAttributeDecl = useTangents ? "attribute vec4 tangent;" : "";
   const colorAttributeDecl = useColors ? "attribute vec4 color;" : "";
   const colorPassthrough = useColors ? "v_color = color;" : "v_color = vec4(1.0, 1.0, 1.0, 1.0);";
-  let instanceAttributeDecl = useInstancing ? "attribute vec3 instanceOffset;\nattribute float instanceId;" : "";
+  let instanceAttributeDecl = useInstancing ? "attribute vec3 instanceOffset;\nattribute float instanceId;" : useCpuInstancing ? "attribute float instanceId;" : "";
   if (useInstanceRotation) instanceAttributeDecl += "\nattribute vec3 instanceRotation;";
   if (useInstanceScale) instanceAttributeDecl += "\nattribute vec3 instanceScale;";
   const instanceIdVaryingDecl = "varying float v_instanceId;";
-  const instanceIdPassthrough = useInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
-  const ixDefCode = useInstancing ? "float _ix = instanceId;" : "float _ix = 0.0;";
+  const instanceIdPassthrough = useInstancing || useCpuInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+  const ixDefCode = useInstancing || useCpuInstancing ? "float _ix = instanceId;" : "float _ix = 0.0;";
   const instanceOffsetCode = useInstancing ? "pos += instanceOffset;" : "";
   const instanceRotationCode = useInstanceRotation ? `
           // Per-instance rotation (euler XYZ)
@@ -9593,6 +9595,7 @@ const fragPrefix = `
    @group(0) @binding(2) var<uniform> mouse: vec2<f32>;
    @group(0) @binding(3) var<uniform> u_spriteUV: vec4<f32>;
    @group(0) @binding(4) var<uniform> u_spriteGrid: vec2<f32>;
+   @group(0) @binding(5) var<uniform> u_facesPerInstance: f32;
 `;
 const vertexShaderCode = vertexPrefix + `
     @vertex
@@ -9835,6 +9838,12 @@ class wgslHydra {
           // Binding index "u_spriteGrid"
           visibility: GPUShaderStage.FRAGMENT,
           buffer: { type: "uniform" }
+        },
+        {
+          binding: 5,
+          // Binding index "u_facesPerInstance"
+          visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "uniform" }
         }
       ]
     });
@@ -9873,6 +9882,13 @@ class wgslHydra {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
     this.spriteGridUniformValues = new Float32Array([1, 1]);
+    this.facesPerInstanceUniformBuffer = this.device.createBuffer({
+      label: "facesPerInstance uniform buffer",
+      size: 4,
+      // 1 x 32-bit float
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.facesPerInstanceUniformValues = new Float32Array([0]);
     this.sharedBindGroup = this.device.createBindGroup({
       label: "shared bind group",
       layout: this.sharedBindGroupLayout,
@@ -9899,6 +9915,10 @@ class wgslHydra {
         {
           binding: 4,
           resource: { buffer: this.spriteGridUniformBuffer }
+        },
+        {
+          binding: 5,
+          resource: { buffer: this.facesPerInstanceUniformBuffer }
         }
       ]
     });
@@ -10234,12 +10254,16 @@ class wgslHydra {
     this.createSamplerOrBuffersForSprite(spe);
     this.createSpriteBindGroup(spe);
   }
-  // Create per-sprite bind group with sprite-specific spriteGrid
+  // Create per-sprite bind group with sprite-specific spriteGrid and facesPerInstance
   createSpriteBindGroup(spe) {
     let cols = 1, rows = 1;
     if (spe.sprite && spe.sprite.cols && spe.sprite.rows) {
       cols = spe.sprite.cols;
       rows = spe.sprite.rows;
+    }
+    let facesPerInstance = 0;
+    if (spe.sprite && spe.sprite.facesPerInstance) {
+      facesPerInstance = spe.sprite.facesPerInstance;
     }
     spe.spriteGridBuffer = this.device.createBuffer({
       label: `spriteGrid_c${spe.chan}_s${spe.level}`,
@@ -10249,6 +10273,14 @@ class wgslHydra {
     });
     const gridValues = new Float32Array([cols, rows]);
     this.device.queue.writeBuffer(spe.spriteGridBuffer, 0, gridValues);
+    spe.facesPerInstanceBuffer = this.device.createBuffer({
+      label: `facesPerInstance_c${spe.chan}_s${spe.level}`,
+      size: 4,
+      // 1 x 32-bit float
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    const fpiValues = new Float32Array([facesPerInstance]);
+    this.device.queue.writeBuffer(spe.facesPerInstanceBuffer, 0, fpiValues);
     spe.spriteBindGroup = this.device.createBindGroup({
       label: `spriteBindGroup_c${spe.chan}_s${spe.level}`,
       layout: this.sharedBindGroupLayout,
@@ -10257,7 +10289,9 @@ class wgslHydra {
         { binding: 1, resource: { buffer: this.resolutionUniformBuffer } },
         { binding: 2, resource: { buffer: this.mouseUniformBuffer } },
         { binding: 3, resource: { buffer: this.spriteUVUniformBuffer } },
-        { binding: 4, resource: { buffer: spe.spriteGridBuffer } }
+        { binding: 4, resource: { buffer: spe.spriteGridBuffer } },
+        // Per-sprite!
+        { binding: 5, resource: { buffer: spe.facesPerInstanceBuffer } }
         // Per-sprite!
       ]
     });
@@ -10290,6 +10324,9 @@ class wgslHydra {
         }
         if (spe.spriteGridBuffer) {
           spe.spriteGridBuffer.destroy();
+        }
+        if (spe.facesPerInstanceBuffer) {
+          spe.facesPerInstanceBuffer.destroy();
         }
       }
       rpe.sprites.clear();
@@ -25746,9 +25783,16 @@ ${shaderInfo.glslFunctions.map((transform) => {
     // Flip X to correct mirroring in WGSL
     let texcoord = vec2<f32>(1.0 - ourIn.texcoord.x, ourIn.texcoord.y);
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
-      // faceId maps to cell in row-major order (left-to-right, top-to-bottom)
-      let cellX = ourIn.faceId % u_spriteGrid.x;
-      let cellY = floor(ourIn.faceId / u_spriteGrid.x);
+      // Combine instanceId and faceId for unique sprites per instance
+      var spriteIndex: f32;
+      if (u_facesPerInstance > 0.0) {
+        spriteIndex = ourIn.v_instanceId * u_facesPerInstance + ourIn.faceId;
+      } else {
+        spriteIndex = ourIn.faceId;
+      }
+      // spriteIndex maps to cell in row-major order (left-to-right, top-to-bottom)
+      let cellX = spriteIndex % u_spriteGrid.x;
+      let cellY = floor(spriteIndex / u_spriteGrid.x);
       let cellSize = vec2<f32>(1.0 / u_spriteGrid.x, 1.0 / u_spriteGrid.y);
       st = texcoord * cellSize + vec2<f32>(cellX, cellY) * cellSize;
     } else {
@@ -25801,6 +25845,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
   uniform sampler2D prevBuffer;
   uniform vec4 u_spriteUV;  // x=uMin, y=vMin, z=uMax, w=vMax (fallback when no faceId)
   uniform vec2 u_spriteGrid;  // cols, rows for faceId-based sprite picking
+  uniform float u_facesPerInstance;  // faces per instance for unique sprites per instance
 
   ${Object.values(utilityGlsl).map((transform) => {
       return `
@@ -25818,9 +25863,13 @@ ${shaderInfo.glslFunctions.map((transform) => {
     vec2 st;
     // If using sprite grid (cols > 1 or rows > 1), use faceId to pick cell
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
-      // faceId maps to cell in row-major order (left-to-right, top-to-bottom)
-      float cellX = mod(v_faceId, u_spriteGrid.x);
-      float cellY = floor(v_faceId / u_spriteGrid.x);
+      // Combine instanceId and faceId for unique sprites per instance
+      float spriteIndex = (u_facesPerInstance > 0.0)
+        ? v_instanceId * u_facesPerInstance + v_faceId
+        : v_faceId;
+      // spriteIndex maps to cell in row-major order (left-to-right, top-to-bottom)
+      float cellX = mod(spriteIndex, u_spriteGrid.x);
+      float cellY = floor(spriteIndex / u_spriteGrid.x);
       vec2 cellSize = vec2(1.0 / u_spriteGrid.x, 1.0 / u_spriteGrid.y);
       st = uv * cellSize + vec2(cellX, cellY) * cellSize;
     } else {
@@ -26106,52 +26155,136 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
     }
   }
   let hasInstancing = false;
+  let hasCpuInstancing = false;
   let instanceCount = 0;
   let instanceOffsetBuffer = null;
   let instanceIdBuffer = null;
   let instanceRotationBuffer = null;
   let instanceScaleBuffer = null;
+  const supportsInstancing = this.regl.hasExtension("ANGLE_instanced_arrays");
   if (vertexSource && vertexSource.instancePositions && vertexSource.instanceCount > 0) {
-    hasInstancing = true;
+    const baseVertCount = vertexSource.vertices ? vertexSource.vertices.length / 3 : 0;
     instanceCount = vertexSource.instanceCount;
-    const baseVerts = vertexSource.vertices ? vertexSource.vertices.length / 3 : 0;
-    const totalVerts = baseVerts * instanceCount;
-    console.log(`[hydra-vertex] Instancing: ${instanceCount} instances × ${baseVerts} vertices = ${totalVerts} total vertices`);
-    const offsetData = [];
-    for (let i = 0; i < vertexSource.instancePositions.length; i += 3) {
-      offsetData.push([
-        vertexSource.instancePositions[i],
-        vertexSource.instancePositions[i + 1],
-        vertexSource.instancePositions[i + 2]
-      ]);
-    }
-    instanceOffsetBuffer = this.regl.buffer(offsetData);
-    const idData = [];
-    for (let i = 0; i < instanceCount; i++) {
-      idData.push([i]);
-    }
-    instanceIdBuffer = this.regl.buffer(idData);
-    if (vertexSource.instanceRotations) {
-      const rotData = [];
-      for (let i = 0; i < vertexSource.instanceRotations.length; i += 3) {
-        rotData.push([
-          vertexSource.instanceRotations[i],
-          vertexSource.instanceRotations[i + 1],
-          vertexSource.instanceRotations[i + 2]
+    if (supportsInstancing) {
+      hasInstancing = true;
+      const totalVerts = baseVertCount * instanceCount;
+      console.log(`[hydra-vertex] GPU Instancing: ${instanceCount} instances × ${baseVertCount} vertices = ${totalVerts} total vertices`);
+      const offsetData = [];
+      for (let i = 0; i < vertexSource.instancePositions.length; i += 3) {
+        offsetData.push([
+          vertexSource.instancePositions[i],
+          vertexSource.instancePositions[i + 1],
+          vertexSource.instancePositions[i + 2]
         ]);
       }
-      instanceRotationBuffer = this.regl.buffer(rotData);
-    }
-    if (vertexSource.instanceScales) {
-      const scaleData = [];
-      for (let i = 0; i < vertexSource.instanceScales.length; i += 3) {
-        scaleData.push([
-          vertexSource.instanceScales[i],
-          vertexSource.instanceScales[i + 1],
-          vertexSource.instanceScales[i + 2]
-        ]);
+      instanceOffsetBuffer = this.regl.buffer(offsetData);
+      const idData = [];
+      for (let i = 0; i < instanceCount; i++) {
+        idData.push([i]);
       }
-      instanceScaleBuffer = this.regl.buffer(scaleData);
+      instanceIdBuffer = this.regl.buffer(idData);
+      if (vertexSource.instanceRotations) {
+        const rotData = [];
+        for (let i = 0; i < vertexSource.instanceRotations.length; i += 3) {
+          rotData.push([
+            vertexSource.instanceRotations[i],
+            vertexSource.instanceRotations[i + 1],
+            vertexSource.instanceRotations[i + 2]
+          ]);
+        }
+        instanceRotationBuffer = this.regl.buffer(rotData);
+      }
+      if (vertexSource.instanceScales) {
+        const scaleData = [];
+        for (let i = 0; i < vertexSource.instanceScales.length; i += 3) {
+          scaleData.push([
+            vertexSource.instanceScales[i],
+            vertexSource.instanceScales[i + 1],
+            vertexSource.instanceScales[i + 2]
+          ]);
+        }
+        instanceScaleBuffer = this.regl.buffer(scaleData);
+      }
+    } else {
+      console.log(`[hydra-vertex] CPU Instancing fallback: ${instanceCount} instances × ${baseVertCount} vertices = ${baseVertCount * instanceCount} total vertices`);
+      const origVerts = vertexSource.vertices;
+      const origUvs = vertexSource.uvs;
+      const origNormals = vertexSource.normals;
+      const origFaceIds = vertexSource.faceIds;
+      const positions = vertexSource.instancePositions;
+      const expandedVerts = new Float32Array(origVerts.length * instanceCount);
+      for (let inst = 0; inst < instanceCount; inst++) {
+        const ox = positions[inst * 3];
+        const oy = positions[inst * 3 + 1];
+        const oz = positions[inst * 3 + 2];
+        for (let v2 = 0; v2 < origVerts.length; v2 += 3) {
+          const idx = inst * origVerts.length + v2;
+          expandedVerts[idx] = origVerts[v2] + ox;
+          expandedVerts[idx + 1] = origVerts[v2 + 1] + oy;
+          expandedVerts[idx + 2] = origVerts[v2 + 2] + oz;
+        }
+      }
+      let expandedUvs = null;
+      if (origUvs && origUvs.length > 0) {
+        expandedUvs = new Float32Array(origUvs.length * instanceCount);
+        for (let inst = 0; inst < instanceCount; inst++) {
+          expandedUvs.set(origUvs, inst * origUvs.length);
+        }
+      }
+      let expandedNormals = null;
+      if (origNormals && origNormals.length > 0) {
+        expandedNormals = new Float32Array(origNormals.length * instanceCount);
+        for (let inst = 0; inst < instanceCount; inst++) {
+          expandedNormals.set(origNormals, inst * origNormals.length);
+        }
+      }
+      let expandedFaceIds = null;
+      if (origFaceIds && origFaceIds.length > 0) {
+        expandedFaceIds = new Float32Array(origFaceIds.length * instanceCount);
+        for (let inst = 0; inst < instanceCount; inst++) {
+          expandedFaceIds.set(origFaceIds, inst * origFaceIds.length);
+        }
+      }
+      const expandedInstanceIds = new Float32Array(baseVertCount * instanceCount);
+      for (let inst = 0; inst < instanceCount; inst++) {
+        for (let v2 = 0; v2 < baseVertCount; v2++) {
+          expandedInstanceIds[inst * baseVertCount + v2] = inst;
+        }
+      }
+      vertexSource.vertices = expandedVerts;
+      if (expandedUvs) vertexSource.uvs = expandedUvs;
+      if (expandedNormals) vertexSource.normals = expandedNormals;
+      if (expandedFaceIds) vertexSource.faceIds = expandedFaceIds;
+      vertexSource._cpuInstanceIds = expandedInstanceIds;
+      vertexSource.instancePositions = null;
+      vertexSource.instanceCount = 0;
+      rawVerts = expandedVerts;
+      const verts = reshapeToVec3(rawVerts, has3D);
+      positionBuffer = this.regl.buffer(verts);
+      vertexCount = verts.length;
+      if (expandedUvs) {
+        hasExplicitUVs = true;
+        const uvData = [];
+        for (let i = 0; i < expandedUvs.length; i += 2) {
+          uvData.push([expandedUvs[i], expandedUvs[i + 1]]);
+        }
+        uvBuffer = this.regl.buffer(uvData);
+      }
+      if (expandedNormals) {
+        hasNormals = true;
+        const normalData = [];
+        for (let i = 0; i < expandedNormals.length; i += 3) {
+          normalData.push([expandedNormals[i], expandedNormals[i + 1], expandedNormals[i + 2]]);
+        }
+        normalBuffer = this.regl.buffer(normalData);
+      }
+      if (expandedFaceIds) {
+        hasFaceIds = true;
+        faceIdBuffer = this.regl.buffer(expandedFaceIds.map((id) => [id]));
+      }
+      instanceIdBuffer = this.regl.buffer(expandedInstanceIds.map((id) => [id]));
+      hasCpuInstancing = true;
+      instanceCount = 0;
     }
   }
   if (!rawVerts) {
@@ -26176,6 +26309,11 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
     uniforms.u_spriteGrid = [sprite.cols, sprite.rows];
   } else {
     uniforms.u_spriteGrid = [1, 1];
+  }
+  if (sprite && sprite.facesPerInstance) {
+    uniforms.u_facesPerInstance = sprite.facesPerInstance;
+  } else {
+    uniforms.u_facesPerInstance = 0;
   }
   if (rawVerts) {
     uniforms.u_boundsMin = [bounds.minX, bounds.minY];
@@ -26210,6 +26348,7 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
         useTangents: hasTangents,
         useColors: hasColors,
         useInstancing: hasInstancing,
+        useCpuInstancing: hasCpuInstancing,
         useInstanceRotation: hasInstancing && !!instanceRotationBuffer,
         useInstanceScale: hasInstancing && !!instanceScaleBuffer
       });
@@ -26221,8 +26360,8 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
       const uvCode = hasExplicitUVs ? "uv = texcoord;" : "uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);";
       const faceIdCode = hasFaceIds ? "v_faceId = faceId;" : "v_faceId = 0.0;";
       const instanceAttrDecl = hasInstancing ? `attribute vec3 instanceOffset;
-      attribute float instanceId;` : "";
-      const instanceIdPassthrough = hasInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+      attribute float instanceId;` : hasCpuInstancing ? "attribute float instanceId;" : "";
+      const instanceIdPassthrough = hasInstancing || hasCpuInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
       const instanceOffsetCode = hasInstancing ? "pos += instanceOffset.xy;" : "";
       vert = `
       precision ${this.precision} float;
@@ -26281,8 +26420,8 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
       const faceIdCode = hasFaceIds ? "v_faceId = faceId;" : "v_faceId = 0.0;";
       const normalCode = hasNormals ? "v_normal = normalize(normal);" : "v_normal = vec3(0.0, 0.0, 1.0);";
       const instanceAttrDecl = hasInstancing ? `attribute vec3 instanceOffset;
-      attribute float instanceId;` : "";
-      const instanceIdPassthrough = hasInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
+      attribute float instanceId;` : hasCpuInstancing ? "attribute float instanceId;" : "";
+      const instanceIdPassthrough = hasInstancing || hasCpuInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
       const instanceOffsetCode = hasInstancing ? "pos += instanceOffset;" : "";
       const positionCode = has3D ? hasInstancing ? "vec3 pos = position;" : "v_position = position;" : hasInstancing ? "vec3 pos = position;" : "v_position = vec3(position.xy, 0.0);";
       const finalPositionCode = hasInstancing ? "v_position = pos;" : "";
@@ -26375,6 +26514,9 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
         divisor: 1
       };
     }
+  }
+  if (hasCpuInstancing && instanceIdBuffer) {
+    attributes.instanceId = instanceIdBuffer;
   }
   const drawConfig = {
     frag: pass.frag,

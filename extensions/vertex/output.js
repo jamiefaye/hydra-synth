@@ -349,6 +349,39 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     }
   }
 
+  // Check for fragment data from VertexSource (for explosion effects)
+  let hasFragments = false
+  let fragmentCenterBuffer = null
+  let fragmentSeedBuffer = null
+  let fragmentDistanceBuffer = null
+
+  if (vertexSource && vertexSource.isFragmentized) {
+    hasFragments = true
+
+    // Fragment centers (vec3 per vertex)
+    if (vertexSource.fragmentCenters && vertexSource.fragmentCenters.length > 0) {
+      const centerData = []
+      for (let i = 0; i < vertexSource.fragmentCenters.length; i += 3) {
+        centerData.push([
+          vertexSource.fragmentCenters[i],
+          vertexSource.fragmentCenters[i + 1],
+          vertexSource.fragmentCenters[i + 2]
+        ])
+      }
+      fragmentCenterBuffer = this.regl.buffer(centerData)
+    }
+
+    // Fragment seeds (float per vertex)
+    if (vertexSource.fragmentSeeds && vertexSource.fragmentSeeds.length > 0) {
+      fragmentSeedBuffer = this.regl.buffer(Array.from(vertexSource.fragmentSeeds).map(s => [s]))
+    }
+
+    // Fragment distances (float per vertex)
+    if (vertexSource.fragmentDistances && vertexSource.fragmentDistances.length > 0) {
+      fragmentDistanceBuffer = this.regl.buffer(Array.from(vertexSource.fragmentDistances).map(d => [d]))
+    }
+  }
+
   // Check for GPU instancing data from VertexSource
   let hasInstancing = false
   let hasCpuInstancing = false  // CPU fallback when GPU instancing not available
@@ -632,7 +665,8 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
         useInstancing: hasInstancing,
         useCpuInstancing: hasCpuInstancing,
         useInstanceRotation: hasInstancing && !!instanceRotationBuffer,
-        useInstanceScale: hasInstancing && !!instanceScaleBuffer
+        useInstanceScale: hasInstancing && !!instanceScaleBuffer,
+        useFragments: hasFragments
       })
       vert = generated.glsl
       vertexUniforms = generated.uniforms
@@ -811,6 +845,18 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
   if (hasColors && colorBuffer) {
     attributes.color = colorBuffer
   }
+  // Add fragment attributes for explosion effects (per-vertex, no divisor)
+  if (hasFragments) {
+    if (fragmentCenterBuffer) {
+      attributes.fragmentCenter = fragmentCenterBuffer
+    }
+    if (fragmentSeedBuffer) {
+      attributes.fragmentSeed = fragmentSeedBuffer
+    }
+    if (fragmentDistanceBuffer) {
+      attributes.fragmentDistance = fragmentDistanceBuffer
+    }
+  }
   // Add instance attributes with divisor=1 (advances once per instance)
   if (hasInstancing && instanceOffsetBuffer) {
     attributes.instanceOffset = {
@@ -896,6 +942,9 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     normalBuffer,
     tangentBuffer,
     colorBuffer,
+    fragmentCenterBuffer,
+    fragmentSeedBuffer,
+    fragmentDistanceBuffer,
     instanceOffsetBuffer,
     instanceIdBuffer,
     instanceRotationBuffer,
@@ -903,6 +952,7 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     blendMode,
     has3D,
     hasInstancing,
+    hasFragments,
     instanceCount,
     enabled
   }
@@ -950,6 +1000,15 @@ Output.prototype.clearSprites = function () {
     if (sprite.colorBuffer) {
       sprite.colorBuffer.destroy()
     }
+    if (sprite.fragmentCenterBuffer) {
+      sprite.fragmentCenterBuffer.destroy()
+    }
+    if (sprite.fragmentSeedBuffer) {
+      sprite.fragmentSeedBuffer.destroy()
+    }
+    if (sprite.fragmentDistanceBuffer) {
+      sprite.fragmentDistanceBuffer.destroy()
+    }
     if (sprite.instanceOffsetBuffer) {
       sprite.instanceOffsetBuffer.destroy()
     }
@@ -988,6 +1047,15 @@ Output.prototype.removeSprite = function (level) {
     }
     if (sprite.colorBuffer) {
       sprite.colorBuffer.destroy()
+    }
+    if (sprite.fragmentCenterBuffer) {
+      sprite.fragmentCenterBuffer.destroy()
+    }
+    if (sprite.fragmentSeedBuffer) {
+      sprite.fragmentSeedBuffer.destroy()
+    }
+    if (sprite.fragmentDistanceBuffer) {
+      sprite.fragmentDistanceBuffer.destroy()
     }
     if (sprite.instanceOffsetBuffer) {
       sprite.instanceOffsetBuffer.destroy()
@@ -1039,6 +1107,15 @@ Output.prototype.render = function (passes) {
     }
     if (oldSprite.colorBuffer) {
       oldSprite.colorBuffer.destroy()
+    }
+    if (oldSprite.fragmentCenterBuffer) {
+      oldSprite.fragmentCenterBuffer.destroy()
+    }
+    if (oldSprite.fragmentSeedBuffer) {
+      oldSprite.fragmentSeedBuffer.destroy()
+    }
+    if (oldSprite.fragmentDistanceBuffer) {
+      oldSprite.fragmentDistanceBuffer.destroy()
     }
     if (oldSprite.instanceOffsetBuffer) {
       oldSprite.instanceOffsetBuffer.destroy()

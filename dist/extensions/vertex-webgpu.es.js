@@ -1528,6 +1528,508 @@ function cone(radius = 0.3, height = 1, radialSegments = 32, caps = true) {
   vs.is3D = true;
   return vs;
 }
+function seededRandom(seed) {
+  let state = seed;
+  return () => {
+    state = state * 1103515245 + 12345 & 2147483647;
+    return state / 2147483647;
+  };
+}
+function subdivideTriangles(vertices, options = {}) {
+  const {
+    maxEdgeLength = 0.2,
+    maxIterations = 3,
+    uvs = null,
+    normals = null,
+    colors = null,
+    faceIds = null
+  } = options;
+  const edgeLengthSq = (v1, v2) => {
+    const dx = v2[0] - v1[0];
+    const dy = v2[1] - v1[1];
+    const dz = v2[2] - v1[2];
+    return dx * dx + dy * dy + dz * dz;
+  };
+  const lerp = (a2, b, t) => a2 + (b - a2) * t;
+  const lerpVec2 = (a2, b, t) => [lerp(a2[0], b[0], t), lerp(a2[1], b[1], t)];
+  const lerpVec3 = (a2, b, t) => [lerp(a2[0], b[0], t), lerp(a2[1], b[1], t), lerp(a2[2], b[2], t)];
+  const lerpVec4 = (a2, b, t) => [lerp(a2[0], b[0], t), lerp(a2[1], b[1], t), lerp(a2[2], b[2], t), lerp(a2[3], b[3], t)];
+  const normalize = (v2) => {
+    const len = Math.sqrt(v2[0] * v2[0] + v2[1] * v2[1] + v2[2] * v2[2]);
+    if (len < 1e-4) return [0, 0, 1];
+    return [v2[0] / len, v2[1] / len, v2[2] / len];
+  };
+  const maxLenSq = maxEdgeLength * maxEdgeLength;
+  let tris = [];
+  const triangleCount = Math.floor(vertices.length / 9);
+  for (let i = 0; i < triangleCount; i++) {
+    const base = i * 9;
+    const tri2 = {
+      v: [
+        [vertices[base], vertices[base + 1], vertices[base + 2]],
+        [vertices[base + 3], vertices[base + 4], vertices[base + 5]],
+        [vertices[base + 6], vertices[base + 7], vertices[base + 8]]
+      ]
+    };
+    if (uvs && uvs.length >= (i + 1) * 6) {
+      const uvBase = i * 6;
+      tri2.uv = [
+        [uvs[uvBase], uvs[uvBase + 1]],
+        [uvs[uvBase + 2], uvs[uvBase + 3]],
+        [uvs[uvBase + 4], uvs[uvBase + 5]]
+      ];
+    }
+    if (normals && normals.length >= (i + 1) * 9) {
+      const nBase = i * 9;
+      tri2.n = [
+        [normals[nBase], normals[nBase + 1], normals[nBase + 2]],
+        [normals[nBase + 3], normals[nBase + 4], normals[nBase + 5]],
+        [normals[nBase + 6], normals[nBase + 7], normals[nBase + 8]]
+      ];
+    }
+    if (colors && colors.length >= (i + 1) * 12) {
+      const cBase = i * 12;
+      tri2.c = [
+        [colors[cBase], colors[cBase + 1], colors[cBase + 2], colors[cBase + 3]],
+        [colors[cBase + 4], colors[cBase + 5], colors[cBase + 6], colors[cBase + 7]],
+        [colors[cBase + 8], colors[cBase + 9], colors[cBase + 10], colors[cBase + 11]]
+      ];
+    }
+    if (faceIds && faceIds.length >= (i + 1) * 3) {
+      tri2.faceId = faceIds[i * 3];
+    }
+    tris.push(tri2);
+  }
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const newTris = [];
+    let didSubdivide = false;
+    for (const tri2 of tris) {
+      const [v0, v1, v2] = tri2.v;
+      const e01 = edgeLengthSq(v0, v1);
+      const e12 = edgeLengthSq(v1, v2);
+      const e20 = edgeLengthSq(v2, v0);
+      const split01 = e01 > maxLenSq;
+      const split12 = e12 > maxLenSq;
+      const split20 = e20 > maxLenSq;
+      if (!split01 && !split12 && !split20) {
+        newTris.push(tri2);
+        continue;
+      }
+      didSubdivide = true;
+      const m01 = split01 ? lerpVec3(v0, v1, 0.5) : null;
+      const m12 = split12 ? lerpVec3(v1, v2, 0.5) : null;
+      const m20 = split20 ? lerpVec3(v2, v0, 0.5) : null;
+      const uv01 = tri2.uv && split01 ? lerpVec2(tri2.uv[0], tri2.uv[1], 0.5) : null;
+      const uv12 = tri2.uv && split12 ? lerpVec2(tri2.uv[1], tri2.uv[2], 0.5) : null;
+      const uv20 = tri2.uv && split20 ? lerpVec2(tri2.uv[2], tri2.uv[0], 0.5) : null;
+      const n01 = tri2.n && split01 ? normalize(lerpVec3(tri2.n[0], tri2.n[1], 0.5)) : null;
+      const n12 = tri2.n && split12 ? normalize(lerpVec3(tri2.n[1], tri2.n[2], 0.5)) : null;
+      const n20 = tri2.n && split20 ? normalize(lerpVec3(tri2.n[2], tri2.n[0], 0.5)) : null;
+      const c01 = tri2.c && split01 ? lerpVec4(tri2.c[0], tri2.c[1], 0.5) : null;
+      const c12 = tri2.c && split12 ? lerpVec4(tri2.c[1], tri2.c[2], 0.5) : null;
+      const c20 = tri2.c && split20 ? lerpVec4(tri2.c[2], tri2.c[0], 0.5) : null;
+      const makeTri = (verts, uvArr, nArr, cArr) => {
+        const t = { v: verts };
+        if (uvArr) t.uv = uvArr;
+        if (nArr) t.n = nArr;
+        if (cArr) t.c = cArr;
+        if (tri2.faceId !== void 0) t.faceId = tri2.faceId;
+        return t;
+      };
+      const splitCount = (split01 ? 1 : 0) + (split12 ? 1 : 0) + (split20 ? 1 : 0);
+      if (splitCount === 3) {
+        newTris.push(makeTri(
+          [v0, m01, m20],
+          tri2.uv ? [tri2.uv[0], uv01, uv20] : null,
+          tri2.n ? [tri2.n[0], n01, n20] : null,
+          tri2.c ? [tri2.c[0], c01, c20] : null
+        ));
+        newTris.push(makeTri(
+          [m01, v1, m12],
+          tri2.uv ? [uv01, tri2.uv[1], uv12] : null,
+          tri2.n ? [n01, tri2.n[1], n12] : null,
+          tri2.c ? [c01, tri2.c[1], c12] : null
+        ));
+        newTris.push(makeTri(
+          [m20, m12, v2],
+          tri2.uv ? [uv20, uv12, tri2.uv[2]] : null,
+          tri2.n ? [n20, n12, tri2.n[2]] : null,
+          tri2.c ? [c20, c12, tri2.c[2]] : null
+        ));
+        newTris.push(makeTri(
+          [m01, m12, m20],
+          tri2.uv ? [uv01, uv12, uv20] : null,
+          tri2.n ? [n01, n12, n20] : null,
+          tri2.c ? [c01, c12, c20] : null
+        ));
+      } else if (splitCount === 2) {
+        if (!split01) {
+          newTris.push(makeTri(
+            [v0, v1, m12],
+            tri2.uv ? [tri2.uv[0], tri2.uv[1], uv12] : null,
+            tri2.n ? [tri2.n[0], tri2.n[1], n12] : null,
+            tri2.c ? [tri2.c[0], tri2.c[1], c12] : null
+          ));
+          newTris.push(makeTri(
+            [v0, m12, m20],
+            tri2.uv ? [tri2.uv[0], uv12, uv20] : null,
+            tri2.n ? [tri2.n[0], n12, n20] : null,
+            tri2.c ? [tri2.c[0], c12, c20] : null
+          ));
+          newTris.push(makeTri(
+            [m20, m12, v2],
+            tri2.uv ? [uv20, uv12, tri2.uv[2]] : null,
+            tri2.n ? [n20, n12, tri2.n[2]] : null,
+            tri2.c ? [c20, c12, tri2.c[2]] : null
+          ));
+        } else if (!split12) {
+          newTris.push(makeTri(
+            [v0, m01, m20],
+            tri2.uv ? [tri2.uv[0], uv01, uv20] : null,
+            tri2.n ? [tri2.n[0], n01, n20] : null,
+            tri2.c ? [tri2.c[0], c01, c20] : null
+          ));
+          newTris.push(makeTri(
+            [m01, v1, m20],
+            tri2.uv ? [uv01, tri2.uv[1], uv20] : null,
+            tri2.n ? [n01, tri2.n[1], n20] : null,
+            tri2.c ? [c01, tri2.c[1], c20] : null
+          ));
+          newTris.push(makeTri(
+            [m20, v1, v2],
+            tri2.uv ? [uv20, tri2.uv[1], tri2.uv[2]] : null,
+            tri2.n ? [n20, tri2.n[1], tri2.n[2]] : null,
+            tri2.c ? [c20, tri2.c[1], tri2.c[2]] : null
+          ));
+        } else {
+          newTris.push(makeTri(
+            [v0, m01, v2],
+            tri2.uv ? [tri2.uv[0], uv01, tri2.uv[2]] : null,
+            tri2.n ? [tri2.n[0], n01, tri2.n[2]] : null,
+            tri2.c ? [tri2.c[0], c01, tri2.c[2]] : null
+          ));
+          newTris.push(makeTri(
+            [m01, v1, m12],
+            tri2.uv ? [uv01, tri2.uv[1], uv12] : null,
+            tri2.n ? [n01, tri2.n[1], n12] : null,
+            tri2.c ? [c01, tri2.c[1], c12] : null
+          ));
+          newTris.push(makeTri(
+            [m01, m12, v2],
+            tri2.uv ? [uv01, uv12, tri2.uv[2]] : null,
+            tri2.n ? [n01, n12, tri2.n[2]] : null,
+            tri2.c ? [c01, c12, tri2.c[2]] : null
+          ));
+        }
+      } else {
+        if (split01) {
+          newTris.push(makeTri(
+            [v0, m01, v2],
+            tri2.uv ? [tri2.uv[0], uv01, tri2.uv[2]] : null,
+            tri2.n ? [tri2.n[0], n01, tri2.n[2]] : null,
+            tri2.c ? [tri2.c[0], c01, tri2.c[2]] : null
+          ));
+          newTris.push(makeTri(
+            [m01, v1, v2],
+            tri2.uv ? [uv01, tri2.uv[1], tri2.uv[2]] : null,
+            tri2.n ? [n01, tri2.n[1], tri2.n[2]] : null,
+            tri2.c ? [c01, tri2.c[1], tri2.c[2]] : null
+          ));
+        } else if (split12) {
+          newTris.push(makeTri(
+            [v0, v1, m12],
+            tri2.uv ? [tri2.uv[0], tri2.uv[1], uv12] : null,
+            tri2.n ? [tri2.n[0], tri2.n[1], n12] : null,
+            tri2.c ? [tri2.c[0], tri2.c[1], c12] : null
+          ));
+          newTris.push(makeTri(
+            [v0, m12, v2],
+            tri2.uv ? [tri2.uv[0], uv12, tri2.uv[2]] : null,
+            tri2.n ? [tri2.n[0], n12, tri2.n[2]] : null,
+            tri2.c ? [tri2.c[0], c12, tri2.c[2]] : null
+          ));
+        } else {
+          newTris.push(makeTri(
+            [v0, v1, m20],
+            tri2.uv ? [tri2.uv[0], tri2.uv[1], uv20] : null,
+            tri2.n ? [tri2.n[0], tri2.n[1], n20] : null,
+            tri2.c ? [tri2.c[0], tri2.c[1], c20] : null
+          ));
+          newTris.push(makeTri(
+            [m20, v1, v2],
+            tri2.uv ? [uv20, tri2.uv[1], tri2.uv[2]] : null,
+            tri2.n ? [n20, tri2.n[1], tri2.n[2]] : null,
+            tri2.c ? [c20, tri2.c[1], tri2.c[2]] : null
+          ));
+        }
+      }
+    }
+    tris = newTris;
+    if (!didSubdivide) break;
+  }
+  const outVertices = new Float32Array(tris.length * 9);
+  const outUvs = tris[0]?.uv ? new Float32Array(tris.length * 6) : null;
+  const outNormals = tris[0]?.n ? new Float32Array(tris.length * 9) : null;
+  const outColors = tris[0]?.c ? new Float32Array(tris.length * 12) : null;
+  const outFaceIds = tris[0]?.faceId !== void 0 ? new Float32Array(tris.length * 3) : null;
+  for (let i = 0; i < tris.length; i++) {
+    const tri2 = tris[i];
+    const vBase = i * 9;
+    for (let j = 0; j < 3; j++) {
+      outVertices[vBase + j * 3] = tri2.v[j][0];
+      outVertices[vBase + j * 3 + 1] = tri2.v[j][1];
+      outVertices[vBase + j * 3 + 2] = tri2.v[j][2];
+    }
+    if (outUvs && tri2.uv) {
+      const uvBase = i * 6;
+      for (let j = 0; j < 3; j++) {
+        outUvs[uvBase + j * 2] = tri2.uv[j][0];
+        outUvs[uvBase + j * 2 + 1] = tri2.uv[j][1];
+      }
+    }
+    if (outNormals && tri2.n) {
+      const nBase = i * 9;
+      for (let j = 0; j < 3; j++) {
+        outNormals[nBase + j * 3] = tri2.n[j][0];
+        outNormals[nBase + j * 3 + 1] = tri2.n[j][1];
+        outNormals[nBase + j * 3 + 2] = tri2.n[j][2];
+      }
+    }
+    if (outColors && tri2.c) {
+      const cBase = i * 12;
+      for (let j = 0; j < 3; j++) {
+        outColors[cBase + j * 4] = tri2.c[j][0];
+        outColors[cBase + j * 4 + 1] = tri2.c[j][1];
+        outColors[cBase + j * 4 + 2] = tri2.c[j][2];
+        outColors[cBase + j * 4 + 3] = tri2.c[j][3];
+      }
+    }
+    if (outFaceIds && tri2.faceId !== void 0) {
+      const fBase = i * 3;
+      outFaceIds[fBase] = tri2.faceId;
+      outFaceIds[fBase + 1] = tri2.faceId;
+      outFaceIds[fBase + 2] = tri2.faceId;
+    }
+  }
+  return {
+    vertices: outVertices,
+    uvs: outUvs,
+    normals: outNormals,
+    colors: outColors,
+    faceIds: outFaceIds,
+    triangleCount: tris.length
+  };
+}
+function computeTriangleCenters(vertices) {
+  const triangleCount = Math.floor(vertices.length / 9);
+  const centers = new Float32Array(triangleCount * 3);
+  for (let i = 0; i < triangleCount; i++) {
+    const base = i * 9;
+    const cx = (vertices[base] + vertices[base + 3] + vertices[base + 6]) / 3;
+    const cy = (vertices[base + 1] + vertices[base + 4] + vertices[base + 7]) / 3;
+    const cz = (vertices[base + 2] + vertices[base + 5] + vertices[base + 8]) / 3;
+    centers[i * 3] = cx;
+    centers[i * 3 + 1] = cy;
+    centers[i * 3 + 2] = cz;
+  }
+  return centers;
+}
+function computeTriangleNormals(vertices) {
+  const triangleCount = Math.floor(vertices.length / 9);
+  const normals = new Float32Array(triangleCount * 3);
+  for (let i = 0; i < triangleCount; i++) {
+    const base = i * 9;
+    const v0x = vertices[base], v0y = vertices[base + 1], v0z = vertices[base + 2];
+    const v1x = vertices[base + 3], v1y = vertices[base + 4], v1z = vertices[base + 5];
+    const v2x = vertices[base + 6], v2y = vertices[base + 7], v2z = vertices[base + 8];
+    const e1x = v1x - v0x, e1y = v1y - v0y, e1z = v1z - v0z;
+    const e2x = v2x - v0x, e2y = v2y - v0y, e2z = v2z - v0z;
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (len > 0) {
+      nx /= len;
+      ny /= len;
+      nz /= len;
+    } else {
+      nx = 0;
+      ny = 1;
+      nz = 0;
+    }
+    normals[i * 3] = nx;
+    normals[i * 3 + 1] = ny;
+    normals[i * 3 + 2] = nz;
+  }
+  return normals;
+}
+function kMeansClustering(centers, k, seed = 0, maxIterations = 20) {
+  const n = centers.length / 3;
+  if (k >= n) {
+    return new Uint16Array(n).map((_, i) => i);
+  }
+  const rand = seededRandom(seed);
+  const assignments = new Uint16Array(n);
+  const centroids = new Float32Array(k * 3);
+  const first = Math.floor(rand() * n);
+  centroids[0] = centers[first * 3];
+  centroids[1] = centers[first * 3 + 1];
+  centroids[2] = centers[first * 3 + 2];
+  for (let c = 1; c < k; c++) {
+    const distances = new Float32Array(n);
+    let totalDist = 0;
+    for (let i = 0; i < n; i++) {
+      let minDist = Infinity;
+      const px = centers[i * 3], py = centers[i * 3 + 1], pz = centers[i * 3 + 2];
+      for (let j = 0; j < c; j++) {
+        const dx = px - centroids[j * 3];
+        const dy = py - centroids[j * 3 + 1];
+        const dz = pz - centroids[j * 3 + 2];
+        const dist = dx * dx + dy * dy + dz * dz;
+        if (dist < minDist) minDist = dist;
+      }
+      distances[i] = minDist;
+      totalDist += minDist;
+    }
+    let target = rand() * totalDist;
+    let selected = 0;
+    for (let i = 0; i < n; i++) {
+      target -= distances[i];
+      if (target <= 0) {
+        selected = i;
+        break;
+      }
+    }
+    centroids[c * 3] = centers[selected * 3];
+    centroids[c * 3 + 1] = centers[selected * 3 + 1];
+    centroids[c * 3 + 2] = centers[selected * 3 + 2];
+  }
+  const counts = new Uint32Array(k);
+  const sums = new Float32Array(k * 3);
+  for (let iter = 0; iter < maxIterations; iter++) {
+    for (let i = 0; i < n; i++) {
+      let minDist = Infinity;
+      let bestC = 0;
+      const px = centers[i * 3], py = centers[i * 3 + 1], pz = centers[i * 3 + 2];
+      for (let c = 0; c < k; c++) {
+        const dx = px - centroids[c * 3];
+        const dy = py - centroids[c * 3 + 1];
+        const dz = pz - centroids[c * 3 + 2];
+        const dist = dx * dx + dy * dy + dz * dz;
+        if (dist < minDist) {
+          minDist = dist;
+          bestC = c;
+        }
+      }
+      assignments[i] = bestC;
+    }
+    counts.fill(0);
+    sums.fill(0);
+    for (let i = 0; i < n; i++) {
+      const c = assignments[i];
+      counts[c]++;
+      sums[c * 3] += centers[i * 3];
+      sums[c * 3 + 1] += centers[i * 3 + 1];
+      sums[c * 3 + 2] += centers[i * 3 + 2];
+    }
+    for (let c = 0; c < k; c++) {
+      if (counts[c] > 0) {
+        centroids[c * 3] = sums[c * 3] / counts[c];
+        centroids[c * 3 + 1] = sums[c * 3 + 1] / counts[c];
+        centroids[c * 3 + 2] = sums[c * 3 + 2] / counts[c];
+      }
+    }
+  }
+  return assignments;
+}
+function randomClustering(triangleCount, k, seed = 0) {
+  const rand = seededRandom(seed);
+  const assignments = new Uint16Array(triangleCount);
+  for (let i = 0; i < triangleCount; i++) {
+    assignments[i] = Math.floor(rand() * k);
+  }
+  return assignments;
+}
+function computeFragmentData(vertices, triangleAssignments, options = {}) {
+  const { shockOrigin = [0, 0, 0] } = options;
+  const triangleCount = triangleAssignments.length;
+  const vertexCount = triangleCount * 3;
+  const triCenters = computeTriangleCenters(vertices);
+  const triNormals = computeTriangleNormals(vertices);
+  const fragmentIds = new Set(triangleAssignments);
+  const fragmentCount = fragmentIds.size;
+  const fragmentCenterSums = /* @__PURE__ */ new Map();
+  const fragmentNormalSums = /* @__PURE__ */ new Map();
+  const fragmentCounts = /* @__PURE__ */ new Map();
+  for (const fid of fragmentIds) {
+    fragmentCenterSums.set(fid, [0, 0, 0]);
+    fragmentNormalSums.set(fid, [0, 0, 0]);
+    fragmentCounts.set(fid, 0);
+  }
+  for (let i = 0; i < triangleCount; i++) {
+    const fid = triangleAssignments[i];
+    const center = fragmentCenterSums.get(fid);
+    const normal = fragmentNormalSums.get(fid);
+    center[0] += triCenters[i * 3];
+    center[1] += triCenters[i * 3 + 1];
+    center[2] += triCenters[i * 3 + 2];
+    normal[0] += triNormals[i * 3];
+    normal[1] += triNormals[i * 3 + 1];
+    normal[2] += triNormals[i * 3 + 2];
+    fragmentCounts.set(fid, fragmentCounts.get(fid) + 1);
+  }
+  const fragmentCenters = /* @__PURE__ */ new Map();
+  const fragmentNormals = /* @__PURE__ */ new Map();
+  for (const fid of fragmentIds) {
+    const count = fragmentCounts.get(fid);
+    const center = fragmentCenterSums.get(fid);
+    fragmentCenters.set(fid, [center[0] / count, center[1] / count, center[2] / count]);
+    const normal = fragmentNormalSums.get(fid);
+    const len = Math.sqrt(normal[0] ** 2 + normal[1] ** 2 + normal[2] ** 2);
+    if (len > 0) {
+      fragmentNormals.set(fid, [normal[0] / len, normal[1] / len, normal[2] / len]);
+    } else {
+      fragmentNormals.set(fid, [0, 1, 0]);
+    }
+  }
+  const rand = seededRandom(42);
+  const fragmentSeeds = /* @__PURE__ */ new Map();
+  for (const fid of fragmentIds) {
+    fragmentSeeds.set(fid, rand());
+  }
+  const outFragmentCenters = new Float32Array(vertexCount * 3);
+  const outFragmentNormals = new Float32Array(vertexCount * 3);
+  const outFragmentSeeds = new Float32Array(vertexCount);
+  const outFragmentDistances = new Float32Array(vertexCount);
+  for (let tri2 = 0; tri2 < triangleCount; tri2++) {
+    const fid = triangleAssignments[tri2];
+    const center = fragmentCenters.get(fid);
+    const normal = fragmentNormals.get(fid);
+    const seed = fragmentSeeds.get(fid);
+    const dx = center[0] - shockOrigin[0];
+    const dy = center[1] - shockOrigin[1];
+    const dz = center[2] - shockOrigin[2];
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    for (let v2 = 0; v2 < 3; v2++) {
+      const vi = tri2 * 3 + v2;
+      outFragmentCenters[vi * 3] = center[0];
+      outFragmentCenters[vi * 3 + 1] = center[1];
+      outFragmentCenters[vi * 3 + 2] = center[2];
+      outFragmentNormals[vi * 3] = normal[0];
+      outFragmentNormals[vi * 3 + 1] = normal[1];
+      outFragmentNormals[vi * 3 + 2] = normal[2];
+      outFragmentSeeds[vi] = seed;
+      outFragmentDistances[vi] = distance;
+    }
+  }
+  return {
+    fragmentCenters: outFragmentCenters,
+    fragmentNormals: outFragmentNormals,
+    fragmentSeeds: outFragmentSeeds,
+    fragmentDistances: outFragmentDistances,
+    fragmentCount
+  };
+}
 var astralIdentifierCodes = [509, 0, 227, 0, 150, 4, 294, 9, 1368, 2, 2, 1, 6, 3, 41, 2, 5, 0, 166, 1, 574, 3, 9, 9, 7, 9, 32, 4, 318, 1, 80, 3, 71, 10, 50, 3, 123, 2, 54, 14, 32, 10, 3, 1, 11, 3, 46, 10, 8, 0, 46, 9, 7, 2, 37, 13, 2, 9, 6, 1, 45, 0, 13, 2, 49, 13, 9, 3, 2, 11, 83, 11, 7, 0, 3, 0, 158, 11, 6, 9, 7, 3, 56, 1, 2, 6, 3, 1, 3, 2, 10, 0, 11, 1, 3, 6, 4, 4, 68, 8, 2, 0, 3, 0, 2, 3, 2, 4, 2, 0, 15, 1, 83, 17, 10, 9, 5, 0, 82, 19, 13, 9, 214, 6, 3, 8, 28, 1, 83, 16, 16, 9, 82, 12, 9, 9, 7, 19, 58, 14, 5, 9, 243, 14, 166, 9, 71, 5, 2, 1, 3, 3, 2, 0, 2, 1, 13, 9, 120, 6, 3, 6, 4, 0, 29, 9, 41, 6, 2, 3, 9, 0, 10, 10, 47, 15, 343, 9, 54, 7, 2, 7, 17, 9, 57, 21, 2, 13, 123, 5, 4, 0, 2, 1, 2, 6, 2, 0, 9, 9, 49, 4, 2, 1, 2, 4, 9, 9, 330, 3, 10, 1, 2, 0, 49, 6, 4, 4, 14, 10, 5350, 0, 7, 14, 11465, 27, 2343, 9, 87, 9, 39, 4, 60, 6, 26, 9, 535, 9, 470, 0, 2, 54, 8, 3, 82, 0, 12, 1, 19628, 1, 4178, 9, 519, 45, 3, 22, 543, 4, 4, 5, 9, 7, 3, 6, 31, 3, 149, 2, 1418, 49, 513, 54, 5, 49, 9, 0, 15, 0, 23, 4, 2, 14, 1361, 6, 2, 16, 3, 6, 2, 1, 2, 4, 101, 0, 161, 6, 10, 9, 357, 0, 62, 13, 499, 13, 245, 1, 2, 9, 726, 6, 110, 6, 6, 9, 4759, 9, 787719, 239];
 var astralIdentifierStartCodes = [0, 11, 2, 25, 2, 18, 2, 1, 2, 14, 3, 13, 35, 122, 70, 52, 268, 28, 4, 48, 48, 31, 14, 29, 6, 37, 11, 29, 3, 35, 5, 7, 2, 4, 43, 157, 19, 35, 5, 35, 5, 39, 9, 51, 13, 10, 2, 14, 2, 6, 2, 1, 2, 10, 2, 14, 2, 6, 2, 1, 4, 51, 13, 310, 10, 21, 11, 7, 25, 5, 2, 41, 2, 8, 70, 5, 3, 0, 2, 43, 2, 1, 4, 0, 3, 22, 11, 22, 10, 30, 66, 18, 2, 1, 11, 21, 11, 25, 71, 55, 7, 1, 65, 0, 16, 3, 2, 2, 2, 28, 43, 28, 4, 28, 36, 7, 2, 27, 28, 53, 11, 21, 11, 18, 14, 17, 111, 72, 56, 50, 14, 50, 14, 35, 39, 27, 10, 22, 251, 41, 7, 1, 17, 2, 60, 28, 11, 0, 9, 21, 43, 17, 47, 20, 28, 22, 13, 52, 58, 1, 3, 0, 14, 44, 33, 24, 27, 35, 30, 0, 3, 0, 9, 34, 4, 0, 13, 47, 15, 3, 22, 0, 2, 0, 36, 17, 2, 24, 20, 1, 64, 6, 2, 0, 2, 3, 2, 14, 2, 9, 8, 46, 39, 7, 3, 1, 3, 21, 2, 6, 2, 1, 2, 4, 4, 0, 19, 0, 13, 4, 31, 9, 2, 0, 3, 0, 2, 37, 2, 0, 26, 0, 2, 0, 45, 52, 19, 3, 21, 2, 31, 47, 21, 1, 2, 0, 185, 46, 42, 3, 37, 47, 21, 0, 60, 42, 14, 0, 72, 26, 38, 6, 186, 43, 117, 63, 32, 7, 3, 0, 3, 7, 2, 1, 2, 23, 16, 0, 2, 0, 95, 7, 3, 38, 17, 0, 2, 0, 29, 0, 11, 39, 8, 0, 22, 0, 12, 45, 20, 0, 19, 72, 200, 32, 32, 8, 2, 36, 18, 0, 50, 29, 113, 6, 2, 1, 2, 37, 22, 0, 26, 5, 2, 1, 2, 31, 15, 0, 328, 18, 16, 0, 2, 12, 2, 33, 125, 0, 80, 921, 103, 110, 18, 195, 2637, 96, 16, 1071, 18, 5, 26, 3994, 6, 582, 6842, 29, 1763, 568, 8, 30, 18, 78, 18, 29, 19, 47, 17, 3, 32, 20, 6, 18, 433, 44, 212, 63, 129, 74, 6, 0, 67, 12, 65, 1, 2, 0, 29, 6135, 9, 1237, 42, 9, 8936, 3, 2, 6, 2, 1, 2, 290, 16, 0, 30, 2, 3, 0, 15, 3, 9, 395, 2309, 106, 6, 12, 4, 8, 8, 9, 5991, 84, 2, 70, 2, 1, 3, 0, 3, 1, 3, 3, 2, 11, 2, 0, 2, 6, 2, 64, 2, 3, 3, 7, 2, 6, 2, 27, 2, 3, 2, 4, 2, 0, 4, 6, 2, 339, 3, 24, 2, 24, 2, 30, 2, 24, 2, 30, 2, 24, 2, 30, 2, 24, 2, 30, 2, 24, 2, 7, 1845, 30, 7, 5, 262, 61, 147, 44, 11, 6, 17, 0, 322, 29, 19, 43, 485, 27, 229, 29, 3, 0, 496, 6, 2, 3, 2, 1, 2, 14, 2, 196, 60, 67, 8, 0, 1205, 3, 2, 26, 2, 1, 2, 0, 3, 0, 2, 9, 2, 3, 2, 0, 2, 0, 7, 0, 5, 0, 2, 0, 2, 0, 2, 2, 2, 1, 2, 0, 3, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 1, 2, 0, 3, 3, 2, 6, 2, 3, 2, 3, 2, 0, 2, 9, 2, 16, 6, 2, 2, 4, 2, 16, 4421, 42719, 33, 4153, 7, 221, 3, 5761, 15, 7472, 16, 621, 2467, 541, 1507, 4938, 6, 4191];
 var nonASCIIidentifierChars = "‌‍·̀-ͯ·҃-֑҇-ׇֽֿׁׂׅׄؐ-ًؚ-٩ٰۖ-ۜ۟-۪ۤۧۨ-ۭ۰-۹ܑܰ-݊ަ-ް߀-߉߫-߽߳ࠖ-࠙ࠛ-ࠣࠥ-ࠧࠩ-࡙࠭-࡛ࢗ-࢟࣊-ࣣ࣡-ःऺ-़ा-ॏ॑-ॗॢॣ०-९ঁ-ঃ়া-ৄেৈো-্ৗৢৣ০-৯৾ਁ-ਃ਼ਾ-ੂੇੈੋ-੍ੑ੦-ੱੵઁ-ઃ઼ા-ૅે-ૉો-્ૢૣ૦-૯ૺ-૿ଁ-ଃ଼ା-ୄେୈୋ-୍୕-ୗୢୣ୦-୯ஂா-ூெ-ைொ-்ௗ௦-௯ఀ-ఄ఼ా-ౄె-ైొ-్ౕౖౢౣ౦-౯ಁ-ಃ಼ಾ-ೄೆ-ೈೊ-್ೕೖೢೣ೦-೯ೳഀ-ഃ഻഼ാ-ൄെ-ൈൊ-്ൗൢൣ൦-൯ඁ-ඃ්ා-ුූෘ-ෟ෦-෯ෲෳัิ-ฺ็-๎๐-๙ັິ-ຼ່-໎໐-໙༘༙༠-༩༹༵༷༾༿ཱ-྄྆྇ྍ-ྗྙ-ྼ࿆ါ-ှ၀-၉ၖ-ၙၞ-ၠၢ-ၤၧ-ၭၱ-ၴႂ-ႍႏ-ႝ፝-፟፩-፱ᜒ-᜕ᜲ-᜴ᝒᝓᝲᝳ឴-៓៝០-៩᠋-᠍᠏-᠙ᢩᤠ-ᤫᤰ-᤻᥆-᥏᧐-᧚ᨗ-ᨛᩕ-ᩞ᩠-᩿᩼-᪉᪐-᪙᪰-᪽ᪿ-ᫎᬀ-ᬄ᬴-᭄᭐-᭙᭫-᭳ᮀ-ᮂᮡ-ᮭ᮰-᮹᯦-᯳ᰤ-᰷᱀-᱉᱐-᱙᳐-᳔᳒-᳨᳭᳴᳷-᳹᷀-᷿‌‍‿⁀⁔⃐-⃥⃜⃡-⃰⳯-⵿⳱ⷠ-〪ⷿ-゙゚〯・꘠-꘩꙯ꙴ-꙽ꚞꚟ꛰꛱ꠂ꠆ꠋꠣ-ꠧ꠬ꢀꢁꢴ-ꣅ꣐-꣙꣠-꣱ꣿ-꤉ꤦ-꤭ꥇ-꥓ꦀ-ꦃ꦳-꧀꧐-꧙ꧥ꧰-꧹ꨩ-ꨶꩃꩌꩍ꩐-꩙ꩻ-ꩽꪰꪲ-ꪴꪷꪸꪾ꪿꫁ꫫ-ꫯꫵ꫶ꯣ-ꯪ꯬꯭꯰-꯹ﬞ︀-️︠-︯︳︴﹍-﹏０-９＿･";
@@ -8406,6 +8908,104 @@ class VertexSource {
     }
     return this._animations.map((a2) => ({ name: a2.name, duration: a2.duration }));
   }
+  // ========== Fragment/Explosion ==========
+  // Subdivide: split large triangles into smaller ones for better fragment sizes
+  // Uses midpoint subdivision on edges longer than maxEdgeLength
+  // Options:
+  //   maxEdgeLength: maximum edge length before subdivision (default: 0.2)
+  //   maxIterations: maximum subdivision passes (default: 3)
+  // Returns this for chaining
+  subdivide(options = {}) {
+    const { maxEdgeLength = 0.2, maxIterations = 3 } = options;
+    if (!this.is3D) {
+      console.warn("subdivide() requires 3D geometry");
+      return this;
+    }
+    const result = subdivideTriangles(this.vertices, {
+      maxEdgeLength,
+      maxIterations,
+      uvs: this.uvs,
+      normals: this.normals,
+      colors: this.colors,
+      faceIds: this.faceIds
+    });
+    this.vertices = result.vertices;
+    if (result.uvs) this.uvs = result.uvs;
+    if (result.normals) this.normals = result.normals;
+    if (result.colors) this.colors = result.colors;
+    if (result.faceIds) this.faceIds = result.faceIds;
+    return this;
+  }
+  // Prepare geometry for explosion by computing per-fragment data
+  // Options:
+  //   groupSize: target triangles per fragment (default 1 = each triangle is a fragment)
+  //   groupMethod: 'spatial' (k-means clustering) or 'random' (default 'spatial')
+  //   seed: random seed for reproducibility (default 0)
+  //   shockOrigin: center of explosion for distance calculation (default [0,0,0])
+  fragmentize(options = {}) {
+    const {
+      groupSize = 1,
+      groupMethod = "spatial",
+      seed = 0,
+      shockOrigin = [0, 0, 0]
+    } = options;
+    if (!this.is3D) {
+      console.warn("fragmentize() requires 3D geometry");
+      return this;
+    }
+    const triangleCount = Math.floor(this.vertices.length / 9);
+    if (triangleCount === 0) {
+      console.warn("fragmentize() called on empty geometry");
+      return this;
+    }
+    const targetFragments = Math.max(1, Math.ceil(triangleCount / groupSize));
+    const centers = computeTriangleCenters(this.vertices);
+    let assignments;
+    if (groupMethod === "random") {
+      assignments = randomClustering(triangleCount, targetFragments, seed);
+    } else {
+      assignments = kMeansClustering(centers, targetFragments, seed);
+    }
+    const fragData = computeFragmentData(this.vertices, assignments, { shockOrigin });
+    this.fragmentCenters = fragData.fragmentCenters;
+    this.fragmentNormals = fragData.fragmentNormals;
+    this.fragmentSeeds = fragData.fragmentSeeds;
+    this.fragmentDistances = fragData.fragmentDistances;
+    this.isFragmentized = true;
+    this._fragmentCount = fragData.fragmentCount;
+    console.log(`[hydra-vertex] Fragmentized: ${triangleCount} triangles → ${fragData.fragmentCount} fragments`);
+    return this;
+  }
+  // Explosion transform - animates fragments flying outward
+  // Options:
+  //   time: explosion progress (0 = start, number/function/expression)
+  //   velocity: initial outward velocity (default 2.0)
+  //   velocityVariation: per-fragment velocity randomness 0-1 (default 0.3)
+  //   gravity: gravity vector [x, y, z] (default [0, -1, 0])
+  //   spin: fragment rotation speed (default 0.5)
+  //   spinAxisVariation: spin axis randomness 0-1 (default 1.0)
+  //   drag: air resistance (default 0.0)
+  //   shockSpeed: shock wave propagation speed (default Infinity = instant)
+  //   shockOrigin: explosion origin point (default [0, 0, 0])
+  explode(options = {}) {
+    const defaults = {
+      time: 0,
+      velocity: 2,
+      velocityVariation: 0.3,
+      gravity: [0, -1, 0],
+      spin: 0.5,
+      spinAxisVariation: 1,
+      drag: 0,
+      shockSpeed: 1e10,
+      // Very large = nearly instant
+      shockOrigin: [0, 0, 0]
+    };
+    const args = { ...defaults, ...options };
+    if (!this.isFragmentized) {
+      this.fragmentize({ shockOrigin: args.shockOrigin });
+    }
+    return this._addTransform("explode", args);
+  }
 }
 function generateVertexGlsl(vertexSource, precision, options = {}) {
   const {
@@ -8418,7 +9018,9 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
     useCpuInstancing = false,
     // CPU fallback when GPU instancing not available
     useInstanceRotation = false,
-    useInstanceScale = false
+    useInstanceScale = false,
+    useFragments = false
+    // Fragment data for explosion effects
   } = options;
   const uvAttributeDecl = useExplicitUVs ? "attribute vec2 texcoord;" : "";
   const uvComputation = useExplicitUVs ? "uv = texcoord;" : "uv = (position.xy - u_boundsMin) / (u_boundsMax - u_boundsMin);";
@@ -8432,6 +9034,7 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
   let instanceAttributeDecl = useInstancing ? "attribute vec3 instanceOffset;\nattribute float instanceId;" : useCpuInstancing ? "attribute float instanceId;" : "";
   if (useInstanceRotation) instanceAttributeDecl += "\nattribute vec3 instanceRotation;";
   if (useInstanceScale) instanceAttributeDecl += "\nattribute vec3 instanceScale;";
+  const fragmentAttributeDecl = useFragments ? "attribute vec3 fragmentCenter;\nattribute float fragmentSeed;\nattribute float fragmentDistance;" : "";
   const instanceIdVaryingDecl = "varying float v_instanceId;";
   const instanceIdPassthrough = useInstancing || useCpuInstancing ? "v_instanceId = instanceId;" : "v_instanceId = 0.0;";
   const ixDefCode = useInstancing || useCpuInstancing ? "float _ix = instanceId;" : "float _ix = 0.0;";
@@ -8676,6 +9279,86 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
         ]);
         break;
       }
+      case "explode": {
+        const args = transform.args;
+        const getExplodeGlsl = (val, name, type = "float") => {
+          if (typeof val === "string") {
+            const expr = parseShaderExpr(val);
+            if (expr) return expr.toGLSL();
+          }
+          uniformDecls.push(`uniform ${type} ${name};`);
+          uniforms[name] = makeUniformAccessor(val);
+          return name;
+        };
+        const timeGlsl = getExplodeGlsl(args.time, `u_explodeTime_${suffix}`);
+        const velocityGlsl = getExplodeGlsl(args.velocity, `u_explodeVelocity_${suffix}`);
+        const spinGlsl = getExplodeGlsl(args.spin, `u_explodeSpin_${suffix}`);
+        const dragGlsl = getExplodeGlsl(args.drag, `u_explodeDrag_${suffix}`);
+        const shockSpeedGlsl = getExplodeGlsl(args.shockSpeed, `u_explodeShockSpeed_${suffix}`);
+        uniformDecls.push(`uniform vec3 u_explodeGravity_${suffix};`);
+        uniforms[`u_explodeGravity_${suffix}`] = makeUniformAccessor(args.gravity);
+        uniformDecls.push(`uniform vec3 u_explodeOrigin_${suffix};`);
+        uniforms[`u_explodeOrigin_${suffix}`] = makeUniformAccessor(args.shockOrigin);
+        uniformDecls.push(`uniform float u_explodeVelVar_${suffix};`);
+        uniforms[`u_explodeVelVar_${suffix}`] = makeUniformAccessor(args.velocityVariation);
+        transformCode.push(`
+          // === Explosion Physics ===
+          {
+            float explodeTime = ${timeGlsl};
+            float velocity = ${velocityGlsl};
+            float spin = ${spinGlsl};
+            float drag = ${dragGlsl};
+            float shockSpeed = ${shockSpeedGlsl};
+            vec3 gravity = u_explodeGravity_${suffix};
+            vec3 origin = u_explodeOrigin_${suffix};
+            float velVar = u_explodeVelVar_${suffix};
+
+            // Shock wave timing: fragments start moving when shock reaches them
+            float shockArrival = fragmentDistance / shockSpeed;
+            float localTime = max(0.0, explodeTime - shockArrival);
+
+            if (localTime > 0.0) {
+              // Hash functions for per-fragment randomness
+              float h1 = fract(sin(fragmentSeed * 12.9898) * 43758.5453);
+              float h2 = fract(sin(fragmentSeed * 78.233) * 43758.5453);
+              float h3 = fract(sin(fragmentSeed * 45.164) * 43758.5453);
+              vec3 randDir = normalize(vec3(h1 - 0.5, h2 - 0.5, h3 - 0.5));
+
+              // Per-fragment velocity variation
+              float velocityMult = 1.0 - velVar + 2.0 * velVar * h1;
+
+              // Explosion direction: outward from fragment center + random component
+              vec3 outDir = normalize(fragmentCenter - origin);
+              vec3 initVel = (outDir + randDir * 0.3) * velocity * velocityMult;
+
+              // Ballistic trajectory with optional drag
+              vec3 displacement;
+              if (drag > 0.001) {
+                float dragFactor = exp(-drag * localTime);
+                displacement = initVel * (1.0 - dragFactor) / drag + 0.5 * gravity * localTime * localTime;
+              } else {
+                displacement = initVel * localTime + 0.5 * gravity * localTime * localTime;
+              }
+
+              // Spin: rotate around random axis
+              float angle = spin * localTime * (0.5 + h2);
+              vec3 spinAxis = normalize(vec3(h1 - 0.5, h2 - 0.5, h3 - 0.5) + vec3(0.001));
+
+              // Rodrigues rotation formula
+              vec3 localPos = pos - fragmentCenter;
+              float c = cos(angle);
+              float s = sin(angle);
+              vec3 rotatedPos = localPos * c + cross(spinAxis, localPos) * s + spinAxis * dot(spinAxis, localPos) * (1.0 - c);
+
+              pos = rotatedPos + fragmentCenter + displacement;
+
+              // Also rotate normal
+              nrm = nrm * c + cross(spinAxis, nrm) * s + spinAxis * dot(spinAxis, nrm) * (1.0 - c);
+            }
+          }`);
+        vertexSource._hasExplodeTransform = true;
+        break;
+      }
     }
   });
   let glsl;
@@ -8719,6 +9402,7 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
     precision ${precision} float;
     attribute vec3 position;
     ${instanceAttributeDecl}
+    ${fragmentAttributeDecl}
     ${uvAttributeDecl}
     ${faceIdAttributeDecl}
     ${normalAttributeDecl}
@@ -8752,6 +9436,9 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
       ${instanceIdPassthrough}
       ${ixDefCode}
 
+      // Model space normal (raw from vertex buffer, needed early for explosion)
+      ${normalInit}
+
       // Apply transforms (3D)
       vec3 pos = position;
       ${instanceScaleCode}
@@ -8762,8 +9449,7 @@ function generateVertexGlsl(vertexSource, precision, options = {}) {
       // Compute vertex data for fragment shader
       v_position = pos;
 
-      // Model space normal (raw from vertex buffer)
-      ${normalInit}
+      // Store final normal (may have been modified by explosion)
       v_normal = nrm;
 
       // World space normal (after rotation transforms)
@@ -8856,7 +9542,8 @@ function generateVertexWgsl(vertexSource, options = {}) {
     useColors = false,
     useInstancing = false,
     useInstanceRotation = false,
-    useInstanceScale = false
+    useInstanceScale = false,
+    useFragments = false
   } = options;
   const uniforms = [];
   const transformCode = [];
@@ -9020,6 +9707,87 @@ function generateVertexWgsl(vertexSource, options = {}) {
           uniforms.push({ name: perspectiveUniform, type: "vec3f", value: [transform.args.fov, transform.args.near, transform.args.far] });
           break;
         }
+        case "explode": {
+          const args = transform.args;
+          const getExplodeWgsl = (val, name, type = "f32") => {
+            if (typeof val === "string") {
+              const expr = parseShaderExpr(val);
+              if (expr) return expr.toWGSL();
+            }
+            uniforms.push({ name, type, value: val });
+            return `vtx.${name}`;
+          };
+          const timeWgsl = getExplodeWgsl(args.time, `u_explodeTime_${suffix}`);
+          const velocityWgsl = getExplodeWgsl(args.velocity, `u_explodeVelocity_${suffix}`);
+          const spinWgsl = getExplodeWgsl(args.spin, `u_explodeSpin_${suffix}`);
+          const dragWgsl = getExplodeWgsl(args.drag, `u_explodeDrag_${suffix}`);
+          const shockSpeedWgsl = getExplodeWgsl(args.shockSpeed, `u_explodeShockSpeed_${suffix}`);
+          uniforms.push({ name: `u_explodeGravity_${suffix}`, type: "vec3f", value: args.gravity });
+          uniforms.push({ name: `u_explodeOrigin_${suffix}`, type: "vec3f", value: args.shockOrigin });
+          uniforms.push({ name: `u_explodeVelVar_${suffix}`, type: "f32", value: args.velocityVariation });
+          transformCode.push(`
+      // === Explosion Physics ===
+      {
+        let explodeTime = ${timeWgsl};
+        let velocity = ${velocityWgsl};
+        let spin = ${spinWgsl};
+        let drag = ${dragWgsl};
+        let shockSpeed = ${shockSpeedWgsl};
+        let gravity = vtx.u_explodeGravity_${suffix};
+        let origin = vtx.u_explodeOrigin_${suffix};
+        let velVar = vtx.u_explodeVelVar_${suffix};
+
+        // Fragment attributes
+        let fragmentCenter = input.fragmentCenter;
+        let fragmentSeed = input.fragmentSeed;
+        let fragmentDistance = input.fragmentDistance;
+
+        // Shock wave timing: fragments start moving when shock reaches them
+        let shockArrival = fragmentDistance / shockSpeed;
+        let localTime = max(0.0, explodeTime - shockArrival);
+
+        if (localTime > 0.0) {
+          // Hash functions for per-fragment randomness
+          let h1 = fract(sin(fragmentSeed * 12.9898) * 43758.5453);
+          let h2 = fract(sin(fragmentSeed * 78.233) * 43758.5453);
+          let h3 = fract(sin(fragmentSeed * 45.164) * 43758.5453);
+          let randDir = normalize(vec3f(h1 - 0.5, h2 - 0.5, h3 - 0.5));
+
+          // Per-fragment velocity variation
+          let velocityMult = 1.0 - velVar + 2.0 * velVar * h1;
+
+          // Explosion direction: outward from fragment center + random component
+          let outDir = normalize(fragmentCenter - origin);
+          let initVel = (outDir + randDir * 0.3) * velocity * velocityMult;
+
+          // Ballistic trajectory with optional drag
+          var displacement: vec3f;
+          if (drag > 0.001) {
+            let dragFactor = exp(-drag * localTime);
+            displacement = initVel * (1.0 - dragFactor) / drag + 0.5 * gravity * localTime * localTime;
+          } else {
+            displacement = initVel * localTime + 0.5 * gravity * localTime * localTime;
+          }
+
+          // Spin: rotate around random axis
+          let angle = spin * localTime * (0.5 + h2);
+          let spinAxis = normalize(vec3f(h1 - 0.5, h2 - 0.5, h3 - 0.5) + vec3f(0.001));
+
+          // Rodrigues rotation formula
+          let localPos = pos - fragmentCenter;
+          let c = cos(angle);
+          let s = sin(angle);
+          let rotatedPos = localPos * c + cross(spinAxis, localPos) * s + spinAxis * dot(spinAxis, localPos) * (1.0 - c);
+
+          pos = rotatedPos + fragmentCenter + displacement;
+
+          // Also rotate normal
+          nrm = nrm * c + cross(spinAxis, nrm) * s + spinAxis * dot(spinAxis, nrm) * (1.0 - c);
+        }
+      }`);
+          vertexSource._hasExplodeTransform = true;
+          break;
+        }
       }
     });
   }
@@ -9057,6 +9825,11 @@ ${allUniformFields.join("\n")}
   }
   if (useInstanceScale) {
     inputFields.push("  @location(8) instanceScale: vec3f,");
+  }
+  if (useFragments) {
+    inputFields.push("  @location(10) fragmentCenter: vec3f,");
+    inputFields.push("  @location(11) fragmentSeed: f32,");
+    inputFields.push("  @location(12) fragmentDistance: f32,");
   }
   const outputFields = [
     "  @builtin(position) position: vec4f,",
@@ -9160,6 +9933,9 @@ ${fnSignature} {
   // Define _ix for shader expressions
   ${ixDefCode}
 
+  // Initialize normal before transforms (explosion physics may modify it)
+  ${normalInit}
+
   // Apply transforms (3D)
   var pos = input.position;
   ${instanceScaleCode}
@@ -9170,8 +9946,7 @@ ${transformCode.join("\n")}
   // Compute vertex data for fragment shader
   output.v_position = pos;
 
-  // Model space normal (raw from vertex buffer)
-  ${normalInit}
+  // Model space normal (after transforms that may have modified it)
   output.v_normal = nrm;
 
   // World space normal (after rotation transforms)
@@ -9412,12 +10187,14 @@ class OutputWgsl {
     let hasNormals = false;
     let hasTangents = false;
     let hasColors = false;
+    let hasFragments = false;
     if (vertexSource) {
       hasExplicitUVs = vertexSource.uvs && vertexSource.uvs.length > 0;
       hasFaceIds = vertexSource.faceIds && vertexSource.faceIds.length > 0;
       hasNormals = vertexSource.normals && vertexSource.normals.length > 0;
       hasTangents = vertexSource.tangents && vertexSource.tangents.length > 0;
       hasColors = vertexSource.colors && vertexSource.colors.length > 0;
+      hasFragments = vertexSource.isFragmentized === true;
     }
     const hasInstancing = vertexSource?.instanceCount > 0;
     const hasInstanceRotation = vertexSource?.instanceRotations != null;
@@ -9451,7 +10228,8 @@ class OutputWgsl {
           useColors: hasColors,
           useInstancing: hasInstancing,
           useInstanceRotation: hasInstanceRotation,
-          useInstanceScale: hasInstanceScale
+          useInstanceScale: hasInstanceScale,
+          useFragments: hasFragments
         });
         vertexWgsl = generated.wgsl;
         vertexUniforms = [...boundsUniforms, ...generated.uniforms];
@@ -9527,6 +10305,11 @@ class OutputWgsl {
       instancePositions: vertexSource?.instancePositions,
       instanceRotations: vertexSource?.instanceRotations,
       instanceScales: vertexSource?.instanceScales,
+      // Fragment data for explosion effect
+      hasFragments,
+      fragmentCenters: vertexSource?.fragmentCenters,
+      fragmentSeeds: vertexSource?.fragmentSeeds,
+      fragmentDistances: vertexSource?.fragmentDistances,
       sprite,
       animation
     });
@@ -9989,6 +10772,10 @@ class wgslHydra {
       instancePositions,
       instanceRotations,
       instanceScales,
+      hasFragments,
+      fragmentCenters,
+      fragmentSeeds,
+      fragmentDistances,
       sprite,
       animation
     } = config;
@@ -10012,6 +10799,7 @@ class wgslHydra {
     spe.hasInstancing = hasInstancing || false;
     spe.hasInstanceRotation = hasInstanceRotation || false;
     spe.hasInstanceScale = hasInstanceScale || false;
+    spe.hasFragments = hasFragments || false;
     spe.instanceCount = instanceCount || 1;
     spe.sprite = sprite || null;
     spe.animation = animation || null;
@@ -10106,6 +10894,35 @@ class wgslHydra {
           usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
         });
         this.device.queue.writeBuffer(spe.instanceScaleBuffer, 0, instanceScales);
+      }
+      if (spe.hasFragments) {
+        if (fragmentCenters && fragmentCenters.length > 0) {
+          const centerData = new Float32Array(fragmentCenters);
+          spe.fragmentCenterBuffer = this.device.createBuffer({
+            label: `fragmentCenterBuf_c${chan}_s${spriteLevel}`,
+            size: centerData.byteLength,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+          });
+          this.device.queue.writeBuffer(spe.fragmentCenterBuffer, 0, centerData);
+        }
+        if (fragmentSeeds && fragmentSeeds.length > 0) {
+          const seedData = new Float32Array(fragmentSeeds);
+          spe.fragmentSeedBuffer = this.device.createBuffer({
+            label: `fragmentSeedBuf_c${chan}_s${spriteLevel}`,
+            size: seedData.byteLength,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+          });
+          this.device.queue.writeBuffer(spe.fragmentSeedBuffer, 0, seedData);
+        }
+        if (fragmentDistances && fragmentDistances.length > 0) {
+          const distData = new Float32Array(fragmentDistances);
+          spe.fragmentDistanceBuffer = this.device.createBuffer({
+            label: `fragmentDistanceBuf_c${chan}_s${spriteLevel}`,
+            size: distData.byteLength,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+          });
+          this.device.queue.writeBuffer(spe.fragmentDistanceBuffer, 0, distData);
+        }
       }
       if (spe.vertexUniforms.length > 0) {
         this.setupVertexUniforms(spe);
@@ -10240,6 +11057,41 @@ class wgslHydra {
           }]
         });
       }
+      if (spe.hasFragments) {
+        if (spe.fragmentCenterBuffer) {
+          bufferLayouts.push({
+            arrayStride: 12,
+            // 3 floats * 4 bytes (vec3)
+            attributes: [{
+              shaderLocation: 10,
+              offset: 0,
+              format: "float32x3"
+            }]
+          });
+        }
+        if (spe.fragmentSeedBuffer) {
+          bufferLayouts.push({
+            arrayStride: 4,
+            // 1 float * 4 bytes
+            attributes: [{
+              shaderLocation: 11,
+              offset: 0,
+              format: "float32"
+            }]
+          });
+        }
+        if (spe.fragmentDistanceBuffer) {
+          bufferLayouts.push({
+            arrayStride: 4,
+            // 1 float * 4 bytes
+            attributes: [{
+              shaderLocation: 12,
+              offset: 0,
+              format: "float32"
+            }]
+          });
+        }
+      }
       pipelineDescriptor.vertex.buffers = bufferLayouts;
     }
     if (spe.has3D) {
@@ -10327,6 +11179,24 @@ class wgslHydra {
         }
         if (spe.facesPerInstanceBuffer) {
           spe.facesPerInstanceBuffer.destroy();
+        }
+        if (spe.instanceOffsetBuffer) {
+          spe.instanceOffsetBuffer.destroy();
+        }
+        if (spe.instanceRotationBuffer) {
+          spe.instanceRotationBuffer.destroy();
+        }
+        if (spe.instanceScaleBuffer) {
+          spe.instanceScaleBuffer.destroy();
+        }
+        if (spe.fragmentCenterBuffer) {
+          spe.fragmentCenterBuffer.destroy();
+        }
+        if (spe.fragmentSeedBuffer) {
+          spe.fragmentSeedBuffer.destroy();
+        }
+        if (spe.fragmentDistanceBuffer) {
+          spe.fragmentDistanceBuffer.destroy();
         }
       }
       rpe.sprites.clear();
@@ -10666,6 +11536,17 @@ class wgslHydra {
             }
             if (spe.hasInstanceScale && spe.instanceScaleBuffer) {
               passEncoder.setVertexBuffer(slot++, spe.instanceScaleBuffer);
+            }
+            if (spe.hasFragments) {
+              if (spe.fragmentCenterBuffer) {
+                passEncoder.setVertexBuffer(slot++, spe.fragmentCenterBuffer);
+              }
+              if (spe.fragmentSeedBuffer) {
+                passEncoder.setVertexBuffer(slot++, spe.fragmentSeedBuffer);
+              }
+              if (spe.fragmentDistanceBuffer) {
+                passEncoder.setVertexBuffer(slot++, spe.fragmentDistanceBuffer);
+              }
             }
             passEncoder.draw(spe.vertexCount, spe.instanceCount);
           } else {
@@ -26154,6 +27035,30 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
       colorBuffer = this.regl.buffer(colorData);
     }
   }
+  let hasFragments = false;
+  let fragmentCenterBuffer = null;
+  let fragmentSeedBuffer = null;
+  let fragmentDistanceBuffer = null;
+  if (vertexSource && vertexSource.isFragmentized) {
+    hasFragments = true;
+    if (vertexSource.fragmentCenters && vertexSource.fragmentCenters.length > 0) {
+      const centerData = [];
+      for (let i = 0; i < vertexSource.fragmentCenters.length; i += 3) {
+        centerData.push([
+          vertexSource.fragmentCenters[i],
+          vertexSource.fragmentCenters[i + 1],
+          vertexSource.fragmentCenters[i + 2]
+        ]);
+      }
+      fragmentCenterBuffer = this.regl.buffer(centerData);
+    }
+    if (vertexSource.fragmentSeeds && vertexSource.fragmentSeeds.length > 0) {
+      fragmentSeedBuffer = this.regl.buffer(Array.from(vertexSource.fragmentSeeds).map((s) => [s]));
+    }
+    if (vertexSource.fragmentDistances && vertexSource.fragmentDistances.length > 0) {
+      fragmentDistanceBuffer = this.regl.buffer(Array.from(vertexSource.fragmentDistances).map((d) => [d]));
+    }
+  }
   let hasInstancing = false;
   let hasCpuInstancing = false;
   let instanceCount = 0;
@@ -26350,7 +27255,8 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
         useInstancing: hasInstancing,
         useCpuInstancing: hasCpuInstancing,
         useInstanceRotation: hasInstancing && !!instanceRotationBuffer,
-        useInstanceScale: hasInstancing && !!instanceScaleBuffer
+        useInstanceScale: hasInstancing && !!instanceScaleBuffer,
+        useFragments: hasFragments
       });
       vert = generated.glsl;
       vertexUniforms = generated.uniforms;
@@ -26493,6 +27399,17 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
   if (hasColors && colorBuffer) {
     attributes.color = colorBuffer;
   }
+  if (hasFragments) {
+    if (fragmentCenterBuffer) {
+      attributes.fragmentCenter = fragmentCenterBuffer;
+    }
+    if (fragmentSeedBuffer) {
+      attributes.fragmentSeed = fragmentSeedBuffer;
+    }
+    if (fragmentDistanceBuffer) {
+      attributes.fragmentDistance = fragmentDistanceBuffer;
+    }
+  }
   if (hasInstancing && instanceOffsetBuffer) {
     attributes.instanceOffset = {
       buffer: instanceOffsetBuffer,
@@ -26557,6 +27474,9 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
     normalBuffer,
     tangentBuffer,
     colorBuffer,
+    fragmentCenterBuffer,
+    fragmentSeedBuffer,
+    fragmentDistanceBuffer,
     instanceOffsetBuffer,
     instanceIdBuffer,
     instanceRotationBuffer,
@@ -26564,6 +27484,7 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
     blendMode,
     has3D,
     hasInstancing,
+    hasFragments,
     instanceCount,
     enabled
   };
@@ -26606,6 +27527,15 @@ Output.prototype.clearSprites = function() {
     if (sprite.colorBuffer) {
       sprite.colorBuffer.destroy();
     }
+    if (sprite.fragmentCenterBuffer) {
+      sprite.fragmentCenterBuffer.destroy();
+    }
+    if (sprite.fragmentSeedBuffer) {
+      sprite.fragmentSeedBuffer.destroy();
+    }
+    if (sprite.fragmentDistanceBuffer) {
+      sprite.fragmentDistanceBuffer.destroy();
+    }
     if (sprite.instanceOffsetBuffer) {
       sprite.instanceOffsetBuffer.destroy();
     }
@@ -26641,6 +27571,15 @@ Output.prototype.removeSprite = function(level) {
     }
     if (sprite.colorBuffer) {
       sprite.colorBuffer.destroy();
+    }
+    if (sprite.fragmentCenterBuffer) {
+      sprite.fragmentCenterBuffer.destroy();
+    }
+    if (sprite.fragmentSeedBuffer) {
+      sprite.fragmentSeedBuffer.destroy();
+    }
+    if (sprite.fragmentDistanceBuffer) {
+      sprite.fragmentDistanceBuffer.destroy();
     }
     if (sprite.instanceOffsetBuffer) {
       sprite.instanceOffsetBuffer.destroy();
@@ -26685,6 +27624,15 @@ Output.prototype.render = function(passes) {
     }
     if (oldSprite.colorBuffer) {
       oldSprite.colorBuffer.destroy();
+    }
+    if (oldSprite.fragmentCenterBuffer) {
+      oldSprite.fragmentCenterBuffer.destroy();
+    }
+    if (oldSprite.fragmentSeedBuffer) {
+      oldSprite.fragmentSeedBuffer.destroy();
+    }
+    if (oldSprite.fragmentDistanceBuffer) {
+      oldSprite.fragmentDistanceBuffer.destroy();
     }
     if (oldSprite.instanceOffsetBuffer) {
       oldSprite.instanceOffsetBuffer.destroy();
