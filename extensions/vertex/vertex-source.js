@@ -495,7 +495,7 @@ class VertexSource {
 
   // Explosion transform - animates fragments flying outward
   // Options:
-  //   time: explosion progress (0 = start, number/function/expression)
+  //   progress: explosion progress (0 = start, number/function/expression)
   //   velocity: initial outward velocity (default 2.0)
   //   velocityVariation: per-fragment velocity randomness 0-1 (default 0.3)
   //   gravity: gravity vector [x, y, z] (default [0, -1, 0])
@@ -506,7 +506,7 @@ class VertexSource {
   //   shockOrigin: explosion origin point (default [0, 0, 0])
   explode(options = {}) {
     const defaults = {
-      time: 0,
+      progress: 0,
       velocity: 2.0,
       velocityVariation: 0.3,
       gravity: [0, -1, 0],
@@ -873,7 +873,7 @@ export function generateVertexGlsl(vertexSource, precision, options = {}) {
           return name
         }
 
-        const timeGlsl = getExplodeGlsl(args.time, `u_explodeTime_${suffix}`)
+        const timeGlsl = getExplodeGlsl(args.progress, `u_explodeTime_${suffix}`)
         const velocityGlsl = getExplodeGlsl(args.velocity, `u_explodeVelocity_${suffix}`)
         const spinGlsl = getExplodeGlsl(args.spin, `u_explodeSpin_${suffix}`)
         const dragGlsl = getExplodeGlsl(args.drag, `u_explodeDrag_${suffix}`)
@@ -1356,7 +1356,7 @@ export function generateVertexWgsl(vertexSource, options = {}) {
             return `vtx.${name}`
           }
 
-          const timeWgsl = getExplodeWgsl(args.time, `u_explodeTime_${suffix}`)
+          const timeWgsl = getExplodeWgsl(args.progress, `u_explodeTime_${suffix}`)
           const velocityWgsl = getExplodeWgsl(args.velocity, `u_explodeVelocity_${suffix}`)
           const spinWgsl = getExplodeWgsl(args.spin, `u_explodeSpin_${suffix}`)
           const dragWgsl = getExplodeWgsl(args.drag, `u_explodeDrag_${suffix}`)

@@ -57,7 +57,7 @@
               .subdivide({ maxEdgeLength: 0.15 })
               .fragmentize({ groupSize: 2, groupMethod: 'spatial' })
               .explode({
-                time: () => (time % 4),  // Loop every 4 seconds
+                progress: () => (time % 4),  // Loop every 4 seconds
                 velocity: 1.5,
                 gravity: [0, 0.5, 0],  // Positive Y = down in this coord system
                 spin: 2.0,
@@ -97,7 +97,7 @@
                     .subdivide({ maxEdgeLength: 0.15 })
                     .fragmentize({ groupSize: 2, groupMethod: 'spatial' })
                     .explode({
-                      time: () => (time % 4),  // Loop every 4 seconds
+                      progress: () => (time % 4),  // Loop every 4 seconds
                       velocity: 1.5,
                       gravity: [0, 0.5, 0],  // Positive Y = down
                       spin: 2.0,
@@ -117,7 +117,7 @@
                       .subdivide({ maxEdgeLength: 0.1 })
                       .fragmentize({ groupSize: 3, groupMethod: 'spatial' })
                       .explode({
-                        time: () => Math.max(0, (time % 7) - 2),  // 2s delay, 5s explosion, 7s loop
+                        progress: () => Math.max(0, (time % 7) - 2),  // 2s delay, 5s explosion, 7s loop
                         velocity: 1.2,
                         gravity: [0, 0.8, 0],
                         spin: 1.5,
