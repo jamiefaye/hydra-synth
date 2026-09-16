@@ -226,8 +226,12 @@ export class WebGPURenderer extends RendererInterface {
   }
 
   renderAllToScreen(outputs) {
-    // In WebGPU, 4-up rendering is handled by animate()
+    // In WebGPU, grid rendering is handled by animate()
     this._wgslHydra.showQuad = true
+  }
+
+  setGridLayout(opts = {}) {
+    return this._wgslHydra ? this._wgslHydra.setGridLayout(opts) : null
   }
 
   /**

@@ -110,11 +110,19 @@ export class RendererInterface {
   }
 
   /**
-   * Render all 4 outputs in a 2x2 grid to the canvas
-   * @param {Array<OutputBuffer>} outputs - Array of 4 outputs
+   * Render all outputs tiled in a grid to the canvas
+   * @param {Array<OutputBuffer>} outputs - All outputs, in order
    */
   renderAllToScreen(outputs) {
     throw new Error('RendererInterface.renderAllToScreen() must be implemented')
+  }
+
+  /**
+   * Choose how outputs tile the canvas in render-all mode
+   * @param {Object} opts - {cols, rows, fit, order} (see src/lib/grid-layout.js)
+   */
+  setGridLayout(opts = {}) {
+    return null
   }
 
   // ============================================================

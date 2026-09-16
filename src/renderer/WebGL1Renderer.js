@@ -10,6 +10,7 @@ import Output from '../output.js'
 import Source from '../hydra-source.js'
 import regl from 'regl'
 import utilityGlsl from '../glsl/utility-functions.js'
+import { computeGridLayout, gridVertGlsl, gridFragGlsl, gridReglUniforms, gridRenderProps } from '../lib/grid-layout.js'
 
 export class WebGL1Renderer extends RendererInterface {
 
@@ -26,6 +27,8 @@ export class WebGL1Renderer extends RendererInterface {
     // Compiled regl commands for screen rendering
     this._renderFboCommand = null
     this._renderAllCommand = null
+    this._numOutputs = 4
+    this._gridLayout = null
   }
 
   init(canvas, options = {}) {
@@ -33,10 +36,13 @@ export class WebGL1Renderer extends RendererInterface {
       precision = 'mediump',
       width = canvas.width || 1280,
       height = canvas.height || 720,
-      pb = null
+      pb = null,
+      numOutputs = 4
     } = options
 
     this._canvas = canvas
+    this._numOutputs = numOutputs
+    this._gridLayout = computeGridLayout(numOutputs)
     this._width = width
     this._height = height
     this._precision = precision
@@ -89,45 +95,14 @@ export class WebGL1Renderer extends RendererInterface {
       depth: { enable: false }
     })
 
-    // Create the renderAll command (4-up grid)
-    this._renderAllCommand = this._regl({
-      frag: `
-      precision ${this._precision} float;
-      varying vec2 uv;
-      uniform sampler2D tex0;
-      uniform sampler2D tex1;
-      uniform sampler2D tex2;
-      uniform sampler2D tex3;
+    // Create the renderAll command (grid of all outputs)
+    this._renderAllCommand = this._buildRenderAllCommand(numOutputs)
+  }
 
-      void main () {
-        vec2 st = vec2(1.0 - uv.x, uv.y);
-        st*= vec2(2);
-        vec2 q = floor(st).xy*(vec2(2.0, 1.0));
-        int quad = int(q.x) + int(q.y);
-        st.x += step(1., mod(st.y,2.0));
-        st.y += step(1., mod(st.x,2.0));
-        st = fract(st);
-        if(quad==0){
-          gl_FragColor = texture2D(tex0, st);
-        } else if(quad==1){
-          gl_FragColor = texture2D(tex1, st);
-        } else if (quad==2){
-          gl_FragColor = texture2D(tex2, st);
-        } else {
-          gl_FragColor = texture2D(tex3, st);
-        }
-
-      }
-      `,
-      vert: `
-      precision ${this._precision} float;
-      attribute vec2 position;
-      varying vec2 uv;
-
-      void main () {
-        uv = position;
-        gl_Position = vec4(1.0 - 2.0 * position, 0, 1);
-      }`,
+  _buildRenderAllCommand(count) {
+    return this._regl({
+      frag: gridFragGlsl(count, this._precision),
+      vert: gridVertGlsl(this._precision),
       attributes: {
         position: [
           [-2, 0],
@@ -135,15 +110,16 @@ export class WebGL1Renderer extends RendererInterface {
           [2, 2]
         ]
       },
-      uniforms: {
-        tex0: this._regl.prop('tex0'),
-        tex1: this._regl.prop('tex1'),
-        tex2: this._regl.prop('tex2'),
-        tex3: this._regl.prop('tex3')
-      },
+      uniforms: gridReglUniforms(this._regl, count),
       count: 3,
       depth: { enable: false }
     })
+  }
+
+  // Choose how outputs tile the canvas in render-all mode: {cols, rows, fit, order}
+  setGridLayout(opts = {}) {
+    this._gridLayout = computeGridLayout(this._numOutputs, opts)
+    return this._gridLayout
   }
 
   destroy() {
@@ -233,13 +209,12 @@ export class WebGL1Renderer extends RendererInterface {
   }
 
   renderAllToScreen(outputs) {
-    this._renderAllCommand({
-      tex0: outputs[0].getCurrent(),
-      tex1: outputs[1].getCurrent(),
-      tex2: outputs[2].getCurrent(),
-      tex3: outputs[3].getCurrent(),
-      resolution: [this._width, this._height]
-    })
+    if (outputs.length !== this._numOutputs) {
+      this._numOutputs = outputs.length
+      this._gridLayout = computeGridLayout(outputs.length)
+      this._renderAllCommand = this._buildRenderAllCommand(outputs.length)
+    }
+    this._renderAllCommand(gridRenderProps(outputs, this._gridLayout, [this._width, this._height]))
   }
 
   // ============================================================

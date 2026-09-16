@@ -147,10 +147,165 @@
       this.device.queue.submit([commandEncoder.finish()]);
     }
   }
-  class FBO4ToCanvas {
-    constructor(canvas, device) {
+  function computeGridLayout(count, opts = {}) {
+    let cols = opts.cols;
+    let rows = opts.rows;
+    if (!cols && !rows) {
+      cols = Math.ceil(Math.sqrt(count));
+      rows = Math.ceil(count / cols);
+    } else if (!rows) {
+      rows = Math.ceil(count / cols);
+    } else if (!cols) {
+      cols = Math.ceil(count / rows);
+    }
+    cols = Math.max(1, cols);
+    rows = Math.max(1, rows);
+    const fit = opts.fit === false ? [1, 1] : [Math.min(1, cols / rows), Math.min(1, rows / cols)];
+    return {
+      cols,
+      rows,
+      fit,
+      rowMajor: opts.order === "row"
+    };
+  }
+  function gridUniformValues(layout) {
+    return {
+      grid: [layout.cols, layout.rows],
+      fit: layout.fit,
+      rowMajor: layout.rowMajor ? 1 : 0
+    };
+  }
+  function gridRenderProps(outputs, layout, resolution) {
+    const props = Object.assign({ resolution }, gridUniformValues(layout));
+    outputs.forEach((o, i2) => {
+      props[`tex${i2}`] = o.getCurrent();
+    });
+    return props;
+  }
+  const range = (n) => Array.from({ length: n }, (_, i2) => i2);
+  function gridVertGlsl(precision) {
+    return `
+  precision ${precision} float;
+  attribute vec2 position;
+  varying vec2 uv;
+
+  void main () {
+    uv = position;
+    gl_Position = vec4(1.0 - 2.0 * position, 0, 1);
+  }`;
+  }
+  function gridFragGlsl(count, precision) {
+    const decls = range(count).map((i2) => `uniform sampler2D tex${i2};`).join("\n  ");
+    const chain = range(count).map((i2) => `${i2 ? "else " : ""}if (idx == ${i2}) gl_FragColor = texture2D(tex${i2}, local);`).join("\n    ");
+    return `
+  precision ${precision} float;
+  varying vec2 uv;
+  uniform vec2 grid;       // (cols, rows)
+  uniform vec2 fit;        // fraction of each cell used, to keep the output aspect
+  uniform float rowMajor;  // 1.0 = left-to-right then down, 0.0 = top-to-bottom then right
+  ${decls}
+
+  void main () {
+    vec2 st = vec2(1.0 - uv.x, uv.y);   // x from left, y from top
+    vec2 cell = floor(st * grid);
+    int cx = int(cell.x);
+    int cy = int(cell.y);
+    int idx = rowMajor > 0.5 ? cx + cy * int(grid.x) : cy + cx * int(grid.y);
+    vec2 local = (fract(st * grid) - 0.5) / fit + 0.5;
+    if (local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0) {
+      gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+      return;
+    }
+    ${chain}
+    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+  }`;
+  }
+  function gridReglUniforms(regl2, count) {
+    const uniforms = {
+      grid: regl2.prop("grid"),
+      fit: regl2.prop("fit"),
+      rowMajor: regl2.prop("rowMajor")
+    };
+    range(count).forEach((i2) => {
+      uniforms[`tex${i2}`] = regl2.prop(`tex${i2}`);
+    });
+    return uniforms;
+  }
+  const GRID_WGSL_UNIFORM_BYTES = 32;
+  function gridWgsl(count) {
+    const texDecls = range(count).map((i2) => `@group(0) @binding(${i2 + 1}) var tex${i2}: texture_2d<f32>;`).join("\n");
+    const chain = range(count).map((i2) => `${i2 ? "else " : ""}if (idx == ${i2}) { return textureSampleLevel(tex${i2}, samp, local, 0.0); }`).join("\n    ");
+    const prefix = `
+struct VertexOutput {
+  @builtin(position) position : vec4f,
+  @location(0) texcoord : vec2f,
+};
+struct GridUniforms {
+  grid : vec2<f32>,
+  fit : vec2<f32>,
+  rowMajor : f32,
+  pad0 : f32,
+  pad1 : f32,
+  pad2 : f32,
+};
+@group(0) @binding(0) var samp: sampler;
+${texDecls}
+@group(0) @binding(${count + 1}) var<uniform> gridU: GridUniforms;
+`;
+    const vertex = prefix + `
+@vertex
+fn main(@builtin(vertex_index) vertexIndex : u32) -> VertexOutput {
+  var positions = array<vec2<f32>, 6>(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>(-1.0, 1.0),
+    vec2<f32>(1.0, -1.0),
+    vec2<f32>(1.0, -1.0),
+    vec2<f32>(-1.0, 1.0),
+    vec2<f32>(1.0, 1.0)
+  );
+  var output : VertexOutput;
+  output.position = vec4<f32>(positions[vertexIndex], 0.0, 1.0);
+  output.texcoord = positions[vertexIndex] / 2.0 + 0.5;
+  return output;
+}`;
+    const fragment = prefix + `
+@fragment
+fn main(ourIn: VertexOutput) -> @location(0) vec4<f32> {
+  let uv = ourIn.texcoord;                       // (0,0) is bottom-left on screen
+  let cols = i32(gridU.grid.x);
+  let rows = i32(gridU.grid.y);
+  let cell = floor(uv * gridU.grid);
+  let cx = i32(cell.x);
+  let cyTop = rows - 1 - i32(cell.y);            // count rows from the top, like WebGL
+  var idx : i32;
+  if (gridU.rowMajor > 0.5) { idx = cx + cyTop * cols; } else { idx = cyTop + cx * rows; }
+  let local = (fract(uv * gridU.grid) - 0.5) / gridU.fit + 0.5;
+  if (local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0) {
+    return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+  }
+  ${chain}
+  return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+}`;
+    return { vertex, fragment, uniformBinding: count + 1 };
+  }
+  function gridWgslUniformArray(layout) {
+    return new Float32Array([
+      layout.cols,
+      layout.rows,
+      layout.fit[0],
+      layout.fit[1],
+      layout.rowMajor ? 1 : 0,
+      0,
+      0,
+      0
+    ]);
+  }
+  class FBOGridToCanvas {
+    constructor(canvas, device, count = 4, layout = null) {
       this.canvas = canvas;
       this.device = device;
+      this.count = count;
+      this.layout = layout || computeGridLayout(count);
       this.context = this.canvas.getContext("webgpu");
       this.aspect = this.canvas.width / this.canvas.height;
     }
@@ -169,211 +324,76 @@
     async initializeFBOdrawing() {
       if (!this.device) await this.setupFromScratch();
       const format = navigator.gpu.getPreferredCanvasFormat();
-      this.context.configure({
-        device: this.device,
-        format,
-        alphaMode: "opaque"
-      });
-      const codePrefix = `
-	 struct VertexOutput {
-  	@builtin(position) position : vec4f,
-  	@location(0) texcoord : vec2f,
-	 };
-   @group(0) @binding(0) var ourSamp0: sampler;
-	 @group(0) @binding(1) var ourTex0:  texture_2d<f32>;
-   @group(0) @binding(2) var ourSamp1: sampler;
-	 @group(0) @binding(3) var ourTex1:  texture_2d<f32>;
-   @group(0) @binding(4) var ourSamp2: sampler;
-	 @group(0) @binding(5) var ourTex2:  texture_2d<f32>;
-	 @group(0) @binding(6) var ourSamp3: sampler;
-	 @group(0) @binding(7) var ourTex3:  texture_2d<f32>;
-`;
-      const vertexShaderCode2 = codePrefix + `
-        @vertex
-        fn main(@builtin(vertex_index) vertexIndex : u32) -> VertexOutput {
-          var positions = array<vec2<f32>, 6>(
-            vec2<f32>(-1.0, -1.0),
-            vec2<f32>(-1.0, 1.0),
-            vec2<f32>(1.0, -1.0 ),
-
-            vec2<f32>(1.0, -1.0),
-            vec2<f32>(-1.0, 1.0),
-            vec2<f32>(1.0, 1.0)
-          );
-         var output : VertexOutput;
-         output.position = vec4<f32>( positions[vertexIndex], 0.0, 1);
-         output.texcoord = positions[vertexIndex] / 2 + 0.5; // positions are -1.0 to 1.0, texcoords are 0.0 to 1.0.
-         return output;
-        }
-      `;
-      const fragmentShaderCode = codePrefix + `
-        @fragment
-        fn main(ourIn: VertexOutput) -> @location(0) vec4<f32> {
-         var uv :vec2<f32>;
-         uv = ourIn.texcoord; //* ourStruct.scale + ourStruct.offset;
-
-        var st = vec2<f32>(uv.x, uv.y);
-        st = st * vec2<f32>(2.0);
-        let q = floor(st).xy*(vec2<f32>(2.0, 1.0));
-        let quad : i32 = i32(q.x) + i32(q.y);
-        st.x =  st.x + step(1., st.y % 2.0);
-        st.y = st.y + step(1., st.x %2.0);
-        st = fract(st);
-
-        let val0 = textureSample(ourTex0, ourSamp0, st);
-        let val1 = textureSample(ourTex1, ourSamp1, st);
-        let val2 = textureSample(ourTex2, ourSamp2, st);
-        let val3 = textureSample(ourTex3, ourSamp3, st);
-   
-        if(quad == 0){ // LLHC
-					return val1;
-        } else if (quad == 1) { // ULHC
-					return val0;
-        } else if (quad == 2){ // LRHC
-					return val3;
-        } else {
-  				return val2; // URHC
-        }
+      this.context.configure({ device: this.device, format, alphaMode: "opaque" });
+      const { vertex, fragment, uniformBinding } = gridWgsl(this.count);
+      const vertexShaderModule = this.device.createShaderModule({ label: "vertFBOGrid", code: vertex });
+      const fragmentShaderModule = this.device.createShaderModule({ label: "fragFBOGrid", code: fragment });
+      const entries = [{
+        binding: 0,
+        visibility: GPUShaderStage.FRAGMENT,
+        sampler: { type: "filtering" }
+      }];
+      for (let i2 = 0; i2 < this.count; i2++) {
+        entries.push({
+          binding: i2 + 1,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: "float", viewDimension: "2d", multisampled: false }
+        });
       }
-`;
-      const vertexShaderModule = this.device.createShaderModule({ label: "vertFBO", code: vertexShaderCode2 });
-      const fragmentShaderModule = this.device.createShaderModule({ label: "fragFBO", code: fragmentShaderCode });
+      entries.push({
+        binding: uniformBinding,
+        visibility: GPUShaderStage.FRAGMENT,
+        buffer: { type: "uniform" }
+      });
+      this.uniformBinding = uniformBinding;
       this.textureBindGroupLayout = this.device.createBindGroupLayout({
-        label: "FBOtextureBindGroupLayout",
-        entries: [
-          //  0
-          {
-            binding: 0,
-            // Binding index for sampler.
-            visibility: GPUShaderStage.FRAGMENT,
-            // Shader stages where this binding is used
-            sampler: {
-              type: "filtering"
-            }
-          },
-          {
-            binding: 1,
-            // Binding index for texture 0 
-            visibility: GPUShaderStage.FRAGMENT,
-            // Shader stages where this binding is used
-            texture: {
-              sampleType: "float",
-              viewDimension: "2d",
-              multisampled: false
-            }
-          },
-          // 1
-          {
-            binding: 2,
-            // Binding index for sampler.
-            visibility: GPUShaderStage.FRAGMENT,
-            // Shader stages where this binding is used
-            sampler: {
-              type: "filtering"
-            }
-          },
-          {
-            binding: 3,
-            // Binding index for texture 1
-            visibility: GPUShaderStage.FRAGMENT,
-            // Shader stages where this binding is used
-            texture: {
-              sampleType: "float",
-              viewDimension: "2d",
-              multisampled: false
-            }
-          },
-          // 2
-          {
-            binding: 4,
-            // Binding index for sampler.
-            visibility: GPUShaderStage.FRAGMENT,
-            // Shader stages where this binding is used
-            sampler: {
-              type: "filtering"
-            }
-          },
-          {
-            binding: 5,
-            // Binding index for texture 2
-            visibility: GPUShaderStage.FRAGMENT,
-            // Shader stages where this binding is used
-            texture: {
-              sampleType: "float",
-              viewDimension: "2d",
-              multisampled: false
-            }
-          },
-          // 3   	
-          {
-            binding: 6,
-            // Binding index for sampler.
-            visibility: GPUShaderStage.FRAGMENT,
-            // Shader stages where this binding is used
-            sampler: {
-              type: "filtering"
-            }
-          },
-          {
-            binding: 7,
-            // Binding index for texture 3
-            visibility: GPUShaderStage.FRAGMENT,
-            // Shader stages where this binding is used
-            texture: {
-              sampleType: "float",
-              viewDimension: "2d",
-              multisampled: false
-            }
-          }
-        ]
+        label: "FBOGridBindGroupLayout",
+        entries
       });
       this.pipelineLayout = this.device.createPipelineLayout({
         bindGroupLayouts: [this.textureBindGroupLayout]
       });
       this.pipeline = this.device.createRenderPipeline({
-        label: "FBOrenderpipeline",
-        vertex: {
-          module: vertexShaderModule,
-          entryPoint: "main"
-        },
-        fragment: {
-          module: fragmentShaderModule,
-          entryPoint: "main",
-          targets: [{ format }]
-        },
-        primitive: {
-          topology: "triangle-list"
-        },
+        label: "FBOGridRenderPipeline",
+        vertex: { module: vertexShaderModule, entryPoint: "main" },
+        fragment: { module: fragmentShaderModule, entryPoint: "main", targets: [{ format }] },
+        primitive: { topology: "triangle-list" },
         layout: this.pipelineLayout
       });
-      this.sampler0 = this.device.createSampler();
-      this.sampler1 = this.device.createSampler();
-      this.sampler2 = this.device.createSampler();
-      this.sampler3 = this.device.createSampler();
+      this.sampler = this.device.createSampler();
+      this.uniformBuffer = this.device.createBuffer({
+        label: "FBOGridUniforms",
+        size: GRID_WGSL_UNIFORM_BYTES,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
+      this.setLayout(this.layout);
     }
-    refreshCanvases(tex0, tex1, tex2, tex3) {
-      if (!tex0 || !tex1 || !tex2 || !tex3) return;
+    // layout: result of computeGridLayout(); takes effect on the next refresh.
+    setLayout(layout) {
+      this.layout = layout;
+      if (this.uniformBuffer) {
+        this.device.queue.writeBuffer(this.uniformBuffer, 0, gridWgslUniformArray(layout));
+      }
+    }
+    // textures: array of GPUTexture, one per output, in output order.
+    refreshCanvases(textures) {
+      if (!textures || textures.length < this.count || textures.some((t) => !t)) return;
+      const entries = [{ binding: 0, resource: this.sampler }];
+      for (let i2 = 0; i2 < this.count; i2++) {
+        entries.push({ binding: i2 + 1, resource: textures[i2].createView() });
+      }
+      entries.push({ binding: this.uniformBinding, resource: { buffer: this.uniformBuffer } });
       this.textureBindGroup = this.device.createBindGroup({
-        label: "texture bind group",
+        label: "FBOGrid texture bind group",
         layout: this.textureBindGroupLayout,
-        entries: [
-          { binding: 0, resource: this.sampler0 },
-          { binding: 1, resource: tex0.createView() },
-          { binding: 2, resource: this.sampler1 },
-          { binding: 3, resource: tex1.createView() },
-          { binding: 4, resource: this.sampler2 },
-          { binding: 5, resource: tex2.createView() },
-          { binding: 6, resource: this.sampler3 },
-          { binding: 7, resource: tex3.createView() }
-        ]
+        entries
       });
       const canvasTextureView = this.context.getCurrentTexture().createView();
       this.renderPassDescriptor = {
-        label: "FBOrenderPassDescriptor",
+        label: "FBOGridRenderPassDescriptor",
         colorAttachments: [{
-          label: "FBO canvas textureView attachment",
           view: canvasTextureView,
-          clearValue: { r: 1, g: 1, b: 1, a: 1 },
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
           loadOp: "clear",
           storeOp: "store"
         }]
@@ -8790,15 +8810,15 @@
     // count: number of instances
     // range: {x, y, z} spread range (centered at origin)
     // seed: optional random seed for reproducibility
-    scatter(count = 10, range = { x: 2, y: 2, z: 0 }, seed = 0) {
+    scatter(count = 10, range2 = { x: 2, y: 2, z: 0 }, seed = 0) {
       let s = seed;
       const random = () => {
         s = s * 1103515245 + 12345 & 2147483647;
         return s / 2147483647;
       };
-      const rx = typeof range === "number" ? range : range.x || 2;
-      const ry = typeof range === "number" ? range : range.y || 2;
-      const rz = typeof range === "number" ? 0 : range.z || 0;
+      const rx = typeof range2 === "number" ? range2 : range2.x || 2;
+      const ry = typeof range2 === "number" ? range2 : range2.y || 2;
+      const rz = typeof range2 === "number" ? 0 : range2.z || 0;
       this.instanceOffsets = new Float32Array(count * 3);
       let idx = 0;
       for (let i2 = 0; i2 < count; i2++) {
@@ -10526,9 +10546,16 @@ fn main(input: VertexInput) -> VertexOutput {
       this.mousePos = { x: 0, y: 0 };
       this.showQuad = false;
       this.outChannel = 0;
+      this.gridLayout = computeGridLayout(this.numChannels);
     }
     relayUniformInfo(mouse2) {
       this.mousePos = mouse2;
+    }
+    // Choose how outputs tile the canvas in render-all mode: {cols, rows, fit, order}
+    setGridLayout(opts = {}) {
+      this.gridLayout = computeGridLayout(this.numChannels, opts);
+      if (this.fboGridRenderer) this.fboGridRenderer.setLayout(this.gridLayout);
+      return this.gridLayout;
     }
     // Changes the destination canvas size and the outputs too.
     async resizeOutputsTo(width, height) {
@@ -10542,9 +10569,9 @@ fn main(input: VertexInput) -> VertexOutput {
         this.ensureDepthTexture();
       }
       this.fboRenderer = new FBOToCanvas(this.canvas, this.device);
-      this.fbo4Renderer = new FBO4ToCanvas(this.canvas, this.device);
+      this.fboGridRenderer = new FBOGridToCanvas(this.canvas, this.device, this.numChannels, this.gridLayout);
       await this.fboRenderer.initializeFBOdrawing();
-      await this.fbo4Renderer.initializeFBOdrawing();
+      await this.fboGridRenderer.initializeFBOdrawing();
     }
     createOutputTextures() {
       this.outputChannelObjects = this.hydra.o;
@@ -10593,7 +10620,7 @@ fn main(input: VertexInput) -> VertexOutput {
         });
       }
       this.fboRenderer = new FBOToCanvas(this.canvas, this.device);
-      this.fbo4Renderer = new FBO4ToCanvas(this.canvas, this.device);
+      this.fboGridRenderer = new FBOGridToCanvas(this.canvas, this.device, this.numChannels, this.gridLayout);
       this.format = navigator.gpu.getPreferredCanvasFormat();
       this.context.configure({
         device: this.device,
@@ -10733,7 +10760,7 @@ fn main(input: VertexInput) -> VertexOutput {
       this.createOutputTextures();
       this.vertexShaderModule = this.device.createShaderModule({ label: "wgslvertex", code: vertexShaderCode });
       await this.fboRenderer.initializeFBOdrawing();
-      await this.fbo4Renderer.initializeFBOdrawing();
+      await this.fboGridRenderer.initializeFBOdrawing();
     }
     // ------------------------------------------------------------------------------
     // set up a output render chain for a given channel number, uniforms list, and fragment shader string
@@ -11603,11 +11630,8 @@ fn main(input: VertexInput) -> VertexOutput {
       this.device.queue.submit([commandEncoder.finish()]);
       await this.device.queue.onSubmittedWorkDone();
       if (this.showQuad) {
-        await this.fbo4Renderer.refreshCanvases(
-          this.outputChannelObjects[0].getCurrentTexture(),
-          this.outputChannelObjects[1].getCurrentTexture(),
-          this.outputChannelObjects[2].getCurrentTexture(),
-          this.outputChannelObjects[3].getCurrentTexture()
+        await this.fboGridRenderer.refreshCanvases(
+          this.outputChannelObjects.map((o) => o.getCurrentTexture())
         );
       } else {
         await this.fboRenderer.refreshCanvas(this.outputChannelObjects[this.outChannel].getCurrentTexture());
@@ -25514,6 +25538,12 @@ fn main(input: VertexInput) -> VertexOutput {
         hydra.isRenderingAll = true;
       }
     }).bind(hydra);
+    hydra.gridLayout = computeGridLayout(numOutputs);
+    hydra.synth.setGridLayout = hydra.setGridLayout = function(opts = {}) {
+      hydra.gridLayout = computeGridLayout(numOutputs, opts);
+      if (hydra.wgslHydra) hydra.wgslHydra.setGridLayout(opts);
+      return hydra.gridLayout;
+    };
     hydra.synth.setResolution = hydra.setResolution = (function(w, h) {
       if (!w || !h || w <= 0 || h <= 0) {
         console.warn(`[hydra] setResolution called with invalid dimensions: ${w}x${h}`);
@@ -25618,54 +25648,7 @@ fn main(input: VertexInput) -> VertexOutput {
         }
       });
       hydra.synth.setFunction = hydra.generator.setFunction.bind(hydra.generator);
-      hydra.renderAll = hydra.regl({
-        frag: `
-        precision ${hydra.precision} float;
-        varying vec2 uv;
-        uniform sampler2D tex0;
-        uniform sampler2D tex1;
-        uniform sampler2D tex2;
-        uniform sampler2D tex3;
-        void main () {
-          vec2 st = vec2(1.0 - uv.x, uv.y);
-          st *= vec2(2);
-          vec2 q = floor(st).xy * vec2(2.0, 1.0);
-          int quad = int(q.x) + int(q.y);
-          st.x += step(1., mod(st.y, 2.0));
-          st.y += step(1., mod(st.x, 2.0));
-          st = fract(st);
-          if (quad == 0) {
-            gl_FragColor = texture2D(tex0, st);
-          } else if (quad == 1) {
-            gl_FragColor = texture2D(tex1, st);
-          } else if (quad == 2) {
-            gl_FragColor = texture2D(tex2, st);
-          } else {
-            gl_FragColor = texture2D(tex3, st);
-          }
-        }
-      `,
-        vert: `
-        precision ${hydra.precision} float;
-        attribute vec2 position;
-        varying vec2 uv;
-        void main () {
-          uv = position;
-          gl_Position = vec4(2.0 * position - 1.0, 0, 1);
-        }
-      `,
-        attributes: {
-          position: [[-2, 0], [0, -2], [2, 2]]
-        },
-        uniforms: {
-          tex0: () => hydra.o[0].getCurrent(),
-          tex1: () => hydra.o[1].getCurrent(),
-          tex2: () => hydra.o[2].getCurrent(),
-          tex3: () => hydra.o[3].getCurrent()
-        },
-        count: 3,
-        depth: { enable: false }
-      });
+      hydra.renderAll = makeRenderAll(hydra);
       hydra.renderFbo = hydra.regl({
         frag: `
         precision ${hydra.precision} float;
@@ -25743,18 +25726,7 @@ fn main(input: VertexInput) -> VertexOutput {
           source.tex = hydra.regl.texture({ shape: [1, 1] });
         }
       });
-      hydra.renderAll = hydra.regl({
-        frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0, tex1, tex2, tex3;
-        void main() { vec2 st = vec2(1.0-uv.x,uv.y)*2.0; vec2 q = floor(st)*vec2(2.0,1.0); int quad = int(q.x)+int(q.y);
-        st.x += step(1.,mod(st.y,2.0)); st.y += step(1.,mod(st.x,2.0)); st = fract(st);
-        if(quad==0) gl_FragColor=texture2D(tex0,st); else if(quad==1) gl_FragColor=texture2D(tex1,st);
-        else if(quad==2) gl_FragColor=texture2D(tex2,st); else gl_FragColor=texture2D(tex3,st); }`,
-        vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
-        attributes: { position: [[-2, 0], [0, -2], [2, 2]] },
-        uniforms: { tex0: hydra.regl.prop("tex0"), tex1: hydra.regl.prop("tex1"), tex2: hydra.regl.prop("tex2"), tex3: hydra.regl.prop("tex3") },
-        count: 3,
-        depth: { enable: false }
-      });
+      hydra.renderAll = makeRenderAll(hydra);
       hydra.renderFbo = hydra.regl({
         frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = texture2D(tex0, vec2(1.0-uv.x, uv.y)); }`,
         vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
@@ -25920,6 +25892,8 @@ fn main(input: VertexInput) -> VertexOutput {
       if (hydra.synth.update) hydra.synth.update(dt);
       hydra.s.forEach((source) => source.tick && source.tick(hydra.synth.time));
       if (hydra.useWGSL) {
+        hydra.wgslHydra.showQuad = !!hydra.isRenderingAll;
+        hydra.wgslHydra.outChannel = hydra.output ? hydra.output.chanNum : 0;
         hydra.wgslHydra.animate(hydra.synth.time, hydra.synth.mouse, hydra.synth.resolution, hydra.isRenderingAll);
       } else {
         hydra.o.forEach((o) => o.tick && o.tick({
@@ -25929,13 +25903,7 @@ fn main(input: VertexInput) -> VertexOutput {
           resolution: [hydra.canvas.width, hydra.canvas.height]
         }));
         if (hydra.isRenderingAll) {
-          hydra.renderAll({
-            tex0: hydra.o[0].getCurrent(),
-            tex1: hydra.o[1].getCurrent(),
-            tex2: hydra.o[2].getCurrent(),
-            tex3: hydra.o[3].getCurrent(),
-            resolution: [hydra.canvas.width, hydra.canvas.height]
-          });
+          hydra.renderAll(gridRenderProps(hydra.o, hydra.gridLayout, [hydra.canvas.width, hydra.canvas.height]));
         } else {
           hydra.renderFbo({
             tex0: hydra.output.getCurrent(),
@@ -25945,6 +25913,17 @@ fn main(input: VertexInput) -> VertexOutput {
       }
       if (hydra.synth.afterUpdate) hydra.synth.afterUpdate(dt);
     };
+  }
+  function makeRenderAll(hydra) {
+    const count = hydra.o.length;
+    return hydra.regl({
+      frag: gridFragGlsl(count, hydra.precision),
+      vert: gridVertGlsl(hydra.precision),
+      attributes: { position: [[-2, 0], [0, -2], [2, 2]] },
+      uniforms: gridReglUniforms(hydra.regl, count),
+      count: 3,
+      depth: { enable: false }
+    });
   }
   class VaryingRef {
     constructor(glslName, wgslName) {

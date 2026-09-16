@@ -107,7 +107,8 @@ class HydraRenderer {
       precision: this.precision,
       width: this.width,
       height: this.height,
-      pb: this.pb
+      pb: this.pb,
+      numOutputs
     })
 
     // Expose renderer and regl for backward compatibility
@@ -121,6 +122,9 @@ class HydraRenderer {
     this.synth.screencap = () => {
       this.saveFrame = true
     }
+
+    // Layout of outputs when render() is called with no argument
+    this.synth.setGridLayout = (opts) => this.renderer.setGridLayout(opts)
 
     if (enableStreamCapture) {
       try {

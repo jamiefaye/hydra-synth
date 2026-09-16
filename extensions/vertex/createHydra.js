@@ -20,6 +20,7 @@ import Audio from '../../src/lib/audio.js'
 import VidRecorder from '../../src/lib/video-recorder.js'
 import ArrayUtils from '../../src/lib/array-utils.js'
 import Generator from '../../src/generator-factory.js'
+import { computeGridLayout, gridVertGlsl, gridFragGlsl, gridReglUniforms, gridRenderProps } from '../../src/lib/grid-layout.js'
 import regl from 'regl'
 
 // GeneratorFunction constructor for yield support in sketches
@@ -188,6 +189,14 @@ export async function createHydra({
     }
   }.bind(hydra)
 
+  // Layout of outputs when render() is called with no argument: {cols, rows, fit, order}
+  hydra.gridLayout = computeGridLayout(numOutputs)
+  hydra.synth.setGridLayout = hydra.setGridLayout = function(opts = {}) {
+    hydra.gridLayout = computeGridLayout(numOutputs, opts)
+    if (hydra.wgslHydra) hydra.wgslHydra.setGridLayout(opts)
+    return hydra.gridLayout
+  }
+
   hydra.synth.setResolution = hydra.setResolution = function(w, h) {
     // Guard against invalid dimensions
     if (!w || !h || w <= 0 || h <= 0) {
@@ -321,55 +330,8 @@ export async function createHydra({
     // Expose setFunction for extensions
     hydra.synth.setFunction = hydra.generator.setFunction.bind(hydra.generator)
 
-    // Create renderAll for WebGL
-    hydra.renderAll = hydra.regl({
-      frag: `
-        precision ${hydra.precision} float;
-        varying vec2 uv;
-        uniform sampler2D tex0;
-        uniform sampler2D tex1;
-        uniform sampler2D tex2;
-        uniform sampler2D tex3;
-        void main () {
-          vec2 st = vec2(1.0 - uv.x, uv.y);
-          st *= vec2(2);
-          vec2 q = floor(st).xy * vec2(2.0, 1.0);
-          int quad = int(q.x) + int(q.y);
-          st.x += step(1., mod(st.y, 2.0));
-          st.y += step(1., mod(st.x, 2.0));
-          st = fract(st);
-          if (quad == 0) {
-            gl_FragColor = texture2D(tex0, st);
-          } else if (quad == 1) {
-            gl_FragColor = texture2D(tex1, st);
-          } else if (quad == 2) {
-            gl_FragColor = texture2D(tex2, st);
-          } else {
-            gl_FragColor = texture2D(tex3, st);
-          }
-        }
-      `,
-      vert: `
-        precision ${hydra.precision} float;
-        attribute vec2 position;
-        varying vec2 uv;
-        void main () {
-          uv = position;
-          gl_Position = vec4(2.0 * position - 1.0, 0, 1);
-        }
-      `,
-      attributes: {
-        position: [[-2, 0], [0, -2], [2, 2]]
-      },
-      uniforms: {
-        tex0: () => hydra.o[0].getCurrent(),
-        tex1: () => hydra.o[1].getCurrent(),
-        tex2: () => hydra.o[2].getCurrent(),
-        tex3: () => hydra.o[3].getCurrent()
-      },
-      count: 3,
-      depth: { enable: false }
-    })
+    // Create renderAll for WebGL (grid of all outputs)
+    hydra.renderAll = makeRenderAll(hydra)
 
     // Create renderFbo for single output to canvas
     hydra.renderFbo = hydra.regl({
@@ -471,17 +433,7 @@ export async function createHydra({
     })
 
     // Recreate renderAll and renderFbo
-    hydra.renderAll = hydra.regl({
-      frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0, tex1, tex2, tex3;
-        void main() { vec2 st = vec2(1.0-uv.x,uv.y)*2.0; vec2 q = floor(st)*vec2(2.0,1.0); int quad = int(q.x)+int(q.y);
-        st.x += step(1.,mod(st.y,2.0)); st.y += step(1.,mod(st.x,2.0)); st = fract(st);
-        if(quad==0) gl_FragColor=texture2D(tex0,st); else if(quad==1) gl_FragColor=texture2D(tex1,st);
-        else if(quad==2) gl_FragColor=texture2D(tex2,st); else gl_FragColor=texture2D(tex3,st); }`,
-      vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
-      attributes: { position: [[-2,0],[0,-2],[2,2]] },
-      uniforms: { tex0: hydra.regl.prop('tex0'), tex1: hydra.regl.prop('tex1'), tex2: hydra.regl.prop('tex2'), tex3: hydra.regl.prop('tex3') },
-      count: 3, depth: { enable: false }
-    })
+    hydra.renderAll = makeRenderAll(hydra)
     hydra.renderFbo = hydra.regl({
       frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = texture2D(tex0, vec2(1.0-uv.x, uv.y)); }`,
       vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
@@ -707,7 +659,9 @@ function createTick(hydra) {
 
     // Render
     if (hydra.useWGSL) {
-      // WebGPU render
+      // WebGPU render: tell the presenter whether to tile all outputs or show one
+      hydra.wgslHydra.showQuad = !!hydra.isRenderingAll
+      hydra.wgslHydra.outChannel = hydra.output ? hydra.output.chanNum : 0
       hydra.wgslHydra.animate(hydra.synth.time, hydra.synth.mouse, hydra.synth.resolution, hydra.isRenderingAll)
     } else {
       // WebGL render
@@ -719,13 +673,7 @@ function createTick(hydra) {
       }))
 
       if (hydra.isRenderingAll) {
-        hydra.renderAll({
-          tex0: hydra.o[0].getCurrent(),
-          tex1: hydra.o[1].getCurrent(),
-          tex2: hydra.o[2].getCurrent(),
-          tex3: hydra.o[3].getCurrent(),
-          resolution: [hydra.canvas.width, hydra.canvas.height]
-        })
+        hydra.renderAll(gridRenderProps(hydra.o, hydra.gridLayout, [hydra.canvas.width, hydra.canvas.height]))
       } else {
         hydra.renderFbo({
           tex0: hydra.output.getCurrent(),
@@ -739,3 +687,18 @@ function createTick(hydra) {
 }
 
 export default createHydra
+
+// regl command that tiles every output onto the canvas (render-all mode).
+// Uses the same vertex convention as renderFbo so the grid is not rotated relative to
+// the single-output view.
+function makeRenderAll(hydra) {
+  const count = hydra.o.length
+  return hydra.regl({
+    frag: gridFragGlsl(count, hydra.precision),
+    vert: gridVertGlsl(hydra.precision),
+    attributes: { position: [[-2, 0], [0, -2], [2, 2]] },
+    uniforms: gridReglUniforms(hydra.regl, count),
+    count: 3,
+    depth: { enable: false }
+  })
+}

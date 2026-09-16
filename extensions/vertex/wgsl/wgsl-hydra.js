@@ -1,5 +1,6 @@
 import {FBOToCanvas} from "./FBOToCanvas.js";
-import {FBO4ToCanvas} from "./FBO4ToCanvas.js";
+import {FBOGridToCanvas} from "./FBOGridToCanvas.js";
+import {computeGridLayout} from "../../../src/lib/grid-layout.js";
 import {BLEND_MODES} from "./outputWgsl.js";
 import { computeSkinningMatrices, applySkinning } from '../geometry.js';
 
@@ -194,11 +195,19 @@ class wgslHydra {
 	  this.mousePos = {x: 0, y: 0};
 	  this.showQuad = false;
 	  this.outChannel = 0;
+	  this.gridLayout = computeGridLayout(this.numChannels);
 
 	}
 	
 	relayUniformInfo(mouse) {
 		this.mousePos = mouse;
+	}
+
+	// Choose how outputs tile the canvas in render-all mode: {cols, rows, fit, order}
+	setGridLayout(opts = {}) {
+		this.gridLayout = computeGridLayout(this.numChannels, opts);
+		if (this.fboGridRenderer) this.fboGridRenderer.setLayout(this.gridLayout);
+		return this.gridLayout;
 	}
 
 	// Changes the destination canvas size and the outputs too.
@@ -218,9 +227,9 @@ class wgslHydra {
 
 // resize the renderers by making new ones.
 		 this.fboRenderer = new FBOToCanvas(this.canvas, this.device);
-		 this.fbo4Renderer = new FBO4ToCanvas(this.canvas, this.device);
+		 this.fboGridRenderer = new FBOGridToCanvas(this.canvas, this.device, this.numChannels, this.gridLayout);
 	   await this.fboRenderer.initializeFBOdrawing();
-	   await this.fbo4Renderer.initializeFBOdrawing();
+	   await this.fboGridRenderer.initializeFBOdrawing();
 	}
 
  
@@ -281,7 +290,7 @@ class wgslHydra {
 
 			// The fboRenderer is used to copy the results of our efforts to the final display canvas.
 			this.fboRenderer = new FBOToCanvas(this.canvas, this.device);
-			this.fbo4Renderer = new FBO4ToCanvas(this.canvas, this.device);
+			this.fboGridRenderer = new FBOGridToCanvas(this.canvas, this.device, this.numChannels, this.gridLayout);
 
 			// setup the WebGPU context this Hydra will use.
       this.format = navigator.gpu.getPreferredCanvasFormat();
@@ -431,7 +440,7 @@ class wgslHydra {
 	 this.vertexShaderModule = this.device.createShaderModule({ label: "wgslvertex", code: vertexShaderCode });
 	 // Setup the renderer that goes from an fbo to final screen.
 	 await this.fboRenderer.initializeFBOdrawing();
-	 await this.fbo4Renderer.initializeFBOdrawing();
+	 await this.fboGridRenderer.initializeFBOdrawing();
 
 	 if (trace) console.timeStamp("setup", "setupHydra", undefined, "wgsl-hydra", "hydra", "primary");
 
@@ -1475,11 +1484,8 @@ class wgslHydra {
     await this.device.queue.onSubmittedWorkDone();
  
     if (this.showQuad) {
-			await this.fbo4Renderer.refreshCanvases(
-				this.outputChannelObjects[0].getCurrentTexture(),
-				this.outputChannelObjects[1].getCurrentTexture(),
-				this.outputChannelObjects[2].getCurrentTexture(),
-				this.outputChannelObjects[3].getCurrentTexture()
+			await this.fboGridRenderer.refreshCanvases(
+				this.outputChannelObjects.map(o => o.getCurrentTexture())
 			);
     	}
     else {
