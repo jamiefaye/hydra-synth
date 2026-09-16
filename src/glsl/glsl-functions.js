@@ -1245,22 +1245,22 @@ wgsl:
     {
       type: 'vec4',
       name: 'scale',
-      default: 1,
+      default: [1, 1, 1, 1],
     }
   ],
   glsl:
-`   vec4 v = _c0 * s;
-   return v.r + v.g + v.b + v.a;
+`   vec4 v = _c0 * scale;
+   return vec4(vec3(v.r + v.g + v.b + v.a), _c0.a);
    }
-   float sum(vec2 _st, vec4 s) { // vec4 is not a typo, because argument type is not overloaded
-   vec2 v = _st.xy * s.xy;
+   float sum(vec2 _st, vec4 scale) { // vec4 is not a typo, because argument type is not overloaded
+   vec2 v = _st.xy * scale.xy;
    return v.x + v.y;`,
   wgsl:
-`  let v = vec4<f32> = _c0 * s;
-   return v.r + v.g + v.b + v.a;
+`   let v : vec4<f32> = _c0 * scale;
+   return vec4<f32>(vec3<f32>(v.r + v.g + v.b + v.a), _c0.a);
    }
-   fn sum( _st : vec2<f32>, s : vec4<f32>) -> f32 { // vec4 is not a typo, because argument type is not overloaded
-   v : vec2<f32> = _st.xy * s.xy;
+   fn sum( _st : vec2<f32>, scale : vec4<f32>) -> f32 { // vec4 is not a typo, because argument type is not overloaded
+   let v : vec2<f32> = _st.xy * scale.xy;
    return v.x + v.y;`
 },
 {
