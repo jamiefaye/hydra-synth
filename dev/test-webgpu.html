@@ -14,7 +14,7 @@
   <body>
     <div id="status">Loading...</div>
     <div id="controls">
-      Press 1-7 to switch patterns
+      1-7: pattern on o0 &nbsp; 0: grid / cycle o0..o5 &nbsp; r/c: row or column order
     </div>
     <script type="module">
       // Use the vertex extension's createHydra which has full WGSL support
@@ -36,6 +36,7 @@
           const hydra = await createHydra({
             detectAudio: false,
             makeGlobal: true,
+            numOutputs: 6,
             useWGSL: true
           })
 
@@ -44,12 +45,32 @@
           console.log('wgslHydra:', hydra.wgslHydra)
           status.textContent = `Renderer: WebGPU (WGSL)`
 
-          // Basic test - osc pattern
+
+          // Six outputs, one pattern each, shown as a grid (render() with no argument)
           osc(10, 0.1, 1).out(o0)
+          noise(4).colorama(0.3).out(o1)
+          shape(5, 0.4, 0.05).rotate(() => time * 0.2).out(o2)
+          gradient(0.3).out(o3)
+          voronoi(6, 0.5).out(o4)
+          osc(30, 0.05, 0.8).kaleid(5).out(o5)
+          render()
+          let single = -1   // -1 = grid, else index of the output shown alone
 
           // Keyboard controls for testing patterns
           document.addEventListener('keydown', (e) => {
             switch (e.key) {
+              case '0':
+                // Toggle grid <-> cycle through single outputs o0..o5
+                single = single + 1
+                if (single >= 6) { single = -1; render(); status.textContent = 'render(): all 6 outputs' }
+                else { render(window['o' + single]); status.textContent = 'render(o' + single + ')' }
+                break
+              case 'r':
+                setGridLayout({ order: 'row' }); status.textContent = 'grid order: row'
+                break
+              case 'c':
+                setGridLayout({ order: 'column' }); status.textContent = 'grid order: column (default)'
+                break
               case '1':
                 osc(10, 0.1, 1).out(o0)
                 status.textContent = 'Pattern 1: osc'
@@ -90,7 +111,7 @@
           })
 
           console.log('Hydra WebGPU initialized successfully')
-          status.textContent += ' - Press 1-7 for patterns'
+          status.textContent += ' - 6 outputs, render() grid. Press 0 to cycle, 1-7 for patterns on o0'
 
         } catch (e) {
           console.error('Error:', e)
