@@ -22,6 +22,12 @@ const configs = {
     name: 'HydraInActExtension',
     outDir: 'dist/extensions/inact',
     fileName: (format) => format === 'es' ? 'index.js' : `index.${format}.js`
+  },
+  midi: {
+    entry: path.resolve(__dirname, 'extensions/midi/index.js'),
+    name: 'HydraMidiExtension',
+    outDir: 'dist/extensions/midi',
+    fileName: (format) => format === 'es' ? 'index.js' : `index.${format}.js`
   }
 }
 
