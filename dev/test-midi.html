@@ -15,7 +15,7 @@
     <canvas id="c" width="1280" height="720"></canvas>
     <div id="panel">
       <div id="inputs">Requesting MIDI access...</div>
-      <div>cc0 freq <span class="val" id="v16"></span> &nbsp; cc1 sync <span class="val" id="v17"></span> &nbsp; cc2 rotate <span class="val" id="v18"></span> &nbsp; cc3 kaleid <span class="val" id="v19"></span> &nbsp; push (note 0) <span class="val" id="n16"></span></div>
+      <div>cc0 freq (log, push=fine) <span class="val" id="v16"></span> &nbsp; cc1 sync <span class="val" id="v17"></span> &nbsp; cc2 rotate (wrap, push=fine) <span class="val" id="v18"></span> &nbsp; cc3 kaleid <span class="val" id="v19"></span> &nbsp; push (note 0) <span class="val" id="n16"></span> &nbsp; feedback: <span class="val" id="fb"></span></div>
       <div>Mode: <select id="mode"><option>r2</option><option>abs</option><option>r1</option><option>abs14</option></select> (must match the EC4 encoder Type; any channel) &nbsp; keys: arrows simulate cc0 up/down</div>
       <div id="log"></div>
     </div>
@@ -37,7 +37,7 @@
         document.getElementById('inputs').textContent = 'MIDI inputs: ' + (midi.inputs.length ? midi.inputs.join(', ') : '(none found: plug in the EC4 or use arrow keys)')
       }
       midi.onInputsChanged = showInputs
-      midi.ready.then(showInputs)
+      midi.ready.then(() => { showInputs(); document.getElementById('fb').textContent = midi.outputs.join(', ') || '(none)' })
 
       const log = document.getElementById('log')
       const lines = []
@@ -46,13 +46,13 @@
         log.textContent = lines.join('\n')
       })
 
-      const freq = midi.cc(0, 2, 80, 12)
+      const freq = midi.cc(0, { min: 2, max: 80, init: 12, curve: 'log', fine: 10 })   // ratio per detent, push = fine
       const sync = midi.cc(1, 0, 1, 0.1)
-      const rot = midi.cc(2, -3.14, 3.14, 0)
+      const rot = midi.cc(2, { min: 0, max: 6.283, init: 0, wrap: true, fine: 10 })    // turns forever
       const kal = midi.cc(3, { min: 1, max: 12, init: 1, steps: 22 })
       const push = midi.note(0, { toggle: true })
 
-      osc(freq, sync, 0.8).kaleid(() => Math.round(kal())).rotate(rot).invert(push).out(o0)
+      osc(freq, sync, 0.8).kaleid(() => Math.round(kal())).rotate(rot).out(o0)
 
       // Keyboard fallback when no controller is attached: arrows send cc0 in the selected mode
       document.addEventListener('keydown', (e) => {

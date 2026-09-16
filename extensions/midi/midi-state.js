@@ -11,12 +11,17 @@
  *   'abs'   absolute 7 bit, 0..127 maps to min..max
  *   'abs14' absolute 14 bit, EC4 "CCah": MSB on cc n, LSB on cc n + 32, 0..16383 maps to min..max
  *
+ * Every control keeps a normalised position 0..1 and derives its value through a
+ * curve, so relative steps, absolute positions, display feedback and snapshots
+ * all share one representation.
+ *
  * With relative modes the value lives here, not on the device, so a knob moves a
  * parameter by how far it turned and never jumps. That is what makes it safe to
  * hand the controller to someone else mid-performance.
  */
 
 export const MODES = ['r1', 'r2', 'abs', 'abs14']
+export const CURVES = ['linear', 'log', 'exp']
 
 export function decodeRelative (mode, v) {
   if (mode === 'r1') return v === 0 ? 0 : (v < 64 ? -v : 128 - v)
@@ -24,10 +29,26 @@ export function decodeRelative (mode, v) {
   return 0
 }
 
-const clamp = (x, a, b) => Math.min(Math.max(x, a), b)
+const clamp01 = (x) => Math.min(Math.max(x, 0), 1)
 
 function key (channel, number) {
   return `${channel == null ? '*' : channel}:${number}`
+}
+
+// position 0..1 -> value, and back
+function posToValue (cfg, p) {
+  const { min, max, curve } = cfg
+  if (curve === 'log') return min * Math.pow(max / min, p)
+  if (curve === 'exp') return min + (max - min) * p * p
+  return min + (max - min) * p
+}
+
+function valueToPos (cfg, v) {
+  const { min, max, curve } = cfg
+  if (max === min) return 0
+  if (curve === 'log') return clamp01(Math.log(v / min) / Math.log(max / min))
+  if (curve === 'exp') return clamp01(Math.sqrt((v - min) / (max - min)))
+  return clamp01((v - min) / (max - min))
 }
 
 export class MidiState {
@@ -37,19 +58,24 @@ export class MidiState {
       channel: null,   // null = accept any channel
       steps: 64,       // relative: detents from min to max (EC4 is 36 pulses per turn)
       min: 0,
-      max: 1
+      max: 1,
+      curve: 'linear', // 'linear' | 'log' (min and max must be > 0) | 'exp'
+      wrap: false,     // relative: wrap around instead of clamping (rotation)
+      fine: 0          // relative: divide the step by this while the encoder's push note is held (0 = off)
     }, defaults)
     this.controls = new Map()   // key -> control record
-    this.notes = new Map()      // key -> {value, velocity}
-    this.listeners = new Set()  // (event) => void, for monitors / learn
+    this.notes = new Map()      // key -> registered note record
+    this.held = new Set()       // keys of every note currently held, registered or not
+    this.listeners = new Set()  // (event) => void, for monitors / learn / feedback
     this.pending14 = new Map()  // key -> msb awaiting lsb
     this.lastEvent = null
   }
 
   /**
    * Register a continuous control and get a function returning its value.
-   * cc(number, min, max, init) or cc(number, {min, max, init, mode, channel, steps, curve})
-   * The returned function also has .value, .set(v), .reset(), .config
+   * cc(number, min, max, init) or
+   * cc(number, {min, max, init, mode, channel, steps, curve, wrap, fine, fineNote})
+   * The returned function also has .value, .set(v), .reset(), .config, .v
    */
   cc (number, a, b, c) {
     const opts = (typeof a === 'object' && a !== null) ? a : { min: a, max: b, init: c }
@@ -58,24 +84,30 @@ export class MidiState {
     if (cfg.max === undefined) cfg.max = this.defaults.max
     if (cfg.init === undefined || cfg.init === null) cfg.init = cfg.min
     if (!MODES.includes(cfg.mode)) throw new Error(`midi.cc: unknown mode "${cfg.mode}", use one of ${MODES.join(', ')}`)
+    if (!CURVES.includes(cfg.curve)) throw new Error(`midi.cc: unknown curve "${cfg.curve}", use one of ${CURVES.join(', ')}`)
+    if (cfg.curve === 'log' && (cfg.min <= 0 || cfg.max <= 0)) throw new Error('midi.cc: log curve needs min and max > 0')
+    if (cfg.fineNote === undefined) cfg.fineNote = number   // EC4 "Note" push sends the encoder's own number
+
     const k = key(cfg.channel, number)
     let rec = this.controls.get(k)
     if (!rec) {
-      rec = { number, config: cfg, value: clamp(cfg.init, Math.min(cfg.min, cfg.max), Math.max(cfg.min, cfg.max)) }
+      rec = { number, config: cfg, pos: valueToPos(cfg, cfg.init), lastChannel: cfg.channel || 1 }
       this.controls.set(k, rec)
     } else {
-      // Re-registering (sketch re-eval): keep the live value, adopt new range if it changed
-      const rangeChanged = rec.config.min !== cfg.min || rec.config.max !== cfg.max
+      // Re-registering (sketch re-eval): keep the live value, re-fit it into the new range/curve
+      const value = posToValue(rec.config, rec.pos)
       rec.config = cfg
-      if (rangeChanged) rec.value = clamp(rec.value, Math.min(cfg.min, cfg.max), Math.max(cfg.min, cfg.max))
+      rec.pos = valueToPos(cfg, value)
     }
-    const fn = () => rec.value
-    fn.value = () => rec.value
-    fn.set = (v) => { rec.value = clamp(v, Math.min(cfg.min, cfg.max), Math.max(cfg.min, cfg.max)); return rec.value }
+    const get = () => posToValue(rec.config, rec.pos)
+    const fn = () => get()
+    fn.value = get
+    fn.set = (v) => { rec.pos = valueToPos(rec.config, v); this._emitSet(rec); return get() }
     fn.reset = () => fn.set(cfg.init)
     fn.config = cfg
     fn.number = number
-    Object.defineProperty(fn, 'v', { get: () => rec.value })
+    Object.defineProperty(fn, 'v', { get })
+    Object.defineProperty(fn, 'pos', { get: () => rec.pos })
     return fn
   }
 
@@ -102,15 +134,24 @@ export class MidiState {
   /** Snapshot of every registered control value, keyed "channel:number". */
   snapshot () {
     const out = {}
-    for (const [k, rec] of this.controls) out[k] = rec.value
+    for (const [k, rec] of this.controls) out[k] = posToValue(rec.config, rec.pos)
     return out
   }
 
   restore (snap) {
     for (const [k, v] of Object.entries(snap || {})) {
       const rec = this.controls.get(k)
-      if (rec) rec.value = v
+      if (rec) { rec.pos = valueToPos(rec.config, v); this._emitSet(rec) }
     }
+  }
+
+  /** Every registered control as {channel, number, pos, value}, e.g. to refresh a device display. */
+  positions () {
+    const out = []
+    for (const rec of this.controls.values()) {
+      out.push({ channel: rec.lastChannel, number: rec.number, pos: rec.pos, value: posToValue(rec.config, rec.pos) })
+    }
+    return out
   }
 
   onEvent (fn) { this.listeners.add(fn); return () => this.listeners.delete(fn) }
@@ -120,8 +161,16 @@ export class MidiState {
     for (const fn of this.listeners) fn(ev)
   }
 
+  _emitSet (rec) {
+    this._emit({ type: 'set', channel: rec.lastChannel, number: rec.number, registered: true, pos: rec.pos, after: posToValue(rec.config, rec.pos) })
+  }
+
   _find (map, channel, number) {
     return map.get(key(channel, number)) || map.get(key(null, number))
+  }
+
+  _isHeld (channel, number) {
+    return this.held.has(key(channel, number))
   }
 
   /**
@@ -151,7 +200,7 @@ export class MidiState {
         if (msb !== undefined) {
           this.pending14.delete(k)
           const raw = (msb << 7) | value
-          return this._apply(msbRec, channel, raw, raw / 16383, 'abs14')
+          return this._applyPos(msbRec, channel, raw, raw / 16383, 'abs14')
         }
       }
     }
@@ -162,34 +211,41 @@ export class MidiState {
       this._emit(ev)
       return ev
     }
-    const mode = rec.config.mode
-    if (mode === 'abs14') {
+    rec.lastChannel = channel
+    const cfg = rec.config
+    if (cfg.mode === 'abs14') {
       this.pending14.set(key(channel, number), value)
       // Also apply MSB alone so the control responds even if the LSB never comes
-      return this._apply(rec, channel, value << 7, (value << 7) / 16383, 'abs14-msb')
+      return this._applyPos(rec, channel, value << 7, (value << 7) / 16383, 'abs14-msb')
     }
-    if (mode === 'abs') return this._apply(rec, channel, value, value / 127, 'abs')
+    if (cfg.mode === 'abs') return this._applyPos(rec, channel, value, value / 127, 'abs')
 
-    const delta = decodeRelative(mode, value)
-    const range = rec.config.max - rec.config.min
-    const step = range / rec.config.steps
-    const before = rec.value
-    rec.value = clamp(rec.value + delta * step, Math.min(rec.config.min, rec.config.max), Math.max(rec.config.min, rec.config.max))
-    const ev = { type: 'cc', channel, number, value, registered: true, mode, delta, before, after: rec.value }
+    let delta = decodeRelative(cfg.mode, value)
+    const fine = cfg.fine && this._isHeld(channel, cfg.fineNote)
+    let step = 1 / cfg.steps
+    if (fine) step /= cfg.fine
+    const before = posToValue(cfg, rec.pos)
+    let p = rec.pos + delta * step
+    if (cfg.wrap) p = p - Math.floor(p)
+    else p = clamp01(p)
+    rec.pos = p
+    const ev = { type: 'cc', channel, number, value, registered: true, mode: cfg.mode, delta, fine: !!fine, before, after: posToValue(cfg, rec.pos), pos: rec.pos }
     this._emit(ev)
     return ev
   }
 
-  _apply (rec, channel, raw, norm, how) {
+  _applyPos (rec, channel, raw, pos, how) {
     const cfg = rec.config
-    const before = rec.value
-    rec.value = cfg.min + norm * (cfg.max - cfg.min)
-    const ev = { type: 'cc', channel, number: rec.number, value: raw, registered: true, mode: how, before, after: rec.value }
+    const before = posToValue(cfg, rec.pos)
+    rec.pos = clamp01(pos)
+    const ev = { type: 'cc', channel, number: rec.number, value: raw, registered: true, mode: how, before, after: posToValue(cfg, rec.pos), pos: rec.pos }
     this._emit(ev)
     return ev
   }
 
   _handleNote (channel, number, velocity, on) {
+    const k = key(channel, number)
+    if (on) this.held.add(k); else this.held.delete(k)
     const rec = this._find(this.notes, channel, number)
     if (rec) {
       rec.held = on ? 1 : 0
@@ -204,9 +260,10 @@ export class MidiState {
 
 export function describeEvent (ev) {
   if (!ev) return ''
+  if (ev.type === 'set') return `set ch ${ev.channel} cc ${ev.number} -> ${ev.after.toFixed(3)}`
   const base = `ch ${ev.channel} ${ev.type} ${ev.number} = ${ev.value}`
   if (ev.type === 'cc' && ev.registered) {
-    if (ev.delta !== undefined) return `${base}  (${ev.mode} ${ev.delta >= 0 ? '+' : ''}${ev.delta}) -> ${ev.after.toFixed(3)}`
+    if (ev.delta !== undefined) return `${base}  (${ev.mode} ${ev.delta >= 0 ? '+' : ''}${ev.delta}${ev.fine ? ' fine' : ''}) -> ${ev.after.toFixed(3)}`
     return `${base}  (${ev.mode}) -> ${ev.after.toFixed(3)}`
   }
   return ev.registered ? base : `${base}  (unassigned)`

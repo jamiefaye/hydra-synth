@@ -122,3 +122,56 @@ test('snapshot and restore', () => {
   m.restore(snap)
   assert.equal(a(), 0.25); assert.equal(b(), 0.5)
 })
+
+test('log curve: each detent multiplies by a constant ratio', () => {
+  const m = new MidiState({ mode: 'r2', steps: 10 })
+  const f = m.cc(5, { min: 0.1, max: 100, init: 1, curve: 'log' })
+  assert.ok(Math.abs(f() - 1) < 1e-9)
+  m.handleMessage(cc(1, 5, 65))
+  const r1 = f() / 1
+  m.handleMessage(cc(1, 5, 65))
+  const r2 = f() / (1 * r1)
+  assert.ok(Math.abs(r1 - r2) < 1e-9)              // constant ratio per step
+  assert.ok(Math.abs(r1 - Math.pow(1000, 0.1)) < 1e-9)
+  for (let i = 0; i < 30; i++) m.handleMessage(cc(1, 5, 65))
+  assert.ok(Math.abs(f() - 100) < 1e-9)            // clamps at max
+  f.set(0.1); assert.ok(Math.abs(f() - 0.1) < 1e-9)
+  assert.throws(() => m.cc(6, { min: 0, max: 1, curve: 'log' }), /log curve/)
+})
+
+test('wrap: rotation knob goes round instead of clamping', () => {
+  const m = new MidiState({ mode: 'r2', steps: 4 })
+  const f = m.cc(7, { min: 0, max: 360, init: 270, wrap: true })
+  m.handleMessage(cc(1, 7, 65)); assert.equal(Math.round(f()), 0)     // 270 + 90 wraps to 0
+  m.handleMessage(cc(1, 7, 63)); assert.equal(Math.round(f()), 270)
+  m.handleMessage(cc(1, 7, 62)); assert.equal(Math.round(f()), 90)    // -180 from 270
+})
+
+test('fine: step divides while the encoder push note is held', () => {
+  const m = new MidiState({ mode: 'r2', steps: 10 })
+  const f = m.cc(8, { min: 0, max: 1, init: 0, fine: 10 })
+  m.handleMessage(cc(1, 8, 65)); assert.equal(f().toFixed(2), '0.10')
+  m.handleMessage(noteOn(1, 8))                       // push held (EC4 Note push = same number)
+  m.handleMessage(cc(1, 8, 65)); assert.equal(f().toFixed(2), '0.11')
+  assert.equal(m.lastEvent.fine, true)
+  m.handleMessage(noteOff(1, 8))
+  m.handleMessage(cc(1, 8, 65)); assert.equal(f().toFixed(2), '0.21')
+  // custom fine note (e.g. a dedicated shift button)
+  const g = m.cc(9, { min: 0, max: 1, init: 0, fine: 4, fineNote: 100 })
+  m.handleMessage(noteOn(1, 100)); m.handleMessage(cc(1, 9, 65)); assert.equal(g().toFixed(3), '0.025')
+})
+
+test('set/restore emit set events and positions() reports 0..1', () => {
+  const m = new MidiState({ mode: 'r2', steps: 10 })
+  const f = m.cc(3, 10, 20, 10)
+  const seen = []
+  m.onEvent(ev => seen.push(ev))
+  f.set(15)
+  assert.equal(seen.at(-1).type, 'set'); assert.equal(seen.at(-1).pos, 0.5); assert.equal(seen.at(-1).after, 15)
+  m.handleMessage(cc(4, 3, 65))                        // moved from channel 4
+  assert.equal(m.positions()[0].channel, 4)            // feedback goes back to where it came from
+  assert.equal(m.positions()[0].pos.toFixed(1), '0.6')
+  m.restore({ '*:3': 20 })
+  assert.equal(seen.at(-1).type, 'set'); assert.equal(seen.at(-1).pos, 1)
+  assert.equal(describeEvent(seen.at(-1)), 'set ch 4 cc 3 -> 20.000')
+})

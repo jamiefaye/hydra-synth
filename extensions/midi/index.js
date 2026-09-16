@@ -17,12 +17,19 @@
  *   midi.learn()        log every incoming message to the console (midi.learn(false) to stop)
  *   midi.last           the most recent event
  *   midi.snapshot() / midi.restore(obj)
+ *   midi.refresh()      resend every control value to the device display (feedback)
  *   midi.inputs         names of connected MIDI inputs (filled once midi.ready resolves)
  *   midi.ready          promise: Web MIDI access granted or refused; install() never blocks on it
  *   midi.state          the underlying MidiState
  *
  * Encoder modes: 'r1' (EC4 CCr1: 1 down / 127 up), 'r2' (EC4 CCr2: 63 down / 65 up, default),
  * 'abs' (0..127), 'abs14' (EC4 CCah, MSB on n and LSB on n+32).
+ *
+ * Per-control options: curve 'linear'|'log'|'exp', wrap (rotation), fine (step divisor while the
+ * encoder's push note is held), fineNote (which note, default = the cc number), steps.
+ *
+ * Display feedback: with feedback enabled (default) every value change is sent back to the
+ * controller as the same CC scaled 0..127, so a relative encoder's display shows the sketch value.
  */
 
 import { MidiState, describeEvent, MODES } from './midi-state.js'
@@ -41,7 +48,9 @@ export async function install (hydra = null, options = {}) {
     steps: 64,
     log: false,
     makeGlobal: true,
-    inputFilter: null   // string or RegExp matched against input names; null = all inputs
+    inputFilter: null,  // string or RegExp matched against input names; null = all inputs
+    feedback: true,     // send values back to the controller display (relative encoders need this)
+    outputFilter: /faderfox|ec4/i   // which output(s) receive feedback; null = every output
   }, options)
 
   const state = new MidiState({ mode: opts.mode, channel: opts.channel, steps: opts.steps })
@@ -54,6 +63,9 @@ export async function install (hydra = null, options = {}) {
     note: (...args) => state.note(...args),
     snapshot: () => state.snapshot(),
     restore: (s) => state.restore(s),
+    refresh: () => { for (const p of state.positions()) sendFeedback(p.channel, p.number, p.pos) },
+    outputs: [],
+    _outputs: [],
     learn: (on = true) => { logging = !!on; console.log(`[midi] learn ${logging ? 'on' : 'off'}`); return logging },
     get last () { return state.lastEvent },
     inputs: [],
@@ -65,11 +77,23 @@ export async function install (hydra = null, options = {}) {
       unlog()
       if (midi.access) midi.access.onstatechange = null
       for (const input of midi._inputs) input.onmidimessage = null
+      midi._outputs = []
       if (typeof window !== 'undefined' && window.midi === midi) delete window.midi
       _midi = null
     },
     _inputs: []
   }
+
+  // Display feedback: echo each control's 0..1 position to the controller as the same CC
+  const sendFeedback = (channel, number, pos) => {
+    if (!opts.feedback || !midi._outputs.length) return
+    const msg = [0xB0 | ((channel || 1) - 1), number & 0x7f, Math.round(pos * 127) & 0x7f]
+    for (const out of midi._outputs) { try { out.send(msg) } catch (e) { /* port went away */ } }
+  }
+  midi.sendFeedback = sendFeedback
+  state.onEvent(ev => {
+    if (ev.registered && ev.pos !== undefined && (ev.type === 'cc' || ev.type === 'set')) sendFeedback(ev.channel, ev.number, ev.pos)
+  })
 
   const _hydra = hydra || (typeof window !== 'undefined' ? window.hydraSynth : null)
   if (_hydra && _hydra.synth) _hydra.synth.midi = midi
@@ -94,11 +118,13 @@ async function connect (midi, state, opts) {
     return midi
   }
 
-  const matches = (name) => {
-    if (!opts.inputFilter) return true
-    if (opts.inputFilter instanceof RegExp) return opts.inputFilter.test(name)
-    return name.toLowerCase().includes(String(opts.inputFilter).toLowerCase())
+  const matcher = (filter) => (name) => {
+    if (!filter) return true
+    if (filter instanceof RegExp) return filter.test(name)
+    return name.toLowerCase().includes(String(filter).toLowerCase())
   }
+  const matches = matcher(opts.inputFilter)
+  const matchesOut = matcher(opts.outputFilter)
 
   const attach = () => {
     const found = [...midi.access.inputs.values()].filter(i => matches(i.name))
@@ -109,8 +135,12 @@ async function connect (midi, state, opts) {
     midi._inputs = found
     midi.inputs = names
     for (const input of found) input.onmidimessage = (msg) => state.handleMessage(msg.data)
-    console.log(`[midi] v${VERSION} listening on: ${names.length ? names.join(', ') : '(no inputs)'}`)
+    midi._outputs = opts.feedback ? [...midi.access.outputs.values()].filter(o => matchesOut(o.name)) : []
+    midi.outputs = midi._outputs.map(o => o.name)
+    console.log(`[midi] v${VERSION} listening on: ${names.length ? names.join(', ') : '(no inputs)'}` +
+      (opts.feedback ? `; feedback to: ${midi.outputs.length ? midi.outputs.join(', ') : '(no outputs)'}` : ''))
     if (midi.onInputsChanged) midi.onInputsChanged(midi.inputs)
+    midi.refresh()
   }
   attach()
   midi.access.onstatechange = attach
