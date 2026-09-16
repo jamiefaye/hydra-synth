@@ -16,7 +16,7 @@
     <div id="panel">
       <div id="inputs">Requesting MIDI access...</div>
       <div>cc0 freq <span class="val" id="v16"></span> &nbsp; cc1 sync <span class="val" id="v17"></span> &nbsp; cc2 rotate <span class="val" id="v18"></span> &nbsp; cc3 kaleid <span class="val" id="v19"></span> &nbsp; push (note 0) <span class="val" id="n16"></span></div>
-      <div>Mode: <select id="mode"><option>abs</option><option>r2</option><option>r1</option><option>abs14</option></select> (must match the EC4 encoder Type; any channel) &nbsp; keys: arrows simulate cc0 up/down</div>
+      <div>Mode: <select id="mode"><option>r2</option><option>abs</option><option>r1</option><option>abs14</option></select> (must match the EC4 encoder Type; any channel) &nbsp; keys: arrows simulate cc0 up/down</div>
       <div id="log"></div>
     </div>
     <script type="module">
@@ -29,7 +29,7 @@
 
       const q = new URLSearchParams(location.search)
       const modeSel = document.getElementById('mode')
-      modeSel.value = q.get('mode') || 'abs'
+      modeSel.value = q.get('mode') || 'r2'
       modeSel.onchange = () => { location.search = '?mode=' + modeSel.value }
 
       const midi = await install(hydra, { mode: modeSel.value, log: false })
