@@ -60,6 +60,12 @@ export default function formatArguments(transform, startIndex, synthContext) {
     if (userArgs.length > index) {
       typedArg.value = userArgs[index]
 
+      // Ported from upstream (issue #150): catch osc passed instead of osc()
+      if (typeof typedArg.value === 'function' && typedArg.value.isHydraFunction) {
+        const name = typedArg.value.hydraFunctionName
+        throw new Error(`${transform.name}() received the hydra function ${name} without parentheses for argument "${input.name}" - did you mean ${name}()?`)
+      }
+
       // Check for VaryingRef first (e.g., v.normal.z) - handle before other type checks
       if (isVaryingRef(userArgs[index])) {
         // Varying reference from v proxy
@@ -134,6 +140,10 @@ export default function formatArguments(transform, startIndex, synthContext) {
       } else if (input.type === 'sampler2D') {
         // typedArg.tex = typedArg.value
         var x = typedArg.value
+        // Ported from upstream (issue #149): fail clearly when src() gets no texture
+        if (!x || typeof x.getTexture !== 'function') {
+          throw new Error(`${transform.name}() expects a texture source (such as s0 or o0) for argument "${input.name}", but received ${x}`)
+        }
         typedArg.value = () => (x.getTexture())
         typedArg.isUniform = true
       } else {

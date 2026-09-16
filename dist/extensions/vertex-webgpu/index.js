@@ -14259,6 +14259,10 @@ function formatArguments$1(transform, startIndex, synthContext) {
     }
     if (userArgs.length > index) {
       typedArg.value = userArgs[index];
+      if (typeof typedArg.value === "function" && typedArg.value.isHydraFunction) {
+        const name = typedArg.value.hydraFunctionName;
+        throw new Error(`${transform.name}() received the hydra function ${name} without parentheses for argument "${input.name}" - did you mean ${name}()?`);
+      }
       if (typedArg.type === "vec4") {
         if (!(typedArg.value.type === "GlslSource" || typedArg.value.getTexture)) {
           throw new Error("Arguments must be a texture or GlslSource");
@@ -14307,6 +14311,9 @@ function formatArguments$1(transform, startIndex, synthContext) {
         typedArg.value = `${typedArg.type}(${typedArg.value.map(ensure_decimal_dot$1).join(", ")})`;
       } else if (input.type === "sampler2D") {
         var x2 = typedArg.value;
+        if (!x2 || typeof x2.getTexture !== "function") {
+          throw new Error(`${transform.name}() expects a texture source (such as s0 or o0) for argument "${input.name}", but received ${x2}`);
+        }
         typedArg.value = () => x2.getTexture();
         typedArg.isUniform = true;
       } else {
@@ -15675,20 +15682,20 @@ const glslFunctions = () => [
       {
         type: "vec4",
         name: "scale",
-        default: 1
+        default: [1, 1, 1, 1]
       }
     ],
-    glsl: `   vec4 v = _c0 * s;
-   return v.r + v.g + v.b + v.a;
+    glsl: `   vec4 v = _c0 * scale;
+   return vec4(vec3(v.r + v.g + v.b + v.a), _c0.a);
    }
-   float sum(vec2 _st, vec4 s) { // vec4 is not a typo, because argument type is not overloaded
-   vec2 v = _st.xy * s.xy;
+   float sum(vec2 _st, vec4 scale) { // vec4 is not a typo, because argument type is not overloaded
+   vec2 v = _st.xy * scale.xy;
    return v.x + v.y;`,
-    wgsl: `  let v = vec4<f32> = _c0 * s;
-   return v.r + v.g + v.b + v.a;
+    wgsl: `   let v : vec4<f32> = _c0 * scale;
+   return vec4<f32>(vec3<f32>(v.r + v.g + v.b + v.a), _c0.a);
    }
-   fn sum( _st : vec2<f32>, s : vec4<f32>) -> f32 { // vec4 is not a typo, because argument type is not overloaded
-   v : vec2<f32> = _st.xy * s.xy;
+   fn sum( _st : vec2<f32>, scale : vec4<f32>) -> f32 { // vec4 is not a typo, because argument type is not overloaded
+   let v : vec2<f32> = _st.xy * scale.xy;
    return v.x + v.y;`
   },
   {
@@ -15811,6 +15818,7 @@ class GeneratorFactory {
         defaultUniforms: this.defaultUniforms,
         synth: self2
       });
+      markAsHydraFunction(func, method);
       this.generators[method] = func;
       this.changeListener({ type: "add", synth: this, method });
       return func;
@@ -15819,6 +15827,7 @@ class GeneratorFactory {
         this.transforms.push({ name: method, transform, userArgs: args, synth: self2 });
         return this;
       };
+      markAsHydraFunction(this.sourceClass.prototype[method], method);
     }
     return void 0;
   }
@@ -15826,6 +15835,10 @@ class GeneratorFactory {
     var processedGlsl = processGlsl(obj);
     if (processedGlsl) this._addMethod(obj.name, processedGlsl);
   }
+}
+function markAsHydraFunction(func, name) {
+  func.isHydraFunction = true;
+  func.hydraFunctionName = name;
 }
 const typeLookup = {
   "src": {
@@ -26135,6 +26148,10 @@ function formatArguments(transform, startIndex, synthContext) {
     }
     if (userArgs.length > index) {
       typedArg.value = userArgs[index];
+      if (typeof typedArg.value === "function" && typedArg.value.isHydraFunction) {
+        const name = typedArg.value.hydraFunctionName;
+        throw new Error(`${transform.name}() received the hydra function ${name} without parentheses for argument "${input.name}" - did you mean ${name}()?`);
+      }
       if (isVaryingRef(userArgs[index])) {
         typedArg.value = userArgs[index];
         typedArg.isVaryingRef = true;
@@ -26183,6 +26200,9 @@ function formatArguments(transform, startIndex, synthContext) {
         typedArg.value = `${typedArg.type}(${typedArg.value.map(ensure_decimal_dot).join(", ")})`;
       } else if (input.type === "sampler2D") {
         var x2 = typedArg.value;
+        if (!x2 || typeof x2.getTexture !== "function") {
+          throw new Error(`${transform.name}() expects a texture source (such as s0 or o0) for argument "${input.name}", but received ${x2}`);
+        }
         typedArg.value = () => x2.getTexture();
         typedArg.isUniform = true;
       } else {
