@@ -7,24 +7,26 @@
       body { margin: 0; background: black; color: #ccc; font-family: monospace; font-size: 12px; overflow: hidden; }
       canvas { width: 100vw; height: 100vh; display: block; }
       #hud { position: fixed; left: 8px; bottom: 8px; font-size: 11px; }
-      #hudhead { background: rgba(0,0,0,0.55); padding: 3px 6px; margin-bottom: 4px; white-space: pre; display: inline-block; }
-      #seedbar { position: fixed; right: 8px; bottom: 8px; background: rgba(0,0,0,0.55); padding: 6px 8px; }
+      #hudhead { background: rgba(0,0,0,0.55); padding: 3px 6px; margin-bottom: 4px; white-space: pre; display: flex; gap: 12px; align-items: center; }
+      #hudhead select, #hudhead input { font: inherit; background: #111; color: #ddd; border: 1px solid #444; }
     </style>
   </head>
   <body>
     <canvas id="c"></canvas>
-    <div id="hud"><div id="hudhead">loading</div><div id="panel"></div></div>
-    <div id="seedbar">
-      seed <select id="seed">
-        <option value="osc">osc + kaleid (sketch)</option>
-        <option value="noise">noise (sketch)</option>
-        <option value="voronoi">voronoi (sketch)</option>
-        <option value="cam">camera (s0)</option>
-        <option value="screen">screen capture (s0)</option>
-        <option value="video">video url (s0)</option>
-        <option value="image">image url (s0)</option>
-      </select>
-      <input id="url" placeholder="video/image url" size="28" style="display:none" />
+    <div id="hud">
+      <div id="hudhead">
+        <span id="headtext">loading</span>
+        <span>seed <select id="seed">
+          <option value="osc">osc + kaleid</option>
+          <option value="noise">noise</option>
+          <option value="voronoi">voronoi</option>
+          <option value="cam">camera</option>
+          <option value="screen">screen</option>
+          <option value="video">video url</option>
+          <option value="image">image url</option>
+        </select> <input id="url" placeholder="url" size="24" style="display:none" /></span>
+      </div>
+      <div id="panel"></div>
     </div>
     <script type="module">
       // Two Light Herder loops on the EC4.
@@ -203,7 +205,7 @@
       }
       for (let m = 1; m <= 4; m++) { const who = ['A direct', 'A mirror', 'B direct', 'B mirror'][m - 1]; DESC[`${m}HUE`] = `Monitor ${m} (${who}) hue.`; DESC[`${m}SAT`] = `Monitor ${m} (${who}) saturation.`; DESC[`${m}BRT`] = `Monitor ${m} (${who}) brightness.`; DESC[`${m}CON`] = `Monitor ${m} (${who}) contrast.` }
       // ---- the virtual surface: all four groups as draggable numbers (drag, wheel, click = push, shift = fine)
-      const head = document.getElementById('hudhead')
+      const head = document.getElementById('headtext')
       const panel = mountPanel(document.getElementById('panel'), midi, {
         groups: [
           { group: 1, title: 'LOPA loop A', labels: LOOP, descs: DESC },
@@ -213,7 +215,7 @@
         ]
       })
       const refreshHud = () => {
-        head.textContent = `${mode}  seed ${seedKind}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  r reset  d dump  h hide   inputs: ${midi.inputs.join(', ') || '(none)'}`
+        head.textContent = `${mode}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  r reset  d dump  h hide   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
       }
       setInterval(() => {
         if (viewPush() !== lastViewPush) { lastViewPush = viewPush(); setView(view === 'grid' ? 'program' : 'grid') }
