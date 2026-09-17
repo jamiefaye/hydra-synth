@@ -32,7 +32,7 @@
         </select> <input id="url" placeholder="url" size="24" style="display:none" /></span>
       </div>
       <div id="editor">
-        <div>Hydra code. <label><input type="radio" name="emode" value="seed" checked /> seed: an expression that becomes the seed on o2, loops untouched</label>
+        <div>Hydra code. <label><input type="radio" name="emode" value="seed" checked /> seed: a chain (no out() needed) that becomes the seed on o2, loops untouched</label>
         <label><input type="radio" name="emode" value="raw" /> roughshod: run as-is, anything goes (b rebuilds the loops)</label>
         <span style="float:right">ctrl+enter apply, esc close</span></div>
         <textarea id="code" spellcheck="false">osc(12, 0.05, 1).kaleid(5).rotate(() => time * 0.1)</textarea>
@@ -132,7 +132,9 @@
       try { const saved = localStorage.getItem('herder.code'); if (saved) codeBox.value = saved } catch (e) { /* no storage */ }
       const editMode = () => document.querySelector('input[name=emode]:checked').value
       const evalSeed = () => {
-        const chain = (0, eval)(codeBox.value)
+        // seed mode: a chain; a trailing .out(...) is a habit, so strip it (the page outputs to o2)
+        const text = codeBox.value.trim().replace(/\.out\s*\([^)]*\)\s*;?\s*$/, '')
+        const chain = (0, eval)(text)
         if (!chain || typeof chain.out !== 'function') throw new Error('seed code must be a chain, e.g. osc(10).kaleid(4)')
         return chain
       }
