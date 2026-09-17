@@ -34,6 +34,7 @@ import Output from './output.js'
 
 // Import lighting functions
 import lightingFunctions from './lighting-functions.js'
+import glslFunctions from '../../src/glsl/glsl-functions.js'
 
 // Import WebGPU utilities
 import { getSharedDevice, hasSharedDevice, releaseSharedDevice } from './wgsl/gpu-device-factory.js'
@@ -246,6 +247,10 @@ function registerGeometryFunctions(synth) {
  * Register lighting functions (diffuse, specular, fresnel, etc.)
  */
 function registerLightingFunctions(synth) {
+  // Texture-space functions from the fork's core that a vanilla host lacks (blur)
+  for (const fn of glslFunctions().filter(f => f.name === 'blur')) {
+    if (!synth[fn.name]) synth.setFunction(fn)
+  }
   for (const fn of lightingFunctions) {
     synth.setFunction(fn)
   }

@@ -35,10 +35,15 @@ function wrapWgslFunction(transform) {
   // We only need to add the FIRST type arg (_st or _c0) to avoid duplicates.
   const originalInputs = transform.transform.inputs || []
   const firstTypeArg = t.args[0]  // _st for src/coord/combineCoord, _c0 for color/combine
-  const allArgs = [firstTypeArg, ...originalInputs.map(inp => ({
-    type: toWgslType(inp.type),
-    name: inp.name
-  }))]
+  const allArgs = [firstTypeArg]
+  for (const inp of originalInputs) {
+    if (inp.type === 'sampler2D') {
+      // a texture argument arrives as a texture plus its sampler (see generate-glsl.js)
+      allArgs.push({ type: 'texture_2d<f32>', name: inp.name }, { type: 'sampler', name: 'samp' + inp.name })
+    } else {
+      allArgs.push({ type: toWgslType(inp.type), name: inp.name })
+    }
+  }
 
   const args = allArgs.map(arg => `${arg.name}: ${arg.type}`).join(', ')
   const body = transform.transform.wgsl || ''

@@ -49,9 +49,16 @@ function generateGlsl (transforms, shaderParams) {
       if (shaderParams.wgsl && inputs[0] && inputs[0].type === "sampler2D") {
         let texName = inputs[0].name;
         let sampName = 'samp' + texName;
-        fragColor = (uv) => {
-          return `textureSample( ${texName}, ${sampName}, fract(${uv}))`
-        };
+        if (transform.name === 'src') {
+          fragColor = (uv) => {
+            return `textureSample( ${texName}, ${sampName}, fract(${uv}))`
+          };
+        } else {
+          // other texture sources (blur, ...) are real functions taking (st, texture, sampler, args...)
+          fragColor = (uv) => {
+            return `${shaderString(`${uv}, ${texName}, ${sampName}`, transform.name, inputs.slice(1), shaderParams)}`
+          };
+        }
       } else { // all other types of 'src' are conventional.
         fragColor = (uv) => {
           return `${shaderString(uv, transform.name, inputs, shaderParams)}`

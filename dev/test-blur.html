@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hydra blur test</title>
+    <style>
+      body { margin: 0; background: #222; }
+      canvas { width: 960px; height: 540px; display: block; }
+      #status { position: fixed; top: 4px; left: 4px; color: white; font-family: monospace; font-size: 12px; background: rgba(0,0,0,0.5); padding: 2px 4px; }
+    </style>
+  </head>
+  <body>
+    <div id="status">Loading...</div>
+    <canvas id="c" width="960" height="540"></canvas>
+    <script type="module">
+      // mode = core | gl | gpu ; radius = blur radius as a fraction of width (default 0.01)
+      // o0 sharp square, o1 = blur(o0), o2 = blur(o0, 3*radius), o3 = blurred feedback loop
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'core'
+      const radius = parseFloat(q.get('radius') || '0.01')
+      const status = document.getElementById('status')
+      const canvas = document.getElementById('c')
+      try {
+        let hydra
+        if (mode === 'core') {
+          const HydraRenderer = (await import('../src/hydra-synth.js')).default
+          hydra = new HydraRenderer({ canvas, width: 960, height: 540, detectAudio: false, makeGlobal: true, numOutputs: 4 })
+          await hydra.ready()
+        } else {
+          const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+          hydra = await createHydra({ canvas, width: 960, height: 540, detectAudio: false, makeGlobal: true, numOutputs: 4, useWGSL: mode === 'gpu' })
+        }
+        window.__hydra = hydra
+        shape(4, 0.5, 0.001).out(o0)                       // hard-edged white square
+        blur(o0, radius).out(o1)
+        blur(o0, radius * 3).out(o2)
+        blur(o3, radius).scale(1.02).blend(shape(4, 0.5, 0.001), 0.05).out(o3)   // glow loop
+        render()
+        status.textContent = `${mode} radius=${radius} READY`
+      } catch (e) {
+        console.error(e); status.textContent = 'ERROR: ' + e.message; window.__blurError = e.message
+      }
+    </script>
+  </body>
+</html>

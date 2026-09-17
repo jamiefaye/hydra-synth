@@ -1225,6 +1225,47 @@ wgsl:
   needs: ["_rgbToHsv", "_hsvToRgb"]
 },
 {
+  name: 'blur',
+  type: 'src',
+  inputs: [
+    {
+      type: 'sampler2D',
+      name: 'tex',
+      default: NaN,
+    },
+    {
+      type: 'float',
+      name: 'radius',
+      default: 0.005,
+    }
+  ],
+  // 13-tap blur of a texture (o0, s0, o0.delay(k)): centre, a ring at `radius` (4 axis + 4
+  // diagonal taps) and a ring at 2*radius (4 axis taps). radius is a fraction of the width;
+  // the y offset is scaled by the aspect ratio so the kernel is round. Sampling wraps like src().
+  glsl:
+`   vec2 r = vec2(radius, radius * resolution.x / resolution.y);
+   vec2 d = r * 0.7071;
+   vec4 c = texture2D(tex, fract(_st)) * 0.2;
+   c += (texture2D(tex, fract(_st + vec2(r.x, 0.))) + texture2D(tex, fract(_st - vec2(r.x, 0.)))
+       + texture2D(tex, fract(_st + vec2(0., r.y))) + texture2D(tex, fract(_st - vec2(0., r.y)))) * 0.12;
+   c += (texture2D(tex, fract(_st + d)) + texture2D(tex, fract(_st - d))
+       + texture2D(tex, fract(_st + vec2(d.x, -d.y))) + texture2D(tex, fract(_st + vec2(-d.x, d.y)))) * 0.06;
+   c += (texture2D(tex, fract(_st + vec2(2. * r.x, 0.))) + texture2D(tex, fract(_st - vec2(2. * r.x, 0.)))
+       + texture2D(tex, fract(_st + vec2(0., 2. * r.y))) + texture2D(tex, fract(_st - vec2(0., 2. * r.y)))) * 0.02;
+   return c;`,
+  wgsl:
+`   let r = vec2<f32>(radius, radius * resolution.x / resolution.y);
+   let d = r * 0.7071;
+   var c = textureSample(tex, samptex, fract(_st)) * 0.2;
+   c += (textureSample(tex, samptex, fract(_st + vec2<f32>(r.x, 0.))) + textureSample(tex, samptex, fract(_st - vec2<f32>(r.x, 0.)))
+       + textureSample(tex, samptex, fract(_st + vec2<f32>(0., r.y))) + textureSample(tex, samptex, fract(_st - vec2<f32>(0., r.y)))) * 0.12;
+   c += (textureSample(tex, samptex, fract(_st + d)) + textureSample(tex, samptex, fract(_st - d))
+       + textureSample(tex, samptex, fract(_st + vec2<f32>(d.x, -d.y))) + textureSample(tex, samptex, fract(_st + vec2<f32>(-d.x, d.y)))) * 0.06;
+   c += (textureSample(tex, samptex, fract(_st + vec2<f32>(2. * r.x, 0.))) + textureSample(tex, samptex, fract(_st - vec2<f32>(2. * r.x, 0.)))
+       + textureSample(tex, samptex, fract(_st + vec2<f32>(0., 2. * r.y))) + textureSample(tex, samptex, fract(_st - vec2<f32>(0., 2. * r.y)))) * 0.02;
+   return c;`
+},
+{
   name: 'prev',
   type: 'src',
   inputs: [

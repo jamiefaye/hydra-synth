@@ -15761,6 +15761,45 @@ fn main(input: VertexInput) -> VertexOutput {
       needs: ["_rgbToHsv", "_hsvToRgb"]
     },
     {
+      name: "blur",
+      type: "src",
+      inputs: [
+        {
+          type: "sampler2D",
+          name: "tex",
+          default: NaN
+        },
+        {
+          type: "float",
+          name: "radius",
+          default: 5e-3
+        }
+      ],
+      // 13-tap blur of a texture (o0, s0, o0.delay(k)): centre, a ring at `radius` (4 axis + 4
+      // diagonal taps) and a ring at 2*radius (4 axis taps). radius is a fraction of the width;
+      // the y offset is scaled by the aspect ratio so the kernel is round. Sampling wraps like src().
+      glsl: `   vec2 r = vec2(radius, radius * resolution.x / resolution.y);
+   vec2 d = r * 0.7071;
+   vec4 c = texture2D(tex, fract(_st)) * 0.2;
+   c += (texture2D(tex, fract(_st + vec2(r.x, 0.))) + texture2D(tex, fract(_st - vec2(r.x, 0.)))
+       + texture2D(tex, fract(_st + vec2(0., r.y))) + texture2D(tex, fract(_st - vec2(0., r.y)))) * 0.12;
+   c += (texture2D(tex, fract(_st + d)) + texture2D(tex, fract(_st - d))
+       + texture2D(tex, fract(_st + vec2(d.x, -d.y))) + texture2D(tex, fract(_st + vec2(-d.x, d.y)))) * 0.06;
+   c += (texture2D(tex, fract(_st + vec2(2. * r.x, 0.))) + texture2D(tex, fract(_st - vec2(2. * r.x, 0.)))
+       + texture2D(tex, fract(_st + vec2(0., 2. * r.y))) + texture2D(tex, fract(_st - vec2(0., 2. * r.y)))) * 0.02;
+   return c;`,
+      wgsl: `   let r = vec2<f32>(radius, radius * resolution.x / resolution.y);
+   let d = r * 0.7071;
+   var c = textureSample(tex, samptex, fract(_st)) * 0.2;
+   c += (textureSample(tex, samptex, fract(_st + vec2<f32>(r.x, 0.))) + textureSample(tex, samptex, fract(_st - vec2<f32>(r.x, 0.)))
+       + textureSample(tex, samptex, fract(_st + vec2<f32>(0., r.y))) + textureSample(tex, samptex, fract(_st - vec2<f32>(0., r.y)))) * 0.12;
+   c += (textureSample(tex, samptex, fract(_st + d)) + textureSample(tex, samptex, fract(_st - d))
+       + textureSample(tex, samptex, fract(_st + vec2<f32>(d.x, -d.y))) + textureSample(tex, samptex, fract(_st + vec2<f32>(-d.x, d.y)))) * 0.06;
+   c += (textureSample(tex, samptex, fract(_st + vec2<f32>(2. * r.x, 0.))) + textureSample(tex, samptex, fract(_st - vec2<f32>(2. * r.x, 0.)))
+       + textureSample(tex, samptex, fract(_st + vec2<f32>(0., 2. * r.y))) + textureSample(tex, samptex, fract(_st - vec2<f32>(0., 2. * r.y)))) * 0.02;
+   return c;`
+    },
+    {
       name: "prev",
       type: "src",
       inputs: [],
@@ -26299,9 +26338,15 @@ fn main(input: VertexInput) -> VertexOutput {
         if (shaderParams.wgsl && inputs[0] && inputs[0].type === "sampler2D") {
           let texName = inputs[0].name;
           let sampName = "samp" + texName;
-          fragColor = (uv) => {
-            return `textureSample( ${texName}, ${sampName}, fract(${uv}))`;
-          };
+          if (transform.name === "src") {
+            fragColor = (uv) => {
+              return `textureSample( ${texName}, ${sampName}, fract(${uv}))`;
+            };
+          } else {
+            fragColor = (uv) => {
+              return `${shaderString(`${uv}, ${texName}, ${sampName}`, transform.name, inputs.slice(1), shaderParams)}`;
+            };
+          }
         } else {
           fragColor = (uv) => {
             return `${shaderString(uv, transform.name, inputs, shaderParams)}`;
@@ -26605,10 +26650,14 @@ fn main(input: VertexInput) -> VertexOutput {
     if (!t) return transform.transform.wgsl || "";
     const originalInputs = transform.transform.inputs || [];
     const firstTypeArg = t.args[0];
-    const allArgs = [firstTypeArg, ...originalInputs.map((inp) => ({
-      type: toWgslType(inp.type),
-      name: inp.name
-    }))];
+    const allArgs = [firstTypeArg];
+    for (const inp of originalInputs) {
+      if (inp.type === "sampler2D") {
+        allArgs.push({ type: "texture_2d<f32>", name: inp.name }, { type: "sampler", name: "samp" + inp.name });
+      } else {
+        allArgs.push({ type: toWgslType(inp.type), name: inp.name });
+      }
+    }
     const args = allArgs.map((arg) => `${arg.name}: ${arg.type}`).join(", ");
     const body = transform.transform.wgsl || "";
     return `
