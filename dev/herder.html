@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Herder, phase 1 and 2</title>
+    <style>
+      body { margin: 0; background: black; color: #ccc; font-family: monospace; font-size: 12px; overflow: hidden; }
+      canvas { width: 100vw; height: 100vh; display: block; }
+      #hud { position: fixed; left: 8px; bottom: 8px; background: rgba(0,0,0,0.55); padding: 6px 8px; white-space: pre; line-height: 1.35; }
+      #hud b { color: #ff9; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="hud">loading</div>
+    <script type="module">
+      // A single optical feedback loop, Light Herder style, on one output:
+      //   camera sees the monitor (itself, k frames ago), through a beam splitter that also
+      //   shows the mirrored monitor; gain (contrast/brightness) sets the loop gain; a seed
+      //   pattern enters through the switcher (blend).
+      // Query: mode = gl | gpu (createHydra), group = EC4 group (default 1), h = hide hud
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'gpu'
+      const group = parseInt(q.get('group') || '1')
+      const canvas = document.getElementById('c')
+      const hud = document.getElementById('hud')
+      canvas.width = 1280; canvas.height = 720
+
+      const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+      const { install, ec4 } = await import('../extensions/midi/index.js')
+      const hydra = await createHydra({ canvas, width: 1280, height: 720, detectAudio: false, makeGlobal: true, numOutputs: 2, useWGSL: mode === 'gpu' })
+      window.__hydra = hydra
+      const midi = await install(hydra, { profile: ec4 })
+
+      // EC4 group `group`: encoder n -> name. Push (type Note) = fine.
+      const g = group
+      midi.names({
+        gain: [g, 1], bright: [g, 2], zoom: [g, 3], rot: [g, 4], x: [g, 5], y: [g, 6],
+        hue: [g, 7], sat: [g, 8], blur: [g, 9], mirror: [g, 10], delay: [g, 11], seed: [g, 12],
+        mirrorZoom: [g, 13], seedFreq: [g, 14], seedKal: [g, 15], persist: [g, 16]
+      })
+      const P = {
+        gain:       midi.cc('gain',   { min: 0.5, max: 2.5, init: 1.02, curve: 'log', steps: 200, fine: 10 }),   // loop gain lives just above 1
+        bright:     midi.cc('bright', { min: -0.3, max: 0.3, init: 0, steps: 200, fine: 10 }),
+        zoom:       midi.cc('zoom',   { min: 0.8, max: 1.25, init: 1.02, curve: 'log', steps: 200, fine: 10 }), // camera distance
+        rot:        midi.cc('rot',    { min: 0, max: 6.283, init: 0.02, wrap: true, steps: 360, fine: 10 }),      // camera rotation per frame
+        x:          midi.cc('x',      { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
+        y:          midi.cc('y',      { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
+        hue:        midi.cc('hue',    { min: -0.1, max: 0.1, init: 0.005, steps: 200, fine: 10 }),            // hue drift per pass
+        sat:        midi.cc('sat',    { min: 0.5, max: 1.5, init: 1.0, steps: 100, fine: 10 }),
+        blur:       midi.cc('blur',   { min: 0.0005, max: 0.02, init: 0.003, curve: 'log', steps: 100, fine: 10 }),
+        mirror:     midi.cc('mirror', { min: 0, max: 1, init: 0.35, steps: 100, fine: 10 }),                  // beam splitter reflectance
+        delay:      midi.cc('delay',  { min: 1, max: 29, init: 1, steps: 28 }),                              // frames of camera delay
+        seed:       midi.cc('seed',   { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),                 // switcher: seed into the loop
+        mirrorZoom: midi.cc('mirrorZoom', { min: 0.5, max: 2, init: 0.9, curve: 'log', steps: 100, fine: 10 }),
+        seedFreq:   midi.cc('seedFreq', { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
+        seedKal:    midi.cc('seedKal', { min: 1, max: 12, init: 3, steps: 11 }),
+        persist:    midi.cc('persist', { min: 0, max: 1, init: 0, steps: 100 })                              // extra echo from the delay line
+      }
+
+      o0.setDepth(30)
+
+      // the seed: what the external video input shows
+      const seed = () => osc(P.seedFreq, 0.05, 1).kaleid(() => Math.round(P.seedKal()))
+
+      // the camera path: monitor k frames ago, softened by the optics, moved by the camera rig
+      const camera = () => blur(o0.delay(() => Math.round(P.delay())), P.blur)
+        .scale(P.zoom).rotate(P.rot).scroll(P.x, P.y)
+
+      // the beam splitter: transmitted camera view mixed with the mirrored monitor
+      const splitter = () => camera()
+        .blend(src(o0).scale(P.mirrorZoom, -1, 1), P.mirror)
+
+      // the monitor knobs and the switcher, then back to the monitor
+      splitter()
+        .hue(P.hue).saturate(P.sat).contrast(P.gain).brightness(P.bright)
+        .blend(src(o0.delay(15)), P.persist)
+        .blend(seed(), P.seed)
+        .out(o0)
+
+      seed().out(o1)   // the seed on its own, for render(o1)
+      render(o0)
+
+      // HUD
+      const names = Object.keys(P)
+      const fmt = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3))
+      setInterval(() => {
+        if (q.get('h')) { hud.style.display = 'none'; return }
+        hud.innerHTML = `Herder 1  ${mode}  EC4 group ${g}   inputs: ${midi.inputs.join(', ') || '(none)'}\n` +
+          names.map((n, i) => `<b>${String(i + 1).padStart(2)} ${n.padEnd(10)}</b> ${fmt(P[n]())}`).join('\n')
+      }, 200)
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
+        if (e.key === '0') render()
+        if (e.key === '1') render(o0)
+        if (e.key === '2') render(o1)
+        if (e.key === 'r') { Object.values(P).forEach(f => f.reset()); midi.refresh() }
+      })
+      window.__herder = { P, midi }
+    </script>
+  </body>
+</html>
