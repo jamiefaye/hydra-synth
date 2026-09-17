@@ -121,25 +121,31 @@
         urlBox.style.display = (kind === 'video' || kind === 'image') ? '' : 'none'
         build()
       }
+      // views: keys 0/1/2, or the push of encoder 16 toggles grid <-> loop
+      let view = 'loop'
+      const setView = (v) => { view = v; if (v === 'grid') render(); else if (v === 'seed') render(o1); else render(o0) }
+      const gridPush = midi.note([g, 16], { toggle: true })
+      let lastGridPush = gridPush()
       seedSel.onchange = () => setSeed(seedSel.value)
       urlBox.onchange = () => setSeed(seedKind, urlBox.value)
       const seedOrder = ['osc', 'noise', 'voronoi', 'cam', 'screen']
       setSeed(seedKind)
-      render(o0)
+      setView('loop')
 
       // HUD
       const names = Object.keys(P)
       const fmt = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3))
       setInterval(() => {
+        if (gridPush() !== lastGridPush) { lastGridPush = gridPush(); setView(view === 'grid' ? 'loop' : 'grid') }
         if (q.get('h')) { hud.style.display = 'none'; return }
-        hud.innerHTML = `Herder 1  ${mode}  EC4 group ${g}  seed: ${seedKind}   inputs: ${midi.inputs.join(', ') || '(none)'}\n` +
+        hud.innerHTML = `Herder 1  ${mode}  EC4 group ${g}  seed: ${seedKind}  view: ${view} (push 16 / keys 0 1 2)   inputs: ${midi.inputs.join(', ') || '(none)'}\n` +
           names.map((n, i) => `<b>${String(i + 1).padStart(2)} ${n.padEnd(10)}</b> ${fmt(P[n]())}`).join('\n')
       }, 200)
       document.addEventListener('keydown', (e) => {
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
-        if (e.key === '0') render()
-        if (e.key === '1') render(o0)
-        if (e.key === '2') render(o1)
+        if (e.key === '0') setView('grid')
+        if (e.key === '1') setView('loop')
+        if (e.key === '2') setView('seed')
         if (e.key === 'r') { Object.values(P).forEach(f => f.reset()); midi.refresh() }
         if (e.key === 's') setSeed(seedOrder[(seedOrder.indexOf(seedKind) + 1) % seedOrder.length])
       })
