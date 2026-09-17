@@ -8,7 +8,11 @@
       canvas { width: 100vw; height: 100vh; display: block; }
       #hud { position: fixed; left: 8px; bottom: 8px; font-size: 11px; }
       #hudhead { background: rgba(0,0,0,0.55); padding: 3px 6px; margin-bottom: 4px; white-space: pre; display: flex; gap: 12px; align-items: center; }
-      #hudhead select, #hudhead input { font: inherit; background: #111; color: #ddd; border: 1px solid #444; }
+      #hudhead select, #hudhead input, #editor textarea, #editor button, #editor label { font: inherit; background: #111; color: #ddd; border: 1px solid #444; }
+      #editor { display: none; background: rgba(0,0,0,0.7); padding: 6px 8px; margin-bottom: 4px; }
+      #editor textarea { width: 60em; height: 7em; display: block; margin: 4px 0; }
+      #editor .err { color: #f88; }
+      #editor label { border: none; }
     </style>
   </head>
   <body>
@@ -24,7 +28,15 @@
           <option value="screen">screen</option>
           <option value="video">video url</option>
           <option value="image">image url</option>
+          <option value="sketch">sketch (e to edit)</option>
         </select> <input id="url" placeholder="url" size="24" style="display:none" /></span>
+      </div>
+      <div id="editor">
+        <div>Hydra code. <label><input type="radio" name="emode" value="seed" checked /> seed: an expression that becomes the seed on o2, loops untouched</label>
+        <label><input type="radio" name="emode" value="raw" /> roughshod: run as-is, anything goes (b rebuilds the loops)</label>
+        <span style="float:right">ctrl+enter apply, esc close</span></div>
+        <textarea id="code" spellcheck="false">osc(12, 0.05, 1).kaleid(5).rotate(() => time * 0.1)</textarea>
+        <button id="apply">apply</button> <span id="everr" class="err"></span>
       </div>
       <div id="panel"></div>
     </div>
@@ -115,8 +127,20 @@
       // the seed sketch uses loop A's SFRQ/SKAL knobs (one seed, two loops)
       const kalOn = () => Math.round(A.skal()) >= 2
       const kal = (chain) => kalOn() ? chain.kaleid(() => Math.max(2, Math.round(A.skal()))) : chain
+      // ---- user code: a seed expression, or roughshod
+      const editor = document.getElementById('editor'), codeBox = document.getElementById('code'), everr = document.getElementById('everr')
+      try { const saved = localStorage.getItem('herder.code'); if (saved) codeBox.value = saved } catch (e) { /* no storage */ }
+      const editMode = () => document.querySelector('input[name=emode]:checked').value
+      const evalSeed = () => {
+        const chain = (0, eval)(codeBox.value)
+        if (!chain || typeof chain.out !== 'function') throw new Error('seed code must be a chain, e.g. osc(10).kaleid(4)')
+        return chain
+      }
       const seedChain = () => {
         switch (seedKind) {
+          case 'sketch': {
+            try { everr.textContent = ''; return kal(evalSeed()) } catch (e) { everr.textContent = e.message; return kal(osc(A.sfrq, 0.05, 1)) }
+          }
           case 'noise': return kal(noise(A.sfrq, 0.1).brightness(0.4).contrast(1.6))
           case 'voronoi': return kal(voronoi(A.sfrq, 0.3, 0.3))
           case 'cam': case 'screen': case 'video': case 'image': ensureSource(seedKind); return kal(src(s0))
@@ -169,7 +193,7 @@
       }
       seedSel.onchange = () => setSeed(seedSel.value)
       urlBox.onchange = () => setSeed(seedKind, urlBox.value)
-      const seedOrder = ['osc', 'noise', 'voronoi', 'cam', 'screen']
+      const seedOrder = ['osc', 'noise', 'voronoi', 'cam', 'screen', 'sketch']
 
       // ---- views
       let view = 'program'
@@ -179,6 +203,21 @@
       let lastViewPush = viewPush(), lastGrid = S.grid() > 0.5
       setSeed(seedKind)
       setView('program')
+
+      const applyCode = () => {
+        try { localStorage.setItem('herder.code', codeBox.value) } catch (e) { /* no storage */ }
+        everr.textContent = ''
+        if (editMode() === 'seed') { setSeed('sketch') }
+        else {
+          try { (0, eval)(codeBox.value) } catch (e) { everr.textContent = e.message }   // roughshod: whatever it does, it does
+        }
+      }
+      document.getElementById('apply').onclick = applyCode
+      codeBox.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); applyCode() }
+        if (e.key === 'Escape') { editor.style.display = 'none'; codeBox.blur() }
+        e.stopPropagation()
+      })
 
       // ---- HUD: header + one group's 4x4 block; [ and ] change the group shown
       const DESC = {
@@ -215,7 +254,7 @@
         ]
       })
       const refreshHud = () => {
-        head.textContent = `${mode}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  r reset  d dump  h hide   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        head.textContent = `${mode}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  e edit  b rebuild  r reset  d dump  h hide   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
       }
       setInterval(() => {
         if (viewPush() !== lastViewPush) { lastViewPush = viewPush(); setView(view === 'grid' ? 'program' : 'grid') }
@@ -225,6 +264,9 @@
         refreshHud()
       }, 200)
       document.addEventListener('keydown', (e) => {
+        if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return   // typing, not flying
+        if (e.key === 'e') { editor.style.display = editor.style.display === 'none' || !editor.style.display ? 'block' : 'none'; if (editor.style.display === 'block') codeBox.focus() }
+        if (e.key === 'b') build()
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
         if (e.key === '0') setView('grid'); if (e.key === '1') setView('a'); if (e.key === '2') setView('b'); if (e.key === '3') setView('seed'); if (e.key === '4') setView('program')
         if (e.key === 'r') { for (const o of [A, B, S, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
@@ -251,7 +293,7 @@
         return state
       }
       document.addEventListener('keydown', (e) => { if (e.key === 'd') dump() })
-      window.__herder = { P, midi, panel, setSeed, setView, build, dump, get seedKind () { return seedKind }, get view () { return view } }
+      window.__herder = { P, midi, panel, setSeed, setView, build, dump, applyCode, codeBox, get seedKind () { return seedKind }, get view () { return view } }
     </script>
   </body>
 </html>
