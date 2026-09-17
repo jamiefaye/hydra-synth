@@ -10,10 +10,15 @@
     "./state": "./core/midi-state.js",
     "./profiles": "./core/profiles.js",
     "./adapters/web-midi": "./adapters/web-midi.js",
-    "./adapters/virtual": "./adapters/virtual.js"
+    "./adapters/virtual": "./adapters/virtual.js",
+    "./ec4-sysex": "./core/ec4-sysex.js",
+    "./adapters/sysex": "./adapters/sysex.js"
   },
   "scripts": {
     "test": "node --test \"core/*.test.js\""
   },
-  "license": "MIT"
+  "license": "MIT",
+  "bin": {
+    "ec4-label": "./tools/ec4-label.js"
+  }
 }

@@ -32,13 +32,43 @@ midi.note('gain', { toggle: true })   // the encoder's push (EC4 push type Note)
 raw numbers only. Profiles live in `core/profiles.js`; the EC4 one encodes setup SE01 as
 programmed in September 2026 (groups by CC offset, channel 1, CCr2).
 
+## Labelling and configuring the EC4 from code
+
+The EC4's setups travel as a SysEx image (format from Faderfox, via the MIT
+faderfox-editor). `core/ec4-sysex.js` parses and encodes it and edits names, types,
+channels, numbers, modes and push settings. The device only takes a complete image and
+the transfer is started by hand on the device, so the flow is receive, edit, send.
+
+Offline, on a backup file (safest; then Load file + Send in the Faderfox editor):
+
+```
+node extensions/midi/tools/ec4-label.js show  backup.syx --setup 1 --group 1
+node extensions/midi/tools/ec4-label.js label backup.syx out.syx --setup 1 --group 1 1=GAIN 2=ROT 3=ZOOM
+node extensions/midi/tools/ec4-label.js apply backup.syx out.syx labels.json
+```
+
+From a sketch, with SysEx access (`install(hydra, { sysex: true })`, a second browser prompt):
+
+```javascript
+await midi.ec4.receive()          // then on the EC4: Func > Setup > Send, hold "Send all setups"
+midi.names({ gain: [1, 1], rot: [1, 2], zoom: [1, 3] })
+midi.ec4.labelFromNames(1)        // setup 1: names become the encoder labels
+midi.ec4.label(1, 2, { 1: { name: 'BLND', type: 'CCR2', mode: 'Acc1' } })
+midi.ec4.send()                   // EC4 in Func > Setup > Receive first; overwrites all 16 setups
+```
+
+Names are 4 characters from `0-9 A-Z a-z space . / -`. Keep a `.syx` backup before the first
+send; `midi.ec4.toBytes()` gives you one to save.
+
 ## Layout
 
 ```
 core/midi-state.js    value model: decode, curves, wrap, fine, snapshots   (no deps)
 core/profiles.js      device layouts and id resolution                    (no deps)
 core/controller.js    Controller = state + profile + feedback + transport (no deps)
+core/ec4-sysex.js     EC4 setup image: parse/encode dumps, edit names and settings (no deps)
 adapters/web-midi.js  browser ports          adapters/virtual.js  tests, bridges
+adapters/sysex.js     midi.ec4: receive / label / send   tools/ec4-label.js  offline CLI
 index.js              Hydra glue only: install() -> window.midi, hydra.synth.midi
 package.json          standalone metadata; `core/` and `adapters/` lift out unchanged
 ```

@@ -30,9 +30,11 @@ import { MidiState, describeEvent, MODES, CURVES } from './core/midi-state.js'
 import { profiles, ec4, generic } from './core/profiles.js'
 import { connectWebMidi } from './adapters/web-midi.js'
 import { connectVirtual } from './adapters/virtual.js'
+import { ec4Tools } from './adapters/sysex.js'
+import { Ec4Image, parseDump, encodeDump } from './core/ec4-sysex.js'
 
 export const VERSION = '0.2.0'
-export { Controller, MidiState, describeEvent, MODES, CURVES, profiles, ec4, generic, connectWebMidi, connectVirtual }
+export { Controller, MidiState, describeEvent, MODES, CURVES, profiles, ec4, generic, connectWebMidi, connectVirtual, ec4Tools, Ec4Image, parseDump, encodeDump }
 
 let _midi = null
 
@@ -41,7 +43,13 @@ let _midi = null
  *   profile      device profile (default: ec4); pass generic for plain absolute CC boxes, or null
  *   mode/channel/steps/feedback/log   Controller options (profile supplies mode/channel defaults)
  *   inputFilter/outputFilter          port name filters for the Web MIDI adapter
+ *   sysex        request SysEx access too (separate browser prompt); enables midi.ec4.receive()/send()
  *   makeGlobal   expose window.midi (default true)
+ *
+ * midi.ec4: device configuration (see adapters/sysex.js and core/ec4-sysex.js):
+ *   await midi.ec4.receive()                 // then on the EC4: Func > Setup > Send > hold "Send all setups"
+ *   midi.ec4.label(1, 1, { 1: 'GAIN', 2: 'ROT' })  or  midi.ec4.labelFromNames(1)
+ *   midi.ec4.send()                          // EC4 in Func > Setup > Receive first; overwrites all setups
  */
 export async function install (hydra = null, options = {}) {
   if (_midi) return _midi
@@ -62,7 +70,8 @@ export async function install (hydra = null, options = {}) {
   if (_hydra && _hydra.synth) _hydra.synth.midi = midi
   if (opts.makeGlobal && typeof window !== 'undefined') window.midi = midi
 
-  midi.ready = connectWebMidi(midi, { inputFilter: opts.inputFilter, outputFilter: opts.outputFilter })
+  midi.ec4 = ec4Tools(midi)
+  midi.ready = connectWebMidi(midi, { inputFilter: opts.inputFilter, outputFilter: opts.outputFilter, sysex: opts.sysex })
   _midi = midi
   return midi
 }

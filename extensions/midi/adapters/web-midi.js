@@ -57,6 +57,7 @@ export async function connectWebMidi (controller, options = {}) {
     for (const input of inputs) input.onmidimessage = (msg) => controller.handleMessage(msg.data)
     const transport = {
       name: 'web-midi',
+      sysex: !!opts.sysex,
       access,
       inputs: inputs.map(i => i.name),
       outputs: outputs.map(o => o.name),

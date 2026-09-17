@@ -2,7 +2,7 @@
   typeof exports === "object" && typeof module !== "undefined" ? factory(exports) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = typeof globalThis !== "undefined" ? globalThis : global || self, factory(global.HydraMidiExtension = {}));
 })(this, (function(exports2) {
   "use strict";
-  const MODES = ["r1", "r2", "abs", "abs14"];
+  const MODES$1 = ["r1", "r2", "abs", "abs14"];
   const CURVES = ["linear", "log", "exp"];
   function decodeRelative(mode, v) {
     if (mode === "r1") return v === 0 ? 0 : v < 64 ? -v : 128 - v;
@@ -64,7 +64,7 @@
       if (cfg.min === void 0) cfg.min = this.defaults.min;
       if (cfg.max === void 0) cfg.max = this.defaults.max;
       if (cfg.init === void 0 || cfg.init === null) cfg.init = cfg.min;
-      if (!MODES.includes(cfg.mode)) throw new Error(`midi.cc: unknown mode "${cfg.mode}", use one of ${MODES.join(", ")}`);
+      if (!MODES$1.includes(cfg.mode)) throw new Error(`midi.cc: unknown mode "${cfg.mode}", use one of ${MODES$1.join(", ")}`);
       if (!CURVES.includes(cfg.curve)) throw new Error(`midi.cc: unknown curve "${cfg.curve}", use one of ${CURVES.join(", ")}`);
       if (cfg.curve === "log" && (cfg.min <= 0 || cfg.max <= 0)) throw new Error("midi.cc: log curve needs min and max > 0");
       if (cfg.fineNote === void 0) cfg.fineNote = number;
@@ -306,6 +306,7 @@
       this.outputs = [];
       this.ready = Promise.resolve(this);
       this.onInputsChanged = null;
+      this._sysexListeners = /* @__PURE__ */ new Set();
       this._logging = !!this.opts.log;
       this._unlisten = this.state.onEvent((ev) => {
         if (this._logging) console.log("[midi]", describeEvent(ev));
@@ -343,7 +344,17 @@
       return this.state.note(note, o);
     }
     handleMessage(bytes) {
+      if (bytes && bytes[0] === 240) return this.handleSysex(bytes);
       return this.state.handleMessage(bytes);
+    }
+    /** System exclusive messages go to onSysex listeners, not to the value model. */
+    handleSysex(bytes) {
+      for (const fn of this._sysexListeners) fn(bytes);
+      return { type: "sysex", length: bytes.length };
+    }
+    onSysex(fn) {
+      this._sysexListeners.add(fn);
+      return () => this._sysexListeners.delete(fn);
     }
     snapshot() {
       return this.state.snapshot();
@@ -435,6 +446,7 @@
       for (const input of inputs) input.onmidimessage = (msg) => controller.handleMessage(msg.data);
       const transport = {
         name: "web-midi",
+        sysex: !!opts.sysex,
         access,
         inputs: inputs.map((i) => i.name),
         outputs: outputs.map((o) => o.name),
@@ -470,6 +482,375 @@
     controller.attachTransport(transport);
     return transport;
   }
+  const MEMORY_OFFSET = 2816;
+  const MEMORY_SIZE = 62720;
+  const DEVICE_ID_EC4 = 11;
+  const PAGE = 64;
+  const ADDR = {
+    key1: 2816 - MEMORY_OFFSET,
+    // push mode(1) + push number(7), 16 bytes per group
+    setupNames: 7104 - MEMORY_OFFSET,
+    // 16 x 4 chars
+    groupNames: 7168 - MEMORY_OFFSET,
+    // 16 setups x 16 groups x 4 chars
+    setupData: 8192 - MEMORY_OFFSET,
+    // 192 bytes per group (see FIELD)
+    key2: 57344 - MEMORY_OFFSET
+    // push display/lower, link/upper, 32 bytes per group
+  };
+  const GROUP_BYTES = 192;
+  const KEY1_GROUP_BYTES = 16;
+  const KEY2_GROUP_BYTES = 32;
+  const FIELD = {
+    typeChannel: 0,
+    // type bits 4..7, channel-1 bits 0..3
+    linkNumber: 16,
+    // link bit 7, command number bits 0..6
+    numberHigh: 32,
+    // NRPN MSB
+    lower: 48,
+    upper: 64,
+    modeScale: 80,
+    // mode bits 4..7, display scale bits 0..3
+    msbs: 96,
+    // upper msb bits 4..7, lower msb bits 0..3 (14-bit ranges)
+    pushTypeChannel: 112,
+    names: 128
+    // 16 x 4 chars
+  };
+  const TYPES = ["CCR1", "CCR2", "CCab", "PrgC", "CCAh", "PBnd", "AftT", "Note", "NRPN"];
+  const MODES = ["Div8", "Div4", "Div2", "Acc0", "Acc1", "Acc2", "Acc3", "LSp2", "LSp4", "LSp6"];
+  const SCALES = ["off", "127", "100", "1000", "+-63", "+-50", "+-500", "ONOF", "9999"];
+  const PUSH_TYPES = ["Off", "Note", "CC", "PrgC", "PBnd", "AftT", "Grp", "Set", "Acc0", "Acc3", "LSp6", "Min", "Max"];
+  const NAME_OK = /^[0-9A-Za-z .\/-]*$/;
+  function normalizeName(name) {
+    const s = String(name ?? "").slice(0, 4);
+    if (!NAME_OK.test(s)) throw new Error(`EC4 name "${name}": only 0-9 A-Z a-z space . / - allowed`);
+    return s.padEnd(4, " ");
+  }
+  const enumIndex = (list, v, what) => {
+    if (typeof v === "number") return v;
+    const i = list.indexOf(v);
+    if (i < 0) throw new Error(`EC4 ${what} "${v}": use one of ${list.join(", ")}`);
+    return i;
+  };
+  class Ec4Image {
+    /** @param {Uint8Array} [data] a MEMORY_SIZE image; empty (zeroed, blank names) when omitted */
+    constructor(data = null) {
+      this.data = data ? Uint8Array.from(data) : new Uint8Array(MEMORY_SIZE);
+      if (this.data.length !== MEMORY_SIZE) throw new Error(`EC4 image must be ${MEMORY_SIZE} bytes, got ${this.data.length}`);
+      this.version = null;
+    }
+    static blank() {
+      const img = new Ec4Image();
+      for (let s = 1; s <= 16; s++) {
+        img.setSetupName(s, `SE${String(s).padStart(2, "0")}`);
+        for (let g = 1; g <= 16; g++) {
+          img.setGroupName(s, g, `GR${String(g).padStart(2, "0")}`);
+          for (let e = 1; e <= 16; e++) {
+            img.setEncoder(s, g, e, { type: "CCab", channel: 1, number: e - 1, lower: 0, upper: 127, mode: "Acc0", scale: "127", name: `EC${String(e).padStart(2, "0")}` });
+          }
+        }
+      }
+      return img;
+    }
+    _check(s, g, e) {
+      if (s < 1 || s > 16) throw new Error(`EC4 setup ${s} out of range 1..16`);
+      if (g !== void 0 && (g < 1 || g > 16)) throw new Error(`EC4 group ${g} out of range 1..16`);
+      if (e !== void 0 && (e < 1 || e > 16)) throw new Error(`EC4 encoder ${e} out of range 1..16`);
+    }
+    _groupBase(s, g) {
+      return ADDR.setupData + ((s - 1) * 16 + (g - 1)) * GROUP_BYTES;
+    }
+    _key1Base(s, g) {
+      return ADDR.key1 + ((s - 1) * 16 + (g - 1)) * KEY1_GROUP_BYTES;
+    }
+    _key2Base(s, g) {
+      return ADDR.key2 + ((s - 1) * 16 + (g - 1)) * KEY2_GROUP_BYTES;
+    }
+    _str(addr) {
+      return String.fromCharCode(...this.data.subarray(addr, addr + 4));
+    }
+    _putStr(addr, name) {
+      const n = normalizeName(name);
+      for (let i = 0; i < 4; i++) this.data[addr + i] = n.charCodeAt(i);
+    }
+    getSetupName(s) {
+      this._check(s);
+      return this._str(ADDR.setupNames + (s - 1) * 4);
+    }
+    setSetupName(s, name) {
+      this._check(s);
+      this._putStr(ADDR.setupNames + (s - 1) * 4, name);
+      return this;
+    }
+    getGroupName(s, g) {
+      this._check(s, g);
+      return this._str(ADDR.groupNames + (s - 1) * 64 + (g - 1) * 4);
+    }
+    setGroupName(s, g, name) {
+      this._check(s, g);
+      this._putStr(ADDR.groupNames + (s - 1) * 64 + (g - 1) * 4, name);
+      return this;
+    }
+    getEncoderName(s, g, e) {
+      this._check(s, g, e);
+      return this._str(this._groupBase(s, g) + FIELD.names + (e - 1) * 4);
+    }
+    setEncoderName(s, g, e, name) {
+      this._check(s, g, e);
+      this._putStr(this._groupBase(s, g) + FIELD.names + (e - 1) * 4, name);
+      return this;
+    }
+    /** All settings of one encoder, with enum names. */
+    getEncoder(s, g, e) {
+      this._check(s, g, e);
+      const d = this.data, b = this._groupBase(s, g), i = e - 1;
+      const k1 = this._key1Base(s, g), k2 = this._key2Base(s, g);
+      return {
+        type: TYPES[d[b + FIELD.typeChannel + i] >> 4] ?? d[b + FIELD.typeChannel + i] >> 4,
+        channel: (d[b + FIELD.typeChannel + i] & 15) + 1,
+        number: d[b + FIELD.linkNumber + i] & 127,
+        link: !!(d[b + FIELD.linkNumber + i] & 128),
+        numberHigh: d[b + FIELD.numberHigh + i],
+        lower: d[b + FIELD.lower + i] + ((d[b + FIELD.msbs + i] & 15) << 8),
+        upper: d[b + FIELD.upper + i] + (d[b + FIELD.msbs + i] >> 4 << 8),
+        mode: MODES[d[b + FIELD.modeScale + i] >> 4] ?? d[b + FIELD.modeScale + i] >> 4,
+        scale: SCALES[d[b + FIELD.modeScale + i] & 15] ?? d[b + FIELD.modeScale + i] & 15,
+        name: this.getEncoderName(s, g, e),
+        push: {
+          type: PUSH_TYPES[d[b + FIELD.pushTypeChannel + i] >> 4] ?? d[b + FIELD.pushTypeChannel + i] >> 4,
+          channel: (d[b + FIELD.pushTypeChannel + i] & 15) + 1,
+          mode: d[k1 + i] >> 7,
+          number: d[k1 + i] & 127,
+          display: d[k2 + i] >> 7,
+          lower: d[k2 + i] & 127,
+          link: d[k2 + 16 + i] >> 7,
+          upper: d[k2 + 16 + i] & 127
+        }
+      };
+    }
+    /** Set any subset of an encoder's settings; enum names or raw numbers accepted. */
+    setEncoder(s, g, e, v = {}) {
+      this._check(s, g, e);
+      const d = this.data, b = this._groupBase(s, g), i = e - 1;
+      const k1 = this._key1Base(s, g), k2 = this._key2Base(s, g);
+      const setHi = (addr, hi) => {
+        d[addr] = d[addr] & 15 | (hi & 15) << 4;
+      };
+      const setLo = (addr, lo) => {
+        d[addr] = d[addr] & 240 | lo & 15;
+      };
+      if (v.type !== void 0) setHi(b + FIELD.typeChannel + i, enumIndex(TYPES, v.type, "type"));
+      if (v.channel !== void 0) setLo(b + FIELD.typeChannel + i, v.channel - 1);
+      if (v.number !== void 0) d[b + FIELD.linkNumber + i] = d[b + FIELD.linkNumber + i] & 128 | v.number & 127;
+      if (v.link !== void 0) d[b + FIELD.linkNumber + i] = d[b + FIELD.linkNumber + i] & 127 | (v.link ? 128 : 0);
+      if (v.numberHigh !== void 0) d[b + FIELD.numberHigh + i] = v.numberHigh & 255;
+      if (v.lower !== void 0) {
+        d[b + FIELD.lower + i] = v.lower & 255;
+        setLo(b + FIELD.msbs + i, v.lower >> 8);
+      }
+      if (v.upper !== void 0) {
+        d[b + FIELD.upper + i] = v.upper & 255;
+        setHi(b + FIELD.msbs + i, v.upper >> 8);
+      }
+      if (v.mode !== void 0) setHi(b + FIELD.modeScale + i, enumIndex(MODES, v.mode, "mode"));
+      if (v.scale !== void 0) setLo(b + FIELD.modeScale + i, enumIndex(SCALES, v.scale, "scale"));
+      if (v.name !== void 0) this.setEncoderName(s, g, e, v.name);
+      const p = v.push || {};
+      if (p.type !== void 0) setHi(b + FIELD.pushTypeChannel + i, enumIndex(PUSH_TYPES, p.type, "push type"));
+      if (p.channel !== void 0) setLo(b + FIELD.pushTypeChannel + i, p.channel - 1);
+      if (p.mode !== void 0) d[k1 + i] = d[k1 + i] & 127 | (p.mode ? 128 : 0);
+      if (p.number !== void 0) d[k1 + i] = d[k1 + i] & 128 | p.number & 127;
+      if (p.display !== void 0) d[k2 + i] = d[k2 + i] & 127 | (p.display ? 128 : 0);
+      if (p.lower !== void 0) d[k2 + i] = d[k2 + i] & 128 | p.lower & 127;
+      if (p.link !== void 0) d[k2 + 16 + i] = d[k2 + 16 + i] & 127 | (p.link ? 128 : 0);
+      if (p.upper !== void 0) d[k2 + 16 + i] = d[k2 + 16 + i] & 128 | p.upper & 127;
+      return this;
+    }
+    /** Apply { [encoder]: name } or { [encoder]: {settings} } to one group. */
+    labelGroup(s, g, map) {
+      for (const [e, v] of Object.entries(map)) {
+        if (typeof v === "string") this.setEncoderName(s, g, Number(e), v);
+        else this.setEncoder(s, g, Number(e), v);
+      }
+      return this;
+    }
+    /** Human summary of one group. */
+    describeGroup(s, g) {
+      const lines = [`Setup ${s} "${this.getSetupName(s)}"  group ${g} "${this.getGroupName(s, g)}"`];
+      for (let e = 1; e <= 16; e++) {
+        const x = this.getEncoder(s, g, e);
+        lines.push(`  ${String(e).padStart(2)} "${x.name}" ${x.type} ch${x.channel} #${x.number} ${x.mode} disp ${x.scale} ${x.lower}..${x.upper}  push ${x.push.type}`);
+      }
+      return lines.join("\n");
+    }
+  }
+  const hilo = (v) => [32 | v >> 4 & 15, 16 | v & 15];
+  function encodeDump(image, { version = [2, 4] } = {}) {
+    const data = image instanceof Ec4Image ? image.data : image;
+    if (data.length !== MEMORY_SIZE) throw new Error(`EC4 image must be ${MEMORY_SIZE} bytes`);
+    const out = [
+      240,
+      0,
+      0,
+      0,
+      65,
+      ...hilo(DEVICE_ID_EC4),
+      // download start, device id
+      66,
+      ...hilo(3),
+      // type: all setups
+      67,
+      ...hilo(version[0]),
+      // app id high
+      68,
+      ...hilo(version[1])
+    ];
+    const pages = data.length / PAGE;
+    for (let p = 0; p < pages; p++) {
+      const pos = p * PAGE;
+      const addr = pos + MEMORY_OFFSET;
+      out.push(73, ...hilo(addr >> 8), 74, ...hilo(addr & 255));
+      let crc = 0;
+      for (let i = 0; i < PAGE; i++) {
+        out.push(77, ...hilo(data[pos + i]));
+        crc += data[pos + i];
+      }
+      crc &= 65535;
+      out.push(75, ...hilo(crc >> 8), 76, ...hilo(crc & 255));
+      for (let i = 0; i < 30; i++) out.push(0);
+    }
+    out.push(79, ...hilo(DEVICE_ID_EC4), 247);
+    return Uint8Array.from(out);
+  }
+  function parseDump(bytes) {
+    if (!bytes || bytes.length < 4 || bytes[0] !== 240) throw new Error("EC4 sysex: not a sysex dump");
+    if (bytes[1] | bytes[2] | bytes[3]) throw new Error("EC4 sysex: wrong manufacturer id");
+    const img = new Ec4Image();
+    let ix = 4, version = 0, addr = 0, page = new Uint8Array(PAGE), pi = 0, crc = 0, done = false, pagesSeen = 0;
+    while (!done) {
+      while (ix < bytes.length && bytes[ix] === 0) ix++;
+      if (ix > bytes.length - 3) throw new Error("EC4 sysex: data incomplete");
+      const cmd = bytes[ix], val = (bytes[ix + 1] & 15) << 4 | bytes[ix + 2] & 15;
+      ix += 3;
+      switch (cmd) {
+        case 65:
+          if (val !== DEVICE_ID_EC4) throw new Error(`EC4 sysex: dump is for device id ${val}, not the EC4`);
+          break;
+        case 66:
+          if (val !== 3) throw new Error(`EC4 sysex: download type ${val} (only "all setups" = 3 supported)`);
+          break;
+        case 67:
+          version += val;
+          break;
+        case 68:
+          version += val / 10;
+          break;
+        case 73:
+          addr = val << 8;
+          break;
+        case 74:
+          addr |= val;
+          break;
+        case 77:
+          if (pi < PAGE) {
+            page[pi++] = val;
+            crc += val;
+          }
+          break;
+        case 75:
+          crc = crc & 65535;
+          if (crc >> 8 !== val) throw new Error(`EC4 sysex: CRC high mismatch at page ${addr.toString(16)}`);
+          break;
+        case 76: {
+          if ((crc & 255) !== val) throw new Error(`EC4 sysex: CRC low mismatch at page ${addr.toString(16)}`);
+          const off = addr - MEMORY_OFFSET;
+          if (off >= 0 && off + pi <= MEMORY_SIZE) img.data.set(page.subarray(0, pi), off);
+          pagesSeen++;
+          page = new Uint8Array(PAGE);
+          pi = 0;
+          crc = 0;
+          break;
+        }
+        case 79:
+          done = true;
+          break;
+        case 247:
+          done = true;
+          break;
+      }
+    }
+    img.version = version;
+    img.pages = pagesSeen;
+    return img;
+  }
+  function ec4Tools(controller) {
+    const tools = {
+      image: null,
+      Ec4Image,
+      parseDump,
+      encodeDump,
+      /** Resolve with an Ec4Image when the device sends a dump (start it on the EC4). */
+      receive({ timeoutMs = 12e4 } = {}) {
+        console.log('[midi/ec4] waiting for a dump: on the EC4 press Func > Setup > Send, hold "Send all setups"');
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            off();
+            reject(new Error("EC4 dump not received in time"));
+          }, timeoutMs);
+          const off = controller.onSysex((bytes) => {
+            if (bytes.length < 100) return;
+            try {
+              const img = parseDump(bytes);
+              clearTimeout(timer);
+              off();
+              tools.image = img;
+              console.log(`[midi/ec4] received firmware ${img.version} dump, ${img.pages} pages`);
+              resolve(img);
+            } catch (e) {
+              clearTimeout(timer);
+              off();
+              reject(e);
+            }
+          });
+        });
+      },
+      /** Send an image (default: the last received/loaded one). Device must be in Setup > Receive. */
+      send(image = tools.image) {
+        if (!image) throw new Error("midi.ec4.send: no image; receive() or load one first");
+        if (!controller.transport || !controller.transport.send) throw new Error("midi.ec4.send: no MIDI output");
+        if (!controller.transport.sysex) throw new Error("midi.ec4.send: transport was opened without sysex (install with { sysex: true })");
+        const bytes = encodeDump(image);
+        console.log(`[midi/ec4] sending ${bytes.length} bytes; the EC4 must show "Work in progress" (Func > Setup > Receive)`);
+        controller.transport.send(bytes);
+        return bytes.length;
+      },
+      /** Label encoders of one group from a map { encoder: name | settings } on the current image. */
+      label(setup, group, map) {
+        if (!tools.image) throw new Error("midi.ec4.label: no image; receive() or load one first");
+        return tools.image.labelGroup(setup, group, map);
+      },
+      /** Label encoders in the given setup from the controller's profile names ({ name: [group, n] }). */
+      labelFromNames(setup = 1, names = controller.profile && controller.profile.names) {
+        if (!names) throw new Error("midi.ec4.labelFromNames: no names; call midi.names({...}) first");
+        for (const [name, id] of Object.entries(names)) {
+          if (Array.isArray(id)) tools.image.setEncoderName(setup, id[0], id[1], name);
+        }
+        return tools.image;
+      },
+      /** Load a .syx file's bytes (e.g. from an <input type=file> or fetch) as the current image. */
+      load(bytes) {
+        tools.image = parseDump(bytes);
+        return tools.image;
+      },
+      /** Bytes for saving the current image as a .syx file. */
+      toBytes(image = tools.image) {
+        return encodeDump(image);
+      }
+    };
+    return tools;
+  }
   const VERSION = "0.2.0";
   let _midi = null;
   async function install(hydra = null, options = {}) {
@@ -492,7 +873,8 @@
     const _hydra = hydra || (typeof window !== "undefined" ? window.hydraSynth : null);
     if (_hydra && _hydra.synth) _hydra.synth.midi = midi;
     if (opts.makeGlobal && typeof window !== "undefined") window.midi = midi;
-    midi.ready = connectWebMidi(midi, { inputFilter: opts.inputFilter, outputFilter: opts.outputFilter });
+    midi.ec4 = ec4Tools(midi);
+    midi.ready = connectWebMidi(midi, { inputFilter: opts.inputFilter, outputFilter: opts.outputFilter, sysex: opts.sysex });
     _midi = midi;
     return midi;
   }
@@ -501,15 +883,19 @@
   }
   exports2.CURVES = CURVES;
   exports2.Controller = Controller;
-  exports2.MODES = MODES;
+  exports2.Ec4Image = Ec4Image;
+  exports2.MODES = MODES$1;
   exports2.MidiState = MidiState;
   exports2.VERSION = VERSION;
   exports2.connectVirtual = connectVirtual;
   exports2.connectWebMidi = connectWebMidi;
   exports2.describeEvent = describeEvent;
   exports2.ec4 = ec4;
+  exports2.ec4Tools = ec4Tools;
+  exports2.encodeDump = encodeDump;
   exports2.generic = generic;
   exports2.install = install;
+  exports2.parseDump = parseDump;
   exports2.profiles = profiles;
   exports2.uninstall = uninstall;
   Object.defineProperty(exports2, Symbol.toStringTag, { value: "Module" });

@@ -31,6 +31,7 @@ export class Controller {
     this.outputs = []
     this.ready = Promise.resolve(this)
     this.onInputsChanged = null
+    this._sysexListeners = new Set()
     this._logging = !!this.opts.log
     this._unlisten = this.state.onEvent(ev => {
       if (this._logging) console.log('[midi]', describeEvent(ev))
@@ -72,7 +73,18 @@ export class Controller {
     return this.state.note(note, o)
   }
 
-  handleMessage (bytes) { return this.state.handleMessage(bytes) }
+  handleMessage (bytes) {
+    if (bytes && bytes[0] === 0xf0) return this.handleSysex(bytes)
+    return this.state.handleMessage(bytes)
+  }
+
+  /** System exclusive messages go to onSysex listeners, not to the value model. */
+  handleSysex (bytes) {
+    for (const fn of this._sysexListeners) fn(bytes)
+    return { type: 'sysex', length: bytes.length }
+  }
+
+  onSysex (fn) { this._sysexListeners.add(fn); return () => this._sysexListeners.delete(fn) }
   snapshot () { return this.state.snapshot() }
   restore (snap) { return this.state.restore(snap) }
   onEvent (fn) { return this.state.onEvent(fn) }
