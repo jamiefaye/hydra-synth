@@ -70,7 +70,7 @@
         seed:       midi.cc('seed',   { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),                 // switcher: seed into the loop
         mirrorZoom: midi.cc('mirrorZoom', { min: 0.5, max: 2, init: 0.9, curve: 'log', steps: 100, fine: 10 }),
         seedFreq:   midi.cc('seedFreq', { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
-        seedKal:    midi.cc('seedKal', { min: 1, max: 12, init: 3, steps: 11 }),
+        seedKal:    midi.cc('seedKal', { min: 0, max: 12, init: 3, steps: 12 }),   // below 2 = kaleid off (kaleid(1) is not a passthrough)
         persist:    midi.cc('persist', { min: 0, max: 1, init: 0, steps: 100 })                              // extra echo from the delay line
       }
 
@@ -89,14 +89,18 @@
         if (kind === 'video' && s0kind !== 'video:' + seedUrl) { if (seedUrl) { s0.initVideo(seedUrl); s0kind = 'video:' + seedUrl } }
         if (kind === 'image' && s0kind !== 'image:' + seedUrl) { if (seedUrl) { s0.initImage(seedUrl); s0kind = 'image:' + seedUrl } }
       }
+      const kalOn = () => Math.round(P.seedKal()) >= 2
+      let kalBuilt = kalOn()
+      const kal = (chain) => kalOn() ? chain.kaleid(() => Math.max(2, Math.round(P.seedKal()))) : chain
       const seed = () => {
+        kalBuilt = kalOn()
         switch (seedKind) {
-          case 'noise': return noise(P.seedFreq, 0.1).brightness(0.4).contrast(1.6).kaleid(() => Math.round(P.seedKal()))
-          case 'voronoi': return voronoi(P.seedFreq, 0.3, 0.3).kaleid(() => Math.round(P.seedKal()))
+          case 'noise': return kal(noise(P.seedFreq, 0.1).brightness(0.4).contrast(1.6))
+          case 'voronoi': return kal(voronoi(P.seedFreq, 0.3, 0.3))
           case 'cam': case 'screen': case 'video': case 'image':
             ensureSource(seedKind)
-            return src(s0).kaleid(() => Math.round(P.seedKal()))
-          default: return osc(P.seedFreq, 0.05, 1).kaleid(() => Math.round(P.seedKal()))
+            return kal(src(s0))
+          default: return kal(osc(P.seedFreq, 0.05, 1))
         }
       }
 
@@ -154,7 +158,7 @@
         'Switcher: how much of the seed enters the loop. Nudge it up to disturb, back down to let the loop work.',
         'Mirror zoom: optical distance of the reflected monitor relative to the direct one.',
         'Seed frequency or scale for the sketch seeds.',
-        'Seed kaleidoscope sides (1 = off).',
+        'Seed kaleidoscope sides. Below 2 the kaleid is removed from the chain (kaleid(1) would still fold the image).',
         'Persistence: an extra echo from 15 frames back mixed into the loop.'
       ]
       const fmt = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3))
@@ -176,6 +180,7 @@
       }
       setInterval(() => {
         if (gridPush() !== lastGridPush) { lastGridPush = gridPush(); setView(view === 'grid' ? 'loop' : 'grid') }
+        if (kalOn() !== kalBuilt) build()   // kaleid enters or leaves the seed chain
         if (q.get('h')) { hud.style.display = 'none'; return }
         head.textContent = `${mode} GR0${g} seed ${seedKind} view ${view}  [0 1 2 s h r, push16 grid]`
         valueEls.forEach((el, i) => { el.textContent = fmt(P[names[i]]()).padStart(6) })
