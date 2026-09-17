@@ -60,6 +60,20 @@ midi.ec4.send()                   // EC4 in Func > Setup > Receive first; overwr
 Names are 4 characters from `0-9 A-Z a-z space . / -`. Keep a `.syx` backup before the first
 send; `midi.ec4.toBytes()` gives you one to save.
 
+## Virtual control surface (no hardware)
+
+`ui/panel.js` mounts a panel of draggable numbers, one cell per encoder, for any number of
+groups. Drag up or down to turn, wheel for single detents, click for the push, hold shift
+while dragging for fine. It synthesises the bytes the device would send and feeds them to
+the controller, so everything behaves as with hardware, and it mirrors real knob moves.
+
+```javascript
+import { mountPanel } from 'hydra-synth/extensions/midi/ui/panel.js'
+mountPanel(document.getElementById('panel'), midi, {
+  groups: [{ group: 1, title: 'LOPA', labels: ['GAIN', 'BRT', ...], descs: { GAIN: 'loop gain' } }]
+})
+```
+
 ## Layout
 
 ```

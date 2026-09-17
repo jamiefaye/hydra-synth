@@ -6,17 +6,14 @@
     <style>
       body { margin: 0; background: black; color: #ccc; font-family: monospace; font-size: 12px; overflow: hidden; }
       canvas { width: 100vw; height: 100vh; display: block; }
-      #hud { position: fixed; left: 8px; bottom: 8px; background: rgba(0,0,0,0.55); padding: 4px 6px; white-space: pre; line-height: 1.25; font-size: 11px; }
-      #hud b { color: #ff9; position: relative; cursor: help; }
-      #hud b:hover::after { content: attr(data-desc); position: absolute; left: 0; bottom: 1.6em; z-index: 2;
-        background: #222; color: #eee; border: 1px solid #665; padding: 4px 7px; white-space: normal; width: 22em;
-        font-weight: normal; font-size: 11px; line-height: 1.3; }
+      #hud { position: fixed; left: 8px; bottom: 8px; font-size: 11px; }
+      #hudhead { background: rgba(0,0,0,0.55); padding: 3px 6px; margin-bottom: 4px; white-space: pre; display: inline-block; }
       #seedbar { position: fixed; right: 8px; bottom: 8px; background: rgba(0,0,0,0.55); padding: 6px 8px; }
     </style>
   </head>
   <body>
     <canvas id="c"></canvas>
-    <div id="hud">loading</div>
+    <div id="hud"><div id="hudhead">loading</div><div id="panel"></div></div>
     <div id="seedbar">
       seed <select id="seed">
         <option value="osc">osc + kaleid (sketch)</option>
@@ -43,6 +40,7 @@
 
       const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
       const { install, ec4 } = await import('../extensions/midi/index.js')
+      const { mountPanel } = await import('../extensions/midi/ui/panel.js')
       const hydra = await createHydra({ canvas, width: 1280, height: 720, detectAudio: false, makeGlobal: true, numOutputs: 4, useWGSL: mode === 'gpu' })
       window.__hydra = hydra
       const midi = await install(hydra, { profile: ec4 })
@@ -204,30 +202,18 @@
         FRZA: 'Freeze loop A (holds the last frame).', FRZB: 'Freeze loop B.', GRID: 'Show all four outputs.', '----': 'unassigned', VIEW: 'push: toggle grid'
       }
       for (let m = 1; m <= 4; m++) { const who = ['A direct', 'A mirror', 'B direct', 'B mirror'][m - 1]; DESC[`${m}HUE`] = `Monitor ${m} (${who}) hue.`; DESC[`${m}SAT`] = `Monitor ${m} (${who}) saturation.`; DESC[`${m}BRT`] = `Monitor ${m} (${who}) brightness.`; DESC[`${m}CON`] = `Monitor ${m} (${who}) contrast.` }
-      const groupValues = (g) => {
-        const src_ = g === 1 ? A : g === 2 ? B : g === 3 ? S : null
-        if (g === 4) return [1, 2, 3, 4].flatMap(m => [M[m].hue, M[m].sat, M[m].brt, M[m].con])
-        const keys = Object.keys(src_)
-        return GROUPS[g].map((_, i) => src_[keys[i]] || (() => 0))
-      }
-      let hudGroup = 1
-      const fmt = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3))
-      const head = document.createElement('div'); hud.textContent = ''; hud.appendChild(head)
-      const labelEls = [], valueEls = []
-      for (let r = 0; r < 4; r++) {
-        const line = document.createElement('div')
-        for (let c = 0; c < 4; c++) {
-          const b = document.createElement('b'), v = document.createElement('span')
-          line.appendChild(b); line.appendChild(document.createTextNode(' ')); line.appendChild(v)
-          if (c < 3) line.appendChild(document.createTextNode('   '))
-          labelEls.push(b); valueEls.push(v)
-        }
-        hud.appendChild(line)
-      }
+      // ---- the virtual surface: all four groups as draggable numbers (drag, wheel, click = push, shift = fine)
+      const head = document.getElementById('hudhead')
+      const panel = mountPanel(document.getElementById('panel'), midi, {
+        groups: [
+          { group: 1, title: 'LOPA loop A', labels: LOOP, descs: DESC },
+          { group: 2, title: 'LOPB loop B', labels: LOOP, descs: DESC },
+          { group: 3, title: 'SWCH switchers', labels: SW, descs: DESC },
+          { group: 4, title: 'MONS monitors', labels: MON, descs: DESC }
+        ]
+      })
       const refreshHud = () => {
-        const labels = GROUPS[hudGroup], vals = groupValues(hudGroup)
-        head.textContent = `${mode} GR0${hudGroup} ${['', 'LOPA', 'LOPB', 'SWCH', 'MONS'][hudGroup]}  seed ${seedKind}  view ${view}   [ ] group   0 grid 1 A 2 B 3 seed 4 program   s seed  r reset  h hide`
-        labels.forEach((l, i) => { labelEls[i].textContent = l.padEnd(4); labelEls[i].dataset.desc = `${l} (encoder ${i + 1}): ${DESC[l] || ''}`; valueEls[i].textContent = fmt(vals[i]()).padStart(6) })
+        head.textContent = `${mode}  seed ${seedKind}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  r reset  h hide   inputs: ${midi.inputs.join(', ') || '(none)'}`
       }
       setInterval(() => {
         if (viewPush() !== lastViewPush) { lastViewPush = viewPush(); setView(view === 'grid' ? 'program' : 'grid') }
@@ -239,12 +225,10 @@
       document.addEventListener('keydown', (e) => {
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
         if (e.key === '0') setView('grid'); if (e.key === '1') setView('a'); if (e.key === '2') setView('b'); if (e.key === '3') setView('seed'); if (e.key === '4') setView('program')
-        if (e.key === '[') hudGroup = hudGroup === 1 ? 4 : hudGroup - 1
-        if (e.key === ']') hudGroup = hudGroup === 4 ? 1 : hudGroup + 1
         if (e.key === 'r') { for (const o of [A, B, S, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
         if (e.key === 's') setSeed(seedOrder[(seedOrder.indexOf(seedKind) + 1) % seedOrder.length])
       })
-      window.__herder = { P, midi, setSeed, setView, build, get seedKind () { return seedKind }, get view () { return view } }
+      window.__herder = { P, midi, panel, setSeed, setView, build, get seedKind () { return seedKind }, get view () { return view } }
     </script>
   </body>
 </html>

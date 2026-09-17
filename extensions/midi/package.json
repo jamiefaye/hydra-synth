@@ -12,7 +12,8 @@
     "./adapters/web-midi": "./adapters/web-midi.js",
     "./adapters/virtual": "./adapters/virtual.js",
     "./ec4-sysex": "./core/ec4-sysex.js",
-    "./adapters/sysex": "./adapters/sysex.js"
+    "./adapters/sysex": "./adapters/sysex.js",
+    "./ui/panel": "./ui/panel.js"
   },
   "scripts": {
     "test": "node --test \"core/*.test.js\""
