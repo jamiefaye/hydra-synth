@@ -7,7 +7,10 @@
       body { margin: 0; background: black; color: #ccc; font-family: monospace; font-size: 12px; overflow: hidden; }
       canvas { width: 100vw; height: 100vh; display: block; }
       #hud { position: fixed; left: 8px; bottom: 8px; background: rgba(0,0,0,0.55); padding: 4px 6px; white-space: pre; line-height: 1.25; font-size: 11px; }
-      #hud b { color: #ff9; }
+      #hud b { color: #ff9; position: relative; cursor: help; }
+      #hud b:hover::after { content: attr(data-desc); position: absolute; left: 0; bottom: 1.6em; z-index: 2;
+        background: #222; color: #eee; border: 1px solid #665; padding: 4px 7px; white-space: normal; width: 22em;
+        font-weight: normal; font-size: 11px; line-height: 1.3; }
     </style>
   </head>
   <body>
@@ -132,16 +135,50 @@
       setSeed(seedKind)
       setView('loop')
 
-      // HUD: one header line, then the 16 encoders as the 4x4 block they form on the EC4
+      // HUD: one header line, then the 16 encoders as the 4x4 block they form on the EC4.
+      // Built once; only the numbers are refreshed, so hovering a label keeps its description open.
       const names = Object.keys(P)
       const labels = ['GAIN','BRT','ZOOM','ROT','X','Y','HUE','SAT','BLUR','MIRR','DLAY','SEED','MZM','SFRQ','SKAL','PRST']   // as on the OLED
+      const descs = [
+        'Loop gain: contrast on the camera path. Below 1 the loop fades, too far above it whites out. Fractals live just above 1. Push for fine.',
+        'Brightness offset on the camera path, the other half of loop gain.',
+        'Camera distance: the loop is rescaled by this every pass. Above 1 zooms in (tunnel), below 1 recedes.',
+        'Camera rotation per pass, in radians, wraps around. With zoom this makes the spirals.',
+        'Camera offset per pass, sideways.',
+        'Camera offset per pass, up and down.',
+        'Hue drift per pass. Small values cycle colour slowly around the loop.',
+        'Saturation multiplier per pass.',
+        'Optical softening: blur radius as a fraction of the width. Too little crystallizes into pixel moire, too much loses detail.',
+        'Beam splitter reflectance: how much of the mirrored monitor the camera sees, 0 to 1.',
+        'Camera delay in frames (1 to 29). Higher values make the loop lag and breathe; move slowly.',
+        'Switcher: how much of the seed enters the loop. Nudge it up to disturb, back down to let the loop work.',
+        'Mirror zoom: optical distance of the reflected monitor relative to the direct one.',
+        'Seed frequency or scale for the sketch seeds.',
+        'Seed kaleidoscope sides (1 = off).',
+        'Persistence: an extra echo from 15 frames back mixed into the loop.'
+      ]
       const fmt = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3))
-      const cell = (i) => `<b>${labels[i].padEnd(4)}</b> ${fmt(P[names[i]]()).padStart(6)}`
+      const head = document.createElement('div')
+      hud.textContent = ''
+      hud.appendChild(head)
+      const valueEls = []
+      for (const r of [0, 4, 8, 12]) {
+        const line = document.createElement('div')
+        for (const c of [0, 1, 2, 3]) {
+          const i = r + c
+          const b = document.createElement('b'); b.textContent = labels[i].padEnd(4); b.dataset.desc = `${labels[i]} (encoder ${i + 1}): ${descs[i]}`
+          const v = document.createElement('span'); v.textContent = fmt(P[names[i]]()).padStart(6)
+          line.appendChild(b); line.appendChild(document.createTextNode(' ')); line.appendChild(v)
+          if (c < 3) line.appendChild(document.createTextNode('   '))
+          valueEls.push(v)
+        }
+        hud.appendChild(line)
+      }
       setInterval(() => {
         if (gridPush() !== lastGridPush) { lastGridPush = gridPush(); setView(view === 'grid' ? 'loop' : 'grid') }
         if (q.get('h')) { hud.style.display = 'none'; return }
-        const rows = [0, 4, 8, 12].map(r => [0, 1, 2, 3].map(c => cell(r + c)).join('   ')).join('\n')
-        hud.innerHTML = `${mode} GR0${g} seed ${seedKind} view ${view}  [0 1 2 s h r, push16 grid]\n` + rows
+        head.textContent = `${mode} GR0${g} seed ${seedKind} view ${view}  [0 1 2 s h r, push16 grid]`
+        valueEls.forEach((el, i) => { el.textContent = fmt(P[names[i]]()).padStart(6) })
       }, 200)
       document.addEventListener('keydown', (e) => {
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
