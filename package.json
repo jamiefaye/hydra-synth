@@ -35,6 +35,7 @@
     "build:vertex-webgl": "VERTEX_TARGET=webgl vite build --config vite.config.vertex.js",
     "build:vertex-webgpu": "VERTEX_TARGET=webgpu vite build --config vite.config.vertex.js",
     "build:midi": "EXT_TARGET=midi vite build --config vite.config.vertex.js",
+    "build:herder": "vite build --config vite.config.herder.js",
     "test": "node --test \"extensions/midi/core/*.test.js\" \"src/lib/*.test.js\"",
     "dev-budo": "budo ./dev/index.js --open --live --port 8000 -- -p esmify",
     "build-browserify": "browserify ./src/index.js -p esmify --standalone Hydra > dist/hydra-synth.js"
