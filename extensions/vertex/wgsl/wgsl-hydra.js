@@ -242,7 +242,8 @@ class wgslHydra {
         },
         mipLevelCount: 1,
         format: this.format,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
+        // COPY_SRC so frames can be read back (tests, screenshots, Syphon-style export)
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
     };
 
 		for (let chan = 0; chan < this.numChannels; ++chan) {

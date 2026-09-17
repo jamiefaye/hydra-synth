@@ -1,3 +1,4 @@
+import { normalizeDepth, delayedIndex, makeDelayProxy } from '../../../src/lib/frame-ring.js'
 import VertexSource, { generateVertexWgsl, getPassthroughVertexWgsl } from '../vertex-source.js'
 
 // Blend mode configurations for WebGPU
@@ -76,13 +77,28 @@ class OutputWgsl {
     return tex
   }
 
-  getTexture() {
-    let tex = this.getOppositeTextureView()
-    return tex
+  // The frame `delay` frames ago (default 1 = the last completed frame)
+  getTexture(delay = 1) {
+    return this.views[delayedIndex(this.pingPongs, this.depth, delay)]
+  }
+
+  // Texture source for k frames ago: src(o0.delay(12)); k may be a function
+  delay(k) {
+    return makeDelayProxy(this, k)
+  }
+
+  // Number of frames kept; delay(k) can reach k = 1 .. depth - 1. Reallocates the ring.
+  setDepth(depth) {
+    depth = normalizeDepth(depth)
+    if (depth === this.depth) return this
+    this.depth = depth
+    if (this._device && this._textureDescriptor) this.createTexturesAndViews(this._device, this._textureDescriptor)
+    return this
   }
 
   init() {
     this.pingPongs = 0
+    if (!this.depth) this.depth = 2
     return this
   }
 
@@ -274,18 +290,21 @@ class OutputWgsl {
   }
 
   flipPingPong() {
-    let x = this.pingPongs === 0 ? 1 : 0
-    this.pingPongs = x
+    this.pingPongs = (this.pingPongs + 1) % this.depth
   }
 
-  // This is called during setup and whenever canvas size changes
+  // This is called during setup, whenever canvas size changes, and by setDepth()
   createTexturesAndViews(device, destTextureDescriptor) {
-    this.textures = new Array(2)
-    this.views = new Array(2)
-    for (let i = 0; i < 2; ++i) {
+    this._device = device
+    this._textureDescriptor = destTextureDescriptor
+    if (this.textures) this.textures.forEach(t => { try { t.destroy() } catch (e) { /* already gone */ } })
+    this.textures = new Array(this.depth)
+    this.views = new Array(this.depth)
+    for (let i = 0; i < this.depth; ++i) {
       this.textures[i] = device.createTexture(destTextureDescriptor)
       this.views[i] = this.textures[i].createView()
     }
+    this.pingPongs = 0
   }
 
   getCurrentTextureView() {
@@ -299,9 +318,7 @@ class OutputWgsl {
   }
 
   getOppositeTextureView() {
-    let p = this.pingPongs
-    let x = p === 0 ? 1 : 0
-    return this.views[x]
+    return this.getTexture(1)
   }
 }
 

@@ -403,6 +403,32 @@ class FBOGridToCanvas {
     this.device.queue.submit([commandEncoder.finish()]);
   }
 }
+const MIN_DEPTH = 2;
+const MAX_DEPTH = 256;
+function normalizeDepth(depth) {
+  const d = Math.round(Number(depth) || MIN_DEPTH);
+  if (d < MIN_DEPTH || d > MAX_DEPTH) throw new Error(`frame ring depth ${depth} out of range ${MIN_DEPTH}..${MAX_DEPTH}`);
+  return d;
+}
+function delayedIndex(index, depth, delay) {
+  let k = typeof delay === "function" ? delay() : delay;
+  k = Math.round(Number(k) || 1);
+  if (k < 1) k = 1;
+  if (k > depth - 1) k = depth - 1;
+  return ((index - k) % depth + depth) % depth;
+}
+function makeDelayProxy(output, delay) {
+  const proxy = {
+    type: "delay",
+    output,
+    delay,
+    id: output.id,
+    label: `${output.label || "o" + output.id}.delay(${typeof delay === "function" ? "fn" : delay})`,
+    getTexture: () => output.getTexture(delay),
+    getCurrent: () => output.getTexture(delay)
+  };
+  return proxy;
+}
 function parseObj(objText, options = {}) {
   const { swapYZ = false } = options;
   const vertices = [];
@@ -10201,12 +10227,25 @@ class OutputWgsl {
     let tex = this.getCurrentTextureView();
     return tex;
   }
-  getTexture() {
-    let tex = this.getOppositeTextureView();
-    return tex;
+  // The frame `delay` frames ago (default 1 = the last completed frame)
+  getTexture(delay = 1) {
+    return this.views[delayedIndex(this.pingPongs, this.depth, delay)];
+  }
+  // Texture source for k frames ago: src(o0.delay(12)); k may be a function
+  delay(k) {
+    return makeDelayProxy(this, k);
+  }
+  // Number of frames kept; delay(k) can reach k = 1 .. depth - 1. Reallocates the ring.
+  setDepth(depth) {
+    depth = normalizeDepth(depth);
+    if (depth === this.depth) return this;
+    this.depth = depth;
+    if (this._device && this._textureDescriptor) this.createTexturesAndViews(this._device, this._textureDescriptor);
+    return this;
   }
   init() {
     this.pingPongs = 0;
+    if (!this.depth) this.depth = 2;
     return this;
   }
   // Register a sprite at a given level (parallel to WebGL Output.registerSprite)
@@ -10370,17 +10409,25 @@ class OutputWgsl {
   tick(props) {
   }
   flipPingPong() {
-    let x2 = this.pingPongs === 0 ? 1 : 0;
-    this.pingPongs = x2;
+    this.pingPongs = (this.pingPongs + 1) % this.depth;
   }
-  // This is called during setup and whenever canvas size changes
+  // This is called during setup, whenever canvas size changes, and by setDepth()
   createTexturesAndViews(device, destTextureDescriptor) {
-    this.textures = new Array(2);
-    this.views = new Array(2);
-    for (let i = 0; i < 2; ++i) {
+    this._device = device;
+    this._textureDescriptor = destTextureDescriptor;
+    if (this.textures) this.textures.forEach((t) => {
+      try {
+        t.destroy();
+      } catch (e) {
+      }
+    });
+    this.textures = new Array(this.depth);
+    this.views = new Array(this.depth);
+    for (let i = 0; i < this.depth; ++i) {
       this.textures[i] = device.createTexture(destTextureDescriptor);
       this.views[i] = this.textures[i].createView();
     }
+    this.pingPongs = 0;
   }
   getCurrentTextureView() {
     let p = this.pingPongs;
@@ -10391,9 +10438,7 @@ class OutputWgsl {
     return this.textures[p];
   }
   getOppositeTextureView() {
-    let p = this.pingPongs;
-    let x2 = p === 0 ? 1 : 0;
-    return this.views[x2];
+    return this.getTexture(1);
   }
 }
 const vertexPrefix = `
@@ -10578,7 +10623,8 @@ class wgslHydra {
       },
       mipLevelCount: 1,
       format: this.format,
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
+      // COPY_SRC so frames can be read back (tests, screenshots, Syphon-style export)
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
     };
     for (let chan = 0; chan < this.numChannels; ++chan) {
       let outp = this.outputChannelObjects[chan];
@@ -12918,7 +12964,7 @@ function stripOutStuff(inp) {
   let outp = inp.substring(firstX + 1, lastX);
   return outp;
 }
-var Output$1 = function({ regl: regl2, precision, label = "", width, height }) {
+var Output$1 = function({ regl: regl2, precision, label = "", width, height, depth = 2 }) {
   this.regl = regl2;
   this.precision = precision;
   this.label = label;
@@ -12931,7 +12977,13 @@ var Output$1 = function({ regl: regl2, precision, label = "", width, height }) {
   };
   this.init();
   this.pingPongIndex = 0;
-  this.fbos = Array(2).fill().map(() => this.regl.framebuffer({
+  this.width = width;
+  this.height = height;
+  this.depth = normalizeDepth(depth);
+  this.fbos = this._makeFbos(this.depth, width, height);
+};
+Output$1.prototype._makeFbos = function(depth, width, height) {
+  return Array(depth).fill().map(() => this.regl.framebuffer({
     color: this.regl.texture({
       mag: "nearest",
       width,
@@ -12942,16 +12994,30 @@ var Output$1 = function({ regl: regl2, precision, label = "", width, height }) {
   }));
 };
 Output$1.prototype.resize = function(width, height) {
+  this.width = width;
+  this.height = height;
   this.fbos.forEach((fbo) => {
     fbo.resize(width, height);
   });
 };
+Output$1.prototype.setDepth = function(depth) {
+  depth = normalizeDepth(depth);
+  if (depth === this.depth) return this;
+  const width = this.fbos[0].width, height = this.fbos[0].height;
+  this.fbos.forEach((fbo) => fbo.destroy());
+  this.depth = depth;
+  this.pingPongIndex = 0;
+  this.fbos = this._makeFbos(depth, width, height);
+  return this;
+};
 Output$1.prototype.getCurrent = function() {
   return this.fbos[this.pingPongIndex];
 };
-Output$1.prototype.getTexture = function() {
-  var index = this.pingPongIndex ? 0 : 1;
-  return this.fbos[index];
+Output$1.prototype.getTexture = function(delay = 1) {
+  return this.fbos[delayedIndex(this.pingPongIndex, this.depth, delay)];
+};
+Output$1.prototype.delay = function(k) {
+  return makeDelayProxy(this, k);
 };
 Output$1.prototype.init = function() {
   this.transformIndex = 0;
@@ -13005,7 +13071,7 @@ Output$1.prototype.render = function(passes) {
     uniforms,
     count: 3,
     framebuffer: () => {
-      self2.pingPongIndex = self2.pingPongIndex ? 0 : 1;
+      self2.pingPongIndex = (self2.pingPongIndex + 1) % self2.depth;
       return self2.fbos[self2.pingPongIndex];
     }
   });
@@ -26827,7 +26893,7 @@ const BLEND_MODES = {
     }
   }
 };
-var Output = function({ regl: regl2, precision, label = "", chanNum, hydraSynth, width, height }) {
+var Output = function({ regl: regl2, precision, label = "", chanNum, hydraSynth, width, height, depth = 2 }) {
   this.regl = regl2;
   this.precision = precision;
   this.label = label;
@@ -26845,15 +26911,31 @@ var Output = function({ regl: regl2, precision, label = "", chanNum, hydraSynth,
   this.init();
   this.pingPongIndex = 0;
   this.hasDepthBuffer = false;
-  this.fbos = Array(2).fill().map(() => this.regl.framebuffer({
+  this.depth = normalizeDepth(depth);
+  this.fbos = this._makeFbos(this.depth, width, height, false);
+};
+Output.prototype._makeFbos = function(depth, width, height, withDepthBuffer) {
+  return Array(depth).fill().map(() => this.regl.framebuffer(Object.assign({
     color: this.regl.texture({
       mag: "nearest",
       width,
       height,
       format: "rgba"
-    }),
-    depthStencil: false
-  }));
+    })
+  }, withDepthBuffer ? { depth: true } : { depthStencil: false })));
+};
+Output.prototype.setDepth = function(depth) {
+  depth = normalizeDepth(depth);
+  if (depth === this.depth) return this;
+  const width = this.fbos[0].width, height = this.fbos[0].height;
+  this.fbos.forEach((fbo) => fbo.destroy());
+  this.depth = depth;
+  this.pingPongIndex = 0;
+  this.fbos = this._makeFbos(depth, width, height, this.hasDepthBuffer);
+  return this;
+};
+Output.prototype.delay = function(k) {
+  return makeDelayProxy(this, k);
 };
 Output.prototype.resize = function(width, height) {
   if (!width || !height || width <= 0 || height <= 0) {
@@ -26869,23 +26951,14 @@ Output.prototype.enableDepthBuffer = function() {
   const width = this.fbos[0].width;
   const height = this.fbos[0].height;
   this.fbos.forEach((fbo) => fbo.destroy());
-  this.fbos = Array(2).fill().map(() => this.regl.framebuffer({
-    color: this.regl.texture({
-      mag: "nearest",
-      width,
-      height,
-      format: "rgba"
-    }),
-    depth: true
-  }));
+  this.fbos = this._makeFbos(this.depth, width, height, true);
   this.hasDepthBuffer = true;
 };
 Output.prototype.getCurrent = function() {
   return this.fbos[this.pingPongIndex];
 };
-Output.prototype.getTexture = function() {
-  var index = this.pingPongIndex ? 0 : 1;
-  return this.fbos[index];
+Output.prototype.getTexture = function(delay = 1) {
+  return this.fbos[delayedIndex(this.pingPongIndex, this.depth, delay)];
 };
 Output.prototype.init = function() {
   this.transformIndex = 0;
@@ -27676,7 +27749,7 @@ Output.prototype.render = function(passes) {
 };
 Output.prototype._renderSprites = function(props) {
   if (this.sprites.size === 0) {
-    this.pingPongIndex = this.pingPongIndex ? 0 : 1;
+    this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
     const targetFbo2 = this.fbos[this.pingPongIndex];
     this.regl.clear({
       color: [0, 0, 0, 1],
@@ -27686,9 +27759,9 @@ Output.prototype._renderSprites = function(props) {
     return;
   }
   const levels = Array.from(this.sprites.keys()).sort((a2, b) => a2 - b);
-  this.pingPongIndex = this.pingPongIndex ? 0 : 1;
+  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
   const targetFbo = this.fbos[this.pingPongIndex];
-  const prevFbo = this.fbos[this.pingPongIndex ? 0 : 1];
+  const prevFbo = this.getTexture(1);
   const level0Sprite = this.sprites.get(0);
   const hasLevel0 = levels.includes(0) && level0Sprite && level0Sprite.enabled !== false;
   const needs3D = Array.from(this.sprites.values()).some((s) => s.has3D);

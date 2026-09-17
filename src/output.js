@@ -1,6 +1,7 @@
 //const transforms = require('./glsl-transforms.js')
+import { normalizeDepth, delayedIndex, makeDelayProxy } from './lib/frame-ring.js'
 
-var Output = function ({ regl, precision, label = "", width, height}) {
+var Output = function ({ regl, precision, label = "", width, height, depth = 2 }) {
   this.regl = regl
   this.precision = precision
   this.label = label
@@ -13,9 +14,19 @@ var Output = function ({ regl, precision, label = "", width, height}) {
   this.draw = () => {}
   this.init()
   this.pingPongIndex = 0
+  this.width = width
+  this.height = height
 
-  // for each output, create two fbos for pingponging
-  this.fbos = (Array(2)).fill().map(() => this.regl.framebuffer({
+  // Frame ring: `depth` fbos, 2 = classic ping-pong. See src/lib/frame-ring.js
+  this.depth = normalizeDepth(depth)
+  this.fbos = this._makeFbos(this.depth, width, height)
+
+  // array containing render passes
+//  this.passes = []
+}
+
+Output.prototype._makeFbos = function (depth, width, height) {
+  return (Array(depth)).fill().map(() => this.regl.framebuffer({
     color: this.regl.texture({
       mag: 'nearest',
       width: width,
@@ -24,26 +35,41 @@ var Output = function ({ regl, precision, label = "", width, height}) {
     }),
     depthStencil: false
   }))
-
-  // array containing render passes
-//  this.passes = []
 }
 
 Output.prototype.resize = function(width, height) {
+  this.width = width
+  this.height = height
   this.fbos.forEach((fbo) => {
     fbo.resize(width, height)
   })
 //  console.log(this)
 }
 
+// Number of frames kept; delay(k) can reach k = 1 .. depth - 1. Reallocates the ring.
+Output.prototype.setDepth = function (depth) {
+  depth = normalizeDepth(depth)
+  if (depth === this.depth) return this
+  const width = this.fbos[0].width, height = this.fbos[0].height
+  this.fbos.forEach(fbo => fbo.destroy())
+  this.depth = depth
+  this.pingPongIndex = 0
+  this.fbos = this._makeFbos(depth, width, height)
+  return this
+}
 
 Output.prototype.getCurrent = function () {
   return this.fbos[this.pingPongIndex]
 }
 
-Output.prototype.getTexture = function () {
-   var index = this.pingPongIndex ? 0 : 1
-  return this.fbos[index]
+// The frame `delay` frames ago (default 1 = the last completed frame)
+Output.prototype.getTexture = function (delay = 1) {
+  return this.fbos[delayedIndex(this.pingPongIndex, this.depth, delay)]
+}
+
+// Texture source for k frames ago: src(o0.delay(12)); k may be a function
+Output.prototype.delay = function (k) {
+  return makeDelayProxy(this, k)
 }
 
 Output.prototype.init = function () {
@@ -109,7 +135,7 @@ Output.prototype.render = function (passes) {
     uniforms: uniforms,
     count: 3,
     framebuffer: () => {
-      self.pingPongIndex = self.pingPongIndex ? 0 : 1
+      self.pingPongIndex = (self.pingPongIndex + 1) % self.depth
       return self.fbos[self.pingPongIndex]
     }
   })

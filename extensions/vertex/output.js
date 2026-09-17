@@ -1,3 +1,4 @@
+import { normalizeDepth, delayedIndex, makeDelayProxy } from '../../src/lib/frame-ring.js'
 import VertexSource, { generateVertexGlsl } from './vertex-source.js'
 import { computeSkinningMatrices, applySkinning } from './geometry.js'
 
@@ -41,7 +42,7 @@ const BLEND_MODES = {
   }
 }
 
-var Output = function ({ regl, precision, label = "", chanNum, hydraSynth, width, height}) {
+var Output = function ({ regl, precision, label = "", chanNum, hydraSynth, width, height, depth = 2 }) {
   this.regl = regl
   this.precision = precision
   this.label = label
@@ -65,21 +66,42 @@ var Output = function ({ regl, precision, label = "", chanNum, hydraSynth, width
   this.init()
   this.pingPongIndex = 0
 
-  // for each output, create two fbos for pingponging
-  // Depth buffer added lazily when 3D geometry is first used
+  // Frame ring: `depth` fbos, 2 = classic ping-pong. See src/lib/frame-ring.js
+  // Depth buffer (z) added lazily when 3D geometry is first used
   this.hasDepthBuffer = false
-  this.fbos = (Array(2)).fill().map(() => this.regl.framebuffer({
+  this.depth = normalizeDepth(depth)
+  this.fbos = this._makeFbos(this.depth, width, height, false)
+
+  // array containing render passes
+//  this.passes = []
+}
+
+Output.prototype._makeFbos = function (depth, width, height, withDepthBuffer) {
+  return (Array(depth)).fill().map(() => this.regl.framebuffer(Object.assign({
     color: this.regl.texture({
       mag: 'nearest',
       width: width,
       height: height,
       format: 'rgba'
-    }),
-    depthStencil: false
-  }))
+    })
+  }, withDepthBuffer ? { depth: true } : { depthStencil: false })))
+}
 
-  // array containing render passes
-//  this.passes = []
+// Number of frames kept; delay(k) can reach k = 1 .. depth - 1. Reallocates the ring.
+Output.prototype.setDepth = function (depth) {
+  depth = normalizeDepth(depth)
+  if (depth === this.depth) return this
+  const width = this.fbos[0].width, height = this.fbos[0].height
+  this.fbos.forEach(fbo => fbo.destroy())
+  this.depth = depth
+  this.pingPongIndex = 0
+  this.fbos = this._makeFbos(depth, width, height, this.hasDepthBuffer)
+  return this
+}
+
+// Texture source for k frames ago: src(o0.delay(12)); k may be a function
+Output.prototype.delay = function (k) {
+  return makeDelayProxy(this, k)
 }
 
 Output.prototype.resize = function(width, height) {
@@ -106,16 +128,8 @@ Output.prototype.enableDepthBuffer = function() {
   // Destroy old framebuffers
   this.fbos.forEach(fbo => fbo.destroy())
 
-  // Create new framebuffers with depth
-  this.fbos = (Array(2)).fill().map(() => this.regl.framebuffer({
-    color: this.regl.texture({
-      mag: 'nearest',
-      width: width,
-      height: height,
-      format: 'rgba'
-    }),
-    depth: true
-  }))
+  // Create new framebuffers with depth, keeping the ring depth
+  this.fbos = this._makeFbos(this.depth, width, height, true)
 
   this.hasDepthBuffer = true
 }
@@ -124,9 +138,9 @@ Output.prototype.getCurrent = function () {
   return this.fbos[this.pingPongIndex]
 }
 
-Output.prototype.getTexture = function () {
-   var index = this.pingPongIndex ? 0 : 1
-  return this.fbos[index]
+// The frame `delay` frames ago (default 1 = the last completed frame)
+Output.prototype.getTexture = function (delay = 1) {
+  return this.fbos[delayedIndex(this.pingPongIndex, this.depth, delay)]
 }
 
 Output.prototype.init = function () {
@@ -1143,7 +1157,7 @@ Output.prototype.render = function (passes) {
 Output.prototype._renderSprites = function (props) {
   if (this.sprites.size === 0) {
     // No sprites - clear framebuffer (for hush())
-    this.pingPongIndex = this.pingPongIndex ? 0 : 1
+    this.pingPongIndex = (this.pingPongIndex + 1) % this.depth
     const targetFbo = this.fbos[this.pingPongIndex]
     this.regl.clear({
       color: [0, 0, 0, 1],
@@ -1156,10 +1170,10 @@ Output.prototype._renderSprites = function (props) {
   // Sort sprite levels ascending
   const levels = Array.from(this.sprites.keys()).sort((a, b) => a - b)
 
-  // Swap ping-pong index once at start of frame
-  this.pingPongIndex = this.pingPongIndex ? 0 : 1
+  // Advance the frame ring once at start of frame
+  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth
   const targetFbo = this.fbos[this.pingPongIndex]
-  const prevFbo = this.fbos[this.pingPongIndex ? 0 : 1]
+  const prevFbo = this.getTexture(1)
 
   // Check if we have an enabled level 0 (which clears)
   const level0Sprite = this.sprites.get(0)

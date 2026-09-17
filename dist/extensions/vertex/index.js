@@ -10025,6 +10025,32 @@ ${shaderInfo.glslFunctions.map((transform) => {
     uniforms: Object.assign({}, this.defaultUniforms, uniforms)
   };
 };
+const MIN_DEPTH = 2;
+const MAX_DEPTH = 256;
+function normalizeDepth(depth) {
+  const d = Math.round(Number(depth) || MIN_DEPTH);
+  if (d < MIN_DEPTH || d > MAX_DEPTH) throw new Error(`frame ring depth ${depth} out of range ${MIN_DEPTH}..${MAX_DEPTH}`);
+  return d;
+}
+function delayedIndex(index, depth, delay) {
+  let k = typeof delay === "function" ? delay() : delay;
+  k = Math.round(Number(k) || 1);
+  if (k < 1) k = 1;
+  if (k > depth - 1) k = depth - 1;
+  return ((index - k) % depth + depth) % depth;
+}
+function makeDelayProxy(output, delay) {
+  const proxy = {
+    type: "delay",
+    output,
+    delay,
+    id: output.id,
+    label: `${output.label || "o" + output.id}.delay(${typeof delay === "function" ? "fn" : delay})`,
+    getTexture: () => output.getTexture(delay),
+    getCurrent: () => output.getTexture(delay)
+  };
+  return proxy;
+}
 const BLEND_MODES = {
   normal: {
     enable: true,
@@ -10063,7 +10089,7 @@ const BLEND_MODES = {
     }
   }
 };
-var Output = function({ regl, precision, label = "", chanNum, hydraSynth, width, height }) {
+var Output = function({ regl, precision, label = "", chanNum, hydraSynth, width, height, depth = 2 }) {
   this.regl = regl;
   this.precision = precision;
   this.label = label;
@@ -10081,15 +10107,31 @@ var Output = function({ regl, precision, label = "", chanNum, hydraSynth, width,
   this.init();
   this.pingPongIndex = 0;
   this.hasDepthBuffer = false;
-  this.fbos = Array(2).fill().map(() => this.regl.framebuffer({
+  this.depth = normalizeDepth(depth);
+  this.fbos = this._makeFbos(this.depth, width, height, false);
+};
+Output.prototype._makeFbos = function(depth, width, height, withDepthBuffer) {
+  return Array(depth).fill().map(() => this.regl.framebuffer(Object.assign({
     color: this.regl.texture({
       mag: "nearest",
       width,
       height,
       format: "rgba"
-    }),
-    depthStencil: false
-  }));
+    })
+  }, withDepthBuffer ? { depth: true } : { depthStencil: false })));
+};
+Output.prototype.setDepth = function(depth) {
+  depth = normalizeDepth(depth);
+  if (depth === this.depth) return this;
+  const width = this.fbos[0].width, height = this.fbos[0].height;
+  this.fbos.forEach((fbo) => fbo.destroy());
+  this.depth = depth;
+  this.pingPongIndex = 0;
+  this.fbos = this._makeFbos(depth, width, height, this.hasDepthBuffer);
+  return this;
+};
+Output.prototype.delay = function(k) {
+  return makeDelayProxy(this, k);
 };
 Output.prototype.resize = function(width, height) {
   if (!width || !height || width <= 0 || height <= 0) {
@@ -10105,23 +10147,14 @@ Output.prototype.enableDepthBuffer = function() {
   const width = this.fbos[0].width;
   const height = this.fbos[0].height;
   this.fbos.forEach((fbo) => fbo.destroy());
-  this.fbos = Array(2).fill().map(() => this.regl.framebuffer({
-    color: this.regl.texture({
-      mag: "nearest",
-      width,
-      height,
-      format: "rgba"
-    }),
-    depth: true
-  }));
+  this.fbos = this._makeFbos(this.depth, width, height, true);
   this.hasDepthBuffer = true;
 };
 Output.prototype.getCurrent = function() {
   return this.fbos[this.pingPongIndex];
 };
-Output.prototype.getTexture = function() {
-  var index = this.pingPongIndex ? 0 : 1;
-  return this.fbos[index];
+Output.prototype.getTexture = function(delay = 1) {
+  return this.fbos[delayedIndex(this.pingPongIndex, this.depth, delay)];
 };
 Output.prototype.init = function() {
   this.transformIndex = 0;
@@ -10912,7 +10945,7 @@ Output.prototype.render = function(passes) {
 };
 Output.prototype._renderSprites = function(props) {
   if (this.sprites.size === 0) {
-    this.pingPongIndex = this.pingPongIndex ? 0 : 1;
+    this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
     const targetFbo2 = this.fbos[this.pingPongIndex];
     this.regl.clear({
       color: [0, 0, 0, 1],
@@ -10922,9 +10955,9 @@ Output.prototype._renderSprites = function(props) {
     return;
   }
   const levels = Array.from(this.sprites.keys()).sort((a, b) => a - b);
-  this.pingPongIndex = this.pingPongIndex ? 0 : 1;
+  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
   const targetFbo = this.fbos[this.pingPongIndex];
-  const prevFbo = this.fbos[this.pingPongIndex ? 0 : 1];
+  const prevFbo = this.getTexture(1);
   const level0Sprite = this.sprites.get(0);
   const hasLevel0 = levels.includes(0) && level0Sprite && level0Sprite.enabled !== false;
   const needs3D = Array.from(this.sprites.values()).some((s) => s.has3D);
