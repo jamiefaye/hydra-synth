@@ -13,12 +13,25 @@
   <body>
     <canvas id="c"></canvas>
     <div id="hud">loading</div>
+    <div id="seedbar" style="position: fixed; right: 8px; bottom: 8px; background: rgba(0,0,0,0.55); padding: 6px 8px;">
+      seed <select id="seed">
+        <option value="osc">osc + kaleid (sketch)</option>
+        <option value="noise">noise (sketch)</option>
+        <option value="voronoi">voronoi (sketch)</option>
+        <option value="cam">camera (s0)</option>
+        <option value="screen">screen capture (s0)</option>
+        <option value="video">video url (s0)</option>
+        <option value="image">image url (s0)</option>
+      </select>
+      <input id="url" placeholder="video/image url" size="28" style="display:none" />
+    </div>
     <script type="module">
       // A single optical feedback loop, Light Herder style, on one output:
       //   camera sees the monitor (itself, k frames ago), through a beam splitter that also
       //   shows the mirrored monitor; gain (contrast/brightness) sets the loop gain; a seed
       //   pattern enters through the switcher (blend).
-      // Query: mode = gl | gpu (createHydra), group = EC4 group (default 1), h = hide hud
+      // Query: mode = gl | gpu (createHydra), group = EC4 group (default 1), h = hide hud,
+      //        seed = osc | noise | voronoi | cam | screen | video | image, url = for video/image
       const q = new URLSearchParams(location.search)
       const mode = q.get('mode') || 'gpu'
       const group = parseInt(q.get('group') || '1')
@@ -60,8 +73,29 @@
 
       o0.setDepth(30)
 
-      // the seed: what the external video input shows
-      const seed = () => osc(P.seedFreq, 0.05, 1).kaleid(() => Math.round(P.seedKal()))
+      // ---- the seed: what the external video input of the switcher shows
+      const seedSel = document.getElementById('seed')
+      const urlBox = document.getElementById('url')
+      let seedKind = q.get('seed') || 'osc'
+      let seedUrl = q.get('url') || ''
+      seedSel.value = seedKind; urlBox.value = seedUrl
+      let s0kind = null   // what s0 currently holds
+      const ensureSource = (kind) => {
+        if (kind === 'cam' && s0kind !== 'cam') { s0.initCam(); s0kind = 'cam' }
+        if (kind === 'screen' && s0kind !== 'screen') { s0.initScreen(); s0kind = 'screen' }
+        if (kind === 'video' && s0kind !== 'video:' + seedUrl) { if (seedUrl) { s0.initVideo(seedUrl); s0kind = 'video:' + seedUrl } }
+        if (kind === 'image' && s0kind !== 'image:' + seedUrl) { if (seedUrl) { s0.initImage(seedUrl); s0kind = 'image:' + seedUrl } }
+      }
+      const seed = () => {
+        switch (seedKind) {
+          case 'noise': return noise(P.seedFreq, 0.1).brightness(0.4).contrast(1.6).kaleid(() => Math.round(P.seedKal()))
+          case 'voronoi': return voronoi(P.seedFreq, 0.3, 0.3).kaleid(() => Math.round(P.seedKal()))
+          case 'cam': case 'screen': case 'video': case 'image':
+            ensureSource(seedKind)
+            return src(s0).kaleid(() => Math.round(P.seedKal()))
+          default: return osc(P.seedFreq, 0.05, 1).kaleid(() => Math.round(P.seedKal()))
+        }
+      }
 
       // the camera path: monitor k frames ago, softened by the optics, moved by the camera rig
       const camera = () => blur(o0.delay(() => Math.round(P.delay())), P.blur)
@@ -71,14 +105,26 @@
       const splitter = () => camera()
         .blend(src(o0).scale(P.mirrorZoom, -1, 1), P.mirror)
 
-      // the monitor knobs and the switcher, then back to the monitor
-      splitter()
-        .hue(P.hue).saturate(P.sat).contrast(P.gain).brightness(P.bright)
-        .blend(src(o0.delay(15)), P.persist)
-        .blend(seed(), P.seed)
-        .out(o0)
-
-      seed().out(o1)   // the seed on its own, for render(o1)
+      // the monitor knobs and the switcher, then back to the monitor.
+      // build() recompiles the loop; the frame ring keeps its contents so the image survives.
+      const build = () => {
+        splitter()
+          .hue(P.hue).saturate(P.sat).contrast(P.gain).brightness(P.bright)
+          .blend(src(o0.delay(15)), P.persist)
+          .blend(seed(), P.seed)
+          .out(o0)
+        seed().out(o1)   // the seed on its own, for render(o1)
+      }
+      const setSeed = (kind, url) => {
+        seedKind = kind; if (url !== undefined) seedUrl = url
+        seedSel.value = kind
+        urlBox.style.display = (kind === 'video' || kind === 'image') ? '' : 'none'
+        build()
+      }
+      seedSel.onchange = () => setSeed(seedSel.value)
+      urlBox.onchange = () => setSeed(seedKind, urlBox.value)
+      const seedOrder = ['osc', 'noise', 'voronoi', 'cam', 'screen']
+      setSeed(seedKind)
       render(o0)
 
       // HUD
@@ -86,7 +132,7 @@
       const fmt = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3))
       setInterval(() => {
         if (q.get('h')) { hud.style.display = 'none'; return }
-        hud.innerHTML = `Herder 1  ${mode}  EC4 group ${g}   inputs: ${midi.inputs.join(', ') || '(none)'}\n` +
+        hud.innerHTML = `Herder 1  ${mode}  EC4 group ${g}  seed: ${seedKind}   inputs: ${midi.inputs.join(', ') || '(none)'}\n` +
           names.map((n, i) => `<b>${String(i + 1).padStart(2)} ${n.padEnd(10)}</b> ${fmt(P[n]())}`).join('\n')
       }, 200)
       document.addEventListener('keydown', (e) => {
@@ -95,8 +141,9 @@
         if (e.key === '1') render(o0)
         if (e.key === '2') render(o1)
         if (e.key === 'r') { Object.values(P).forEach(f => f.reset()); midi.refresh() }
+        if (e.key === 's') setSeed(seedOrder[(seedOrder.indexOf(seedKind) + 1) % seedOrder.length])
       })
-      window.__herder = { P, midi }
+      window.__herder = { P, midi, setSeed, get seedKind () { return seedKind } }
     </script>
   </body>
 </html>
