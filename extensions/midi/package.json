@@ -1,0 +1,19 @@
+{
+  "name": "hydra-midi-controller",
+  "version": "0.2.0",
+  "description": "Relative-encoder value model, device profiles and display feedback for MIDI controllers (Faderfox EC4 first). Lives inside hydra-synth's extensions for now; core/ and adapters/ have no Hydra dependency.",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./index.js",
+    "./core": "./core/controller.js",
+    "./state": "./core/midi-state.js",
+    "./profiles": "./core/profiles.js",
+    "./adapters/web-midi": "./adapters/web-midi.js",
+    "./adapters/virtual": "./adapters/virtual.js"
+  },
+  "scripts": {
+    "test": "node --test \"core/*.test.js\""
+  },
+  "license": "MIT"
+}

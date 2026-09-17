@@ -16,6 +16,37 @@ so it goes anywhere a number goes. With a relative encoder the value lives in th
 so a knob moves the parameter by how far it turned and never jumps to where the knob
 happens to sit. Re-evaluating the sketch keeps the current values.
 
+## Addressing knobs by group, number or name
+
+With the EC4 profile (the default) a control id can be a CC number, a `[group, encoder]`
+pair, or a name you assign:
+
+```javascript
+midi.cc([1, 3], 0, 1)                 // group 1, encoder 3 (CC 2 on channel 1)
+midi.names({ gain: [1, 1], rot: [1, 2] })
+osc().contrast(midi.cc('gain', 0.5, 2, 1)).rotate(midi.cc('rot', { min: 0, max: 6.283, wrap: true })).out(o0)
+midi.note('gain', { toggle: true })   // the encoder's push (EC4 push type Note)
+```
+
+`install(hydra, { profile: generic })` for a plain absolute-CC box, or `profile: null` for
+raw numbers only. Profiles live in `core/profiles.js`; the EC4 one encodes setup SE01 as
+programmed in September 2026 (groups by CC offset, channel 1, CCr2).
+
+## Layout
+
+```
+core/midi-state.js    value model: decode, curves, wrap, fine, snapshots   (no deps)
+core/profiles.js      device layouts and id resolution                    (no deps)
+core/controller.js    Controller = state + profile + feedback + transport (no deps)
+adapters/web-midi.js  browser ports          adapters/virtual.js  tests, bridges
+index.js              Hydra glue only: install() -> window.midi, hydra.synth.midi
+package.json          standalone metadata; `core/` and `adapters/` lift out unchanged
+```
+
+A node transport is a few dozen lines against `easymidi` or `@julusian/midi`: open ports,
+call `controller.handleMessage(bytes)` on input, and pass `{ send }` to
+`controller.attachTransport()`.
+
 ## Finding your CC numbers
 
 ```javascript
@@ -94,6 +125,6 @@ for scene changes or InAct recordings.
 ## Development
 
 ```
-npm test                 # node --test extensions/midi
+npm test                 # node --test extensions/midi/core/*.test.js
 npm run build:midi       # dist/extensions/midi
 ```

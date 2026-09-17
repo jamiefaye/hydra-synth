@@ -53,6 +53,7 @@ function valueToPos (cfg, v) {
 
 export class MidiState {
   constructor (defaults = {}) {
+    defaults = Object.fromEntries(Object.entries(defaults || {}).filter(([, v]) => v !== undefined))
     this.defaults = Object.assign({
       mode: 'r2',      // encoder mode, see above
       channel: null,   // null = accept any channel
@@ -79,7 +80,7 @@ export class MidiState {
    */
   cc (number, a, b, c) {
     const opts = (typeof a === 'object' && a !== null) ? a : { min: a, max: b, init: c }
-    const cfg = Object.assign({}, this.defaults, opts)
+    const cfg = Object.assign({}, this.defaults, Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)))
     if (cfg.min === undefined) cfg.min = this.defaults.min
     if (cfg.max === undefined) cfg.max = this.defaults.max
     if (cfg.init === undefined || cfg.init === null) cfg.init = cfg.min

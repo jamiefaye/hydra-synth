@@ -28,6 +28,7 @@
   }
   class MidiState {
     constructor(defaults = {}) {
+      defaults = Object.fromEntries(Object.entries(defaults || {}).filter(([, v]) => v !== void 0));
       this.defaults = Object.assign({
         mode: "r2",
         // encoder mode, see above
@@ -59,7 +60,7 @@
      */
     cc(number, a, b, c) {
       const opts = typeof a === "object" && a !== null ? a : { min: a, max: b, init: c };
-      const cfg = Object.assign({}, this.defaults, opts);
+      const cfg = Object.assign({}, this.defaults, Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== void 0)));
       if (cfg.min === void 0) cfg.min = this.defaults.min;
       if (cfg.max === void 0) cfg.max = this.defaults.max;
       if (cfg.init === void 0 || cfg.init === null) cfg.init = cfg.min;
@@ -242,129 +243,274 @@
     }
     return ev.registered ? base : `${base}  (unassigned)`;
   }
-  const VERSION = "0.1.0";
+  const ec4 = {
+    name: "Faderfox EC4",
+    match: /faderfox|ec4/i,
+    mode: "r2",
+    channel: 1,
+    groups: 16,
+    encodersPerGroup: 16,
+    encoder: (group, n) => ({ number: (group - 1) * 16 + (n - 1), channel: 1 }),
+    push: (group, n) => ({ note: (group - 1) * 16 + (n - 1), channel: 1 }),
+    names: {}
+  };
+  const generic = {
+    name: "Generic CC controller",
+    match: null,
+    mode: "abs",
+    channel: null,
+    encoder: (group, n) => ({ number: n, channel: null }),
+    push: (group, n) => ({ note: n, channel: null }),
+    names: {}
+  };
+  const profiles = { ec4, generic };
+  function resolveControl(profile, id) {
+    if (typeof id === "number") return { number: id, channel: profile ? profile.channel : null };
+    if (Array.isArray(id) && id.length === 2) {
+      if (!profile || !profile.encoder) throw new Error(`midi: [group, encoder] ids need a profile (use(profile))`);
+      return profile.encoder(id[0], id[1]);
+    }
+    if (typeof id === "string") {
+      if (!profile || !profile.names || !(id in profile.names)) throw new Error(`midi: unknown control name "${id}"`);
+      return resolveControl(profile, profile.names[id]);
+    }
+    throw new Error(`midi: bad control id ${JSON.stringify(id)}`);
+  }
+  function resolvePush(profile, id) {
+    if (typeof id === "number") return { note: id, channel: profile ? profile.channel : null };
+    if (Array.isArray(id) && id.length === 2) {
+      if (!profile || !profile.push) throw new Error(`midi: [group, encoder] ids need a profile (use(profile))`);
+      return profile.push(id[0], id[1]);
+    }
+    if (typeof id === "string") {
+      if (!profile || !profile.names || !(id in profile.names)) throw new Error(`midi: unknown control name "${id}"`);
+      return resolvePush(profile, profile.names[id]);
+    }
+    throw new Error(`midi: bad control id ${JSON.stringify(id)}`);
+  }
+  const defined$1 = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([, v]) => v !== void 0));
+  class Controller {
+    constructor(options = {}) {
+      this.opts = Object.assign({
+        mode: "r2",
+        channel: null,
+        steps: 64,
+        log: false,
+        feedback: true,
+        profile: null
+      }, defined$1(options));
+      this.state = new MidiState({ mode: this.opts.mode, channel: this.opts.channel, steps: this.opts.steps });
+      this.profile = null;
+      this.transport = null;
+      this.inputs = [];
+      this.outputs = [];
+      this.ready = Promise.resolve(this);
+      this.onInputsChanged = null;
+      this._logging = !!this.opts.log;
+      this._unlisten = this.state.onEvent((ev) => {
+        if (this._logging) console.log("[midi]", describeEvent(ev));
+        if (this.opts.feedback && ev.registered && ev.pos !== void 0 && (ev.type === "cc" || ev.type === "set")) {
+          this.sendFeedback(ev.channel, ev.number, ev.pos);
+        }
+      });
+      if (this.opts.profile) this.use(this.opts.profile);
+    }
+    /** Adopt a device profile: defaults for mode/channel plus name and [group, n] addressing. */
+    use(profile, extra = {}) {
+      this.profile = Object.assign({}, profile, extra, { names: Object.assign({}, profile.names || {}, extra.names || {}) });
+      if (this.profile.mode) this.state.defaults.mode = this.profile.mode;
+      if (this.profile.channel !== void 0) this.state.defaults.channel = this.profile.channel;
+      return this.profile;
+    }
+    /** Add or replace control names: names({ gain: [1, 1], rot: [1, 2] }) */
+    names(map) {
+      if (!this.profile) throw new Error("midi.names: call use(profile) first");
+      Object.assign(this.profile.names, map);
+      return this.profile.names;
+    }
+    /** cc(id, min, max, init) or cc(id, opts); id = number | [group, n] | 'name' */
+    cc(id, a, b, c) {
+      const { number, channel } = resolveControl(this.profile, id);
+      const opts = typeof a === "object" && a !== null ? defined$1(a) : defined$1({ min: a, max: b, init: c });
+      if (opts.channel === void 0 && channel != null) opts.channel = channel;
+      return this.state.cc(number, opts);
+    }
+    /** note(id, opts); id = number | [group, n] | 'name' (the encoder's push) */
+    note(id, opts = {}) {
+      const { note, channel } = resolvePush(this.profile, id);
+      const o = Object.assign({}, opts);
+      if (o.channel === void 0 && channel != null) o.channel = channel;
+      return this.state.note(note, o);
+    }
+    handleMessage(bytes) {
+      return this.state.handleMessage(bytes);
+    }
+    snapshot() {
+      return this.state.snapshot();
+    }
+    restore(snap) {
+      return this.state.restore(snap);
+    }
+    onEvent(fn) {
+      return this.state.onEvent(fn);
+    }
+    get last() {
+      return this.state.lastEvent;
+    }
+    learn(on = true) {
+      this._logging = !!on;
+      console.log(`[midi] learn ${this._logging ? "on" : "off"}`);
+      return this._logging;
+    }
+    /** Echo a control's 0..1 position to the device as the same CC (display feedback). */
+    sendFeedback(channel, number, pos) {
+      if (!this.opts.feedback || !this.transport || !this.transport.send) return;
+      const msg = [176 | (channel || 1) - 1, number & 127, Math.round(pos * 127) & 127];
+      try {
+        this.transport.send(msg);
+      } catch (e) {
+      }
+    }
+    /** Resend every control value to the device display. */
+    refresh() {
+      for (const p of this.state.positions()) this.sendFeedback(p.channel, p.number, p.pos);
+    }
+    /** Called by an adapter once ports are open (and again when they change). */
+    attachTransport(transport) {
+      this.transport = transport;
+      this.inputs = transport.inputs || [];
+      this.outputs = transport.outputs || [];
+      if (this.onInputsChanged) this.onInputsChanged(this.inputs);
+      this.refresh();
+    }
+    close() {
+      this._unlisten();
+      if (this.transport && this.transport.close) this.transport.close();
+      this.transport = null;
+    }
+  }
+  const matcher = (filter) => (name) => {
+    if (!filter) return true;
+    if (filter instanceof RegExp) return filter.test(name);
+    return name.toLowerCase().includes(String(filter).toLowerCase());
+  };
+  const defined = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([, v]) => v !== void 0));
+  async function connectWebMidi(controller, options = {}) {
+    const opts = Object.assign({
+      inputFilter: null,
+      // Feedback only to the profiled device by default. Sending to everything would reach
+      // loopback ports such as the IAC bus, and the echo would feed back into the controller.
+      outputFilter: controller.profile && controller.profile.match || null,
+      sysex: false,
+      log: true
+    }, defined(options));
+    if (opts.outputFilter === null && controller.opts.feedback) {
+      console.warn("[midi] feedback with no outputFilter: sending to every output, including loopbacks");
+    }
+    if (typeof navigator === "undefined" || !navigator.requestMIDIAccess) {
+      console.warn("[midi] Web MIDI is not available here; controls keep their initial values");
+      return controller;
+    }
+    let access;
+    try {
+      access = await navigator.requestMIDIAccess({ sysex: opts.sysex });
+    } catch (e) {
+      console.warn("[midi] MIDI access refused:", e.message);
+      return controller;
+    }
+    const matchIn = matcher(opts.inputFilter);
+    const matchOut = matcher(opts.outputFilter);
+    let inputs = [];
+    let outputs = [];
+    let lastKey = null;
+    const attach = () => {
+      const foundIn = [...access.inputs.values()].filter((i) => matchIn(i.name));
+      const foundOut = controller.opts.feedback ? [...access.outputs.values()].filter((o) => matchOut(o.name)) : [];
+      const key2 = foundIn.map((i) => i.id).join("|") + "#" + foundOut.map((o) => o.id).join("|");
+      if (key2 === lastKey) return;
+      lastKey = key2;
+      for (const input of inputs) input.onmidimessage = null;
+      inputs = foundIn;
+      outputs = foundOut;
+      for (const input of inputs) input.onmidimessage = (msg) => controller.handleMessage(msg.data);
+      const transport = {
+        name: "web-midi",
+        access,
+        inputs: inputs.map((i) => i.name),
+        outputs: outputs.map((o) => o.name),
+        send: (bytes) => {
+          for (const o of outputs) o.send(bytes);
+        },
+        close: () => {
+          for (const input of inputs) input.onmidimessage = null;
+          access.onstatechange = null;
+        }
+      };
+      if (opts.log) {
+        console.log(`[midi] listening on: ${transport.inputs.join(", ") || "(no inputs)"}` + (controller.opts.feedback ? `; feedback to: ${transport.outputs.join(", ") || "(no outputs)"}` : ""));
+      }
+      controller.attachTransport(transport);
+    };
+    attach();
+    access.onstatechange = attach;
+    return controller;
+  }
+  function connectVirtual(controller, { name = "virtual" } = {}) {
+    const transport = {
+      name,
+      inputs: [name],
+      outputs: [name],
+      sent: [],
+      send: (bytes) => {
+        transport.sent.push(Array.from(bytes));
+      },
+      close: () => {
+      }
+    };
+    controller.attachTransport(transport);
+    return transport;
+  }
+  const VERSION = "0.2.0";
   let _midi = null;
   async function install(hydra = null, options = {}) {
     if (_midi) return _midi;
-    const opts = Object.assign({
-      mode: "r2",
-      channel: null,
-      steps: 64,
-      log: false,
-      makeGlobal: true,
-      inputFilter: null,
-      // string or RegExp matched against input names; null = all inputs
-      feedback: true,
-      // send values back to the controller display (relative encoders need this)
-      outputFilter: /faderfox|ec4/i
-      // which output(s) receive feedback; null = every output
-    }, options);
-    const state = new MidiState({ mode: opts.mode, channel: opts.channel, steps: opts.steps });
-    let logging = !!opts.log;
-    const unlog = state.onEvent((ev) => {
-      if (logging) console.log("[midi]", describeEvent(ev));
+    const opts = Object.assign({ profile: ec4, makeGlobal: true }, options);
+    const midi = new Controller({
+      mode: opts.mode,
+      channel: opts.channel,
+      steps: opts.steps,
+      feedback: opts.feedback,
+      log: opts.log,
+      profile: opts.profile
     });
-    const midi = {
-      state,
-      cc: (...args) => state.cc(...args),
-      note: (...args) => state.note(...args),
-      snapshot: () => state.snapshot(),
-      restore: (s) => state.restore(s),
-      refresh: () => {
-        for (const p of state.positions()) sendFeedback(p.channel, p.number, p.pos);
-      },
-      outputs: [],
-      _outputs: [],
-      learn: (on = true) => {
-        logging = !!on;
-        console.log(`[midi] learn ${logging ? "on" : "off"}`);
-        return logging;
-      },
-      get last() {
-        return state.lastEvent;
-      },
-      inputs: [],
-      access: null,
-      handleMessage: (data) => state.handleMessage(data),
-      ready: null,
-      // promise resolved once Web MIDI access has been granted or refused
-      onInputsChanged: null,
-      // optional callback (names) when inputs connect or disconnect
-      uninstall: () => {
-        unlog();
-        if (midi.access) midi.access.onstatechange = null;
-        for (const input of midi._inputs) input.onmidimessage = null;
-        midi._outputs = [];
-        if (typeof window !== "undefined" && window.midi === midi) delete window.midi;
-        _midi = null;
-      },
-      _inputs: []
+    midi.handleMessageRaw = midi.handleMessage.bind(midi);
+    midi.uninstall = () => {
+      midi.close();
+      if (typeof window !== "undefined" && window.midi === midi) delete window.midi;
+      _midi = null;
     };
-    const sendFeedback = (channel, number, pos) => {
-      if (!opts.feedback || !midi._outputs.length) return;
-      const msg = [176 | (channel || 1) - 1, number & 127, Math.round(pos * 127) & 127];
-      for (const out of midi._outputs) {
-        try {
-          out.send(msg);
-        } catch (e) {
-        }
-      }
-    };
-    midi.sendFeedback = sendFeedback;
-    state.onEvent((ev) => {
-      if (ev.registered && ev.pos !== void 0 && (ev.type === "cc" || ev.type === "set")) sendFeedback(ev.channel, ev.number, ev.pos);
-    });
     const _hydra = hydra || (typeof window !== "undefined" ? window.hydraSynth : null);
     if (_hydra && _hydra.synth) _hydra.synth.midi = midi;
     if (opts.makeGlobal && typeof window !== "undefined") window.midi = midi;
-    midi.ready = connect(midi, state, opts);
+    midi.ready = connectWebMidi(midi, { inputFilter: opts.inputFilter, outputFilter: opts.outputFilter });
     _midi = midi;
-    return midi;
-  }
-  async function connect(midi, state, opts) {
-    if (typeof navigator === "undefined" || !navigator.requestMIDIAccess) {
-      console.warn("[midi] Web MIDI is not available in this browser; controls will keep their initial values");
-      return midi;
-    }
-    try {
-      midi.access = await navigator.requestMIDIAccess({ sysex: false });
-    } catch (e) {
-      console.warn("[midi] MIDI access refused:", e.message);
-      return midi;
-    }
-    const matcher = (filter) => (name) => {
-      if (!filter) return true;
-      if (filter instanceof RegExp) return filter.test(name);
-      return name.toLowerCase().includes(String(filter).toLowerCase());
-    };
-    const matches = matcher(opts.inputFilter);
-    const matchesOut = matcher(opts.outputFilter);
-    const attach = () => {
-      const found = [...midi.access.inputs.values()].filter((i) => matches(i.name));
-      const names = found.map((i) => i.name);
-      if (names.join("|") === midi.inputs.join("|") && midi._inputs.length === found.length) return;
-      for (const input of midi._inputs) input.onmidimessage = null;
-      midi._inputs = found;
-      midi.inputs = names;
-      for (const input of found) input.onmidimessage = (msg) => state.handleMessage(msg.data);
-      midi._outputs = opts.feedback ? [...midi.access.outputs.values()].filter((o) => matchesOut(o.name)) : [];
-      midi.outputs = midi._outputs.map((o) => o.name);
-      console.log(`[midi] v${VERSION} listening on: ${names.length ? names.join(", ") : "(no inputs)"}` + (opts.feedback ? `; feedback to: ${midi.outputs.length ? midi.outputs.join(", ") : "(no outputs)"}` : ""));
-      if (midi.onInputsChanged) midi.onInputsChanged(midi.inputs);
-      midi.refresh();
-    };
-    attach();
-    midi.access.onstatechange = attach;
     return midi;
   }
   function uninstall() {
     if (_midi) _midi.uninstall();
   }
+  exports2.CURVES = CURVES;
+  exports2.Controller = Controller;
   exports2.MODES = MODES;
   exports2.MidiState = MidiState;
   exports2.VERSION = VERSION;
+  exports2.connectVirtual = connectVirtual;
+  exports2.connectWebMidi = connectWebMidi;
   exports2.describeEvent = describeEvent;
+  exports2.ec4 = ec4;
+  exports2.generic = generic;
   exports2.install = install;
+  exports2.profiles = profiles;
   exports2.uninstall = uninstall;
   Object.defineProperty(exports2, Symbol.toStringTag, { value: "Module" });
 }));
