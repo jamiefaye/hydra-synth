@@ -6,7 +6,7 @@
     <style>
       body { margin: 0; background: black; color: #ccc; font-family: monospace; font-size: 12px; overflow: hidden; }
       canvas { width: 100vw; height: 100vh; display: block; }
-      #hud { position: fixed; left: 8px; bottom: 8px; background: rgba(0,0,0,0.55); padding: 6px 8px; white-space: pre; line-height: 1.35; }
+      #hud { position: fixed; left: 8px; bottom: 8px; background: rgba(0,0,0,0.55); padding: 4px 6px; white-space: pre; line-height: 1.25; font-size: 11px; }
       #hud b { color: #ff9; }
     </style>
   </head>
@@ -132,14 +132,16 @@
       setSeed(seedKind)
       setView('loop')
 
-      // HUD
+      // HUD: one header line, then the 16 encoders as the 4x4 block they form on the EC4
       const names = Object.keys(P)
+      const labels = ['GAIN','BRT','ZOOM','ROT','X','Y','HUE','SAT','BLUR','MIRR','DLAY','SEED','MZM','SFRQ','SKAL','PRST']   // as on the OLED
       const fmt = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3))
+      const cell = (i) => `<b>${labels[i].padEnd(4)}</b> ${fmt(P[names[i]]()).padStart(6)}`
       setInterval(() => {
         if (gridPush() !== lastGridPush) { lastGridPush = gridPush(); setView(view === 'grid' ? 'loop' : 'grid') }
         if (q.get('h')) { hud.style.display = 'none'; return }
-        hud.innerHTML = `Herder 1  ${mode}  EC4 group ${g}  seed: ${seedKind}  view: ${view} (push 16 / keys 0 1 2)   inputs: ${midi.inputs.join(', ') || '(none)'}\n` +
-          names.map((n, i) => `<b>${String(i + 1).padStart(2)} ${n.padEnd(10)}</b> ${fmt(P[n]())}`).join('\n')
+        const rows = [0, 4, 8, 12].map(r => [0, 1, 2, 3].map(c => cell(r + c)).join('   ')).join('\n')
+        hud.innerHTML = `${mode} GR0${g} seed ${seedKind} view ${view}  [0 1 2 s h r, push16 grid]\n` + rows
       }, 200)
       document.addEventListener('keydown', (e) => {
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
