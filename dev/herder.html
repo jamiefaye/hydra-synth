@@ -213,7 +213,7 @@
         ]
       })
       const refreshHud = () => {
-        head.textContent = `${mode}  seed ${seedKind}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  r reset  h hide   inputs: ${midi.inputs.join(', ') || '(none)'}`
+        head.textContent = `${mode}  seed ${seedKind}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  r reset  d dump  h hide   inputs: ${midi.inputs.join(', ') || '(none)'}`
       }
       setInterval(() => {
         if (viewPush() !== lastViewPush) { lastViewPush = viewPush(); setView(view === 'grid' ? 'program' : 'grid') }
@@ -228,7 +228,28 @@
         if (e.key === 'r') { for (const o of [A, B, S, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
         if (e.key === 's') setSeed(seedOrder[(seedOrder.indexOf(seedKind) + 1) % seedOrder.length])
       })
-      window.__herder = { P, midi, panel, setSeed, setView, build, get seedKind () { return seedKind }, get view () { return view } }
+      // ---- state dump: 'd' logs everything as JSON (and copies it to the clipboard)
+      const dump = () => {
+        const groupOf = (obj, labels) => Object.fromEntries(Object.values(obj).map((f, i) => [labels[i], +f().toFixed(5)]))
+        const state = {
+          when: new Date().toISOString(),
+          page: 'herder', mode, time: +time.toFixed(3),
+          seed: { kind: seedKind, url: seedUrl || null }, view,
+          ring: { o0: o0.depth, o1: o1.depth, o2: o2.depth },
+          midi: { inputs: midi.inputs, outputs: midi.outputs, profile: midi.profile && midi.profile.name, mode: midi.state.defaults.mode },
+          groups: {
+            LOPA: groupOf(A, LOOP), LOPB: groupOf(B, LOOP), SWCH: groupOf(S, SW),
+            MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => [['hue', M[m].hue], ['sat', M[m].sat], ['brt', M[m].brt], ['con', M[m].con]].map(([k, f]) => [`${m}${k.toUpperCase()}`, +f().toFixed(5)])))
+          },
+          snapshot: midi.snapshot()   // raw "channel:cc" -> value, what midi.restore() takes
+        }
+        const text = JSON.stringify(state, null, 2)
+        console.log('[herder] state dump\n' + text)
+        if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => { head.textContent = 'state dumped to console and clipboard' }).catch(() => {})
+        return state
+      }
+      document.addEventListener('keydown', (e) => { if (e.key === 'd') dump() })
+      window.__herder = { P, midi, panel, setSeed, setView, build, dump, get seedKind () { return seedKind }, get view () { return view } }
     </script>
   </body>
 </html>
