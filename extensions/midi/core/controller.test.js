@@ -68,3 +68,27 @@ test('undefined options do not erase defaults (regression: NaN steps)', () => {
   assert.equal(c.state.defaults.steps, 64)
   assert.ok(Math.abs(f() - 1 / 64) < 1e-9)
 })
+
+test('alias: one control on two encoders, both turn it and both displays follow', () => {
+  const c = new Controller({ profile: ec4, steps: 4 })
+  const t = connectVirtual(c)
+  const gain = c.cc([1, 1], { min: 0, max: 1, init: 0, fine: 2 })
+  const play = c.alias([7, 1], [1, 1])
+  assert.equal(play.number, 96)
+  t.sent.length = 0
+  c.handleMessage(cc(1, 0, 65)); assert.equal(gain(), 0.25); assert.equal(play(), 0.25)
+  assert.deepEqual(t.sent.sort((a, b) => a[1] - b[1]), [[0xB0, 0, 32], [0xB0, 96, 32]])
+  t.sent.length = 0
+  c.handleMessage(cc(1, 96, 65)); assert.equal(gain(), 0.5)
+  assert.deepEqual(t.sent.sort((a, b) => a[1] - b[1]), [[0xB0, 0, 64], [0xB0, 96, 64]])
+  // the alias's push is the fine push too
+  c.handleMessage([0x90, 96, 100]); c.handleMessage(cc(1, 0, 65)); c.handleMessage([0x80, 96, 0])
+  assert.equal(gain(), 0.625)
+  // snapshot has one entry, refresh reaches both places, a taken cc is refused
+  assert.deepEqual(Object.keys(c.snapshot()), ['1:0'])
+  t.sent.length = 0; c.refresh()
+  assert.deepEqual(t.sent.map(m => m[1]).sort((a, b) => a - b), [0, 96])
+  c.cc([1, 2], 0, 1, 0)
+  assert.throws(() => c.alias([1, 2], [1, 1]), /already has a control/)
+  assert.throws(() => c.alias([7, 3], [4, 9]), /no control/)
+})

@@ -36,7 +36,8 @@ export class Controller {
     this._unlisten = this.state.onEvent(ev => {
       if (this._logging) console.log('[midi]', describeEvent(ev))
       if (this.opts.feedback && ev.registered && ev.pos !== undefined && (ev.type === 'cc' || ev.type === 'set')) {
-        this.sendFeedback(ev.channel, ev.number, ev.pos)
+        // every encoder the control sits on follows, not only the one that moved
+        for (const a of ev.aliases || [{ channel: ev.channel, number: ev.number }]) this.sendFeedback(a.channel || ev.channel, a.number, ev.pos)
       }
     })
     if (this.opts.profile) this.use(this.opts.profile)
@@ -63,6 +64,13 @@ export class Controller {
     const opts = (typeof a === 'object' && a !== null) ? defined(a) : defined({ min: a, max: b, init: c })
     if (opts.channel === undefined && channel != null) opts.channel = channel
     return this.state.cc(number, opts)
+  }
+
+  /** alias(id, ofId): bind another encoder to an existing control (one value, two places). */
+  alias (id, ofId) {
+    const { number, channel } = resolveControl(this.profile, id)
+    const of = resolveControl(this.profile, ofId)
+    return this.state.alias(number, of.number, { channel: channel == null ? of.channel : channel })
   }
 
   /** note(id, opts); id = number | [group, n] | 'name' (the encoder's push) */

@@ -92,7 +92,7 @@ export class MidiState {
     const k = key(cfg.channel, number)
     let rec = this.controls.get(k)
     if (!rec) {
-      rec = { number, config: cfg, pos: valueToPos(cfg, cfg.init), lastChannel: cfg.channel || 1 }
+      rec = { number, config: cfg, pos: valueToPos(cfg, cfg.init), lastChannel: cfg.channel || 1, aliases: [{ channel: cfg.channel, number }] }
       this.controls.set(k, rec)
     } else {
       // Re-registering (sketch re-eval): keep the live value, re-fit it into the new range/curve
@@ -100,16 +100,37 @@ export class MidiState {
       rec.config = cfg
       rec.pos = valueToPos(cfg, value)
     }
+    return this._fnFor(rec, number)
+  }
+
+  _fnFor (rec, number) {
     const get = () => posToValue(rec.config, rec.pos)
     const fn = () => get()
     fn.value = get
     fn.set = (v) => { rec.pos = valueToPos(rec.config, v); this._emitSet(rec); return get() }
-    fn.reset = () => fn.set(cfg.init)
-    fn.config = cfg
+    fn.reset = () => fn.set(rec.config.init)
     fn.number = number
+    Object.defineProperty(fn, 'config', { get: () => rec.config })
     Object.defineProperty(fn, 'v', { get })
     Object.defineProperty(fn, 'pos', { get: () => rec.pos })
+    Object.defineProperty(fn, 'aliases', { get: () => rec.aliases.slice() })
     return fn
+  }
+
+  /**
+   * Bind a second encoder to an existing control: one value, several positions on the
+   * surface. Turning either moves it, both displays follow, a push on either is the fine
+   * push. Returns the same kind of getter cc() returns.
+   */
+  alias (number, ofNumber, opts = {}) {
+    const channel = opts.channel === undefined ? this.defaults.channel : opts.channel
+    const rec = this._find(this.controls, channel, ofNumber)
+    if (!rec) throw new Error(`midi.alias: no control on cc ${ofNumber} to alias`)
+    const k = key(channel, number)
+    const taken = this.controls.get(k)
+    if (taken && taken !== rec) throw new Error(`midi.alias: cc ${number} already has a control of its own`)
+    if (!taken) { this.controls.set(k, rec); rec.aliases.push({ channel, number }) }
+    return this._fnFor(rec, number)
   }
 
   /**
@@ -135,7 +156,7 @@ export class MidiState {
   /** Snapshot of every registered control value, keyed "channel:number". */
   snapshot () {
     const out = {}
-    for (const [k, rec] of this.controls) out[k] = posToValue(rec.config, rec.pos)
+    for (const [k, rec] of this.controls) if (k === key(rec.aliases[0].channel, rec.number)) out[k] = posToValue(rec.config, rec.pos)
     return out
   }
 
@@ -149,8 +170,9 @@ export class MidiState {
   /** Every registered control as {channel, number, pos, value}, e.g. to refresh a device display. */
   positions () {
     const out = []
-    for (const rec of this.controls.values()) {
-      out.push({ channel: rec.lastChannel, number: rec.number, pos: rec.pos, value: posToValue(rec.config, rec.pos) })
+    for (const [k, rec] of this.controls) {
+      if (k !== key(rec.aliases[0].channel, rec.number)) continue
+      for (const a of rec.aliases) out.push({ channel: a.channel || rec.lastChannel, number: a.number, pos: rec.pos, value: posToValue(rec.config, rec.pos) })
     }
     return out
   }
@@ -163,7 +185,7 @@ export class MidiState {
   }
 
   _emitSet (rec) {
-    this._emit({ type: 'set', channel: rec.lastChannel, number: rec.number, registered: true, pos: rec.pos, after: posToValue(rec.config, rec.pos) })
+    this._emit({ type: 'set', channel: rec.lastChannel, number: rec.number, registered: true, pos: rec.pos, after: posToValue(rec.config, rec.pos), aliases: rec.aliases })
   }
 
   _find (map, channel, number) {
@@ -222,7 +244,7 @@ export class MidiState {
     if (cfg.mode === 'abs') return this._applyPos(rec, channel, value, value / 127, 'abs')
 
     let delta = decodeRelative(cfg.mode, value)
-    const fine = cfg.fine && this._isHeld(channel, cfg.fineNote)
+    const fine = cfg.fine && (this._isHeld(channel, cfg.fineNote) || rec.aliases.some(a => this._isHeld(channel, a.number)))
     let step = 1 / cfg.steps
     if (fine) step /= cfg.fine
     const before = posToValue(cfg, rec.pos)
@@ -230,7 +252,7 @@ export class MidiState {
     if (cfg.wrap) p = p - Math.floor(p)
     else p = clamp01(p)
     rec.pos = p
-    const ev = { type: 'cc', channel, number, value, registered: true, mode: cfg.mode, delta, fine: !!fine, before, after: posToValue(cfg, rec.pos), pos: rec.pos }
+    const ev = { type: 'cc', channel, number, value, registered: true, mode: cfg.mode, delta, fine: !!fine, before, after: posToValue(cfg, rec.pos), pos: rec.pos, aliases: rec.aliases }
     this._emit(ev)
     return ev
   }
@@ -239,7 +261,7 @@ export class MidiState {
     const cfg = rec.config
     const before = posToValue(cfg, rec.pos)
     rec.pos = clamp01(pos)
-    const ev = { type: 'cc', channel, number: rec.number, value: raw, registered: true, mode: how, before, after: posToValue(cfg, rec.pos), pos: rec.pos }
+    const ev = { type: 'cc', channel, number: rec.number, value: raw, registered: true, mode: how, before, after: posToValue(cfg, rec.pos), pos: rec.pos, aliases: rec.aliases }
     this._emit(ev)
     return ev
   }

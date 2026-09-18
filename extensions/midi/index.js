@@ -16,7 +16,7 @@
  *   osc(midi.cc([1, 1], 5, 60, 10)).out(o0)    // group 1 encoder 1: 5..60, starts at 10
  *   midi.names({ gain: [1, 2] }); osc().contrast(midi.cc('gain', 0.5, 2, 1)).out(o0)
  *
- * API on midi: cc(id, min, max, init | opts), note(id, opts), use(profile, extra), names(map),
+ * API on midi: cc(id, min, max, init | opts), alias(id, ofId), note(id, opts), use(profile, extra), names(map),
  *   learn(on), last, snapshot(), restore(obj), refresh(), inputs, outputs, ready, state, profile.
  *   id = CC number | [group, encoder] | 'name'.
  *

@@ -34,15 +34,16 @@ const CSS = `
   background: #222; color: #eee; border: 1px solid #665; padding: 4px 7px; line-height: 1.3; cursor: default; }
 `
 
-let cssInjected = false
-function injectCss () {
-  if (cssInjected || typeof document === 'undefined') return
-  const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st)
-  cssInjected = true
+const styled = new WeakSet()   // documents that carry the panel's style
+function injectCss (doc) {
+  if (!doc || styled.has(doc)) return
+  const st = doc.createElement('style'); st.textContent = CSS; doc.head.appendChild(st)
+  styled.add(doc)
 }
 
 export function mountPanel (element, controller, options = {}) {
-  injectCss()
+  const document = element.ownerDocument   // a popup window's document, when the panel lives there
+  injectCss(document)
   const opts = Object.assign({ groups: [], pixelsPerStep: 4, mode: 'r2', refreshMs: 100 }, options)
   const profile = controller.profile
   if (!profile || !profile.encoder) throw new Error('mountPanel: controller needs a profile with encoder(group, n)')
@@ -77,7 +78,9 @@ export function mountPanel (element, controller, options = {}) {
       const val = document.createElement('span'); val.className = 'mp-value'; val.textContent = fmt(null)
       const bar = document.createElement('div'); bar.className = 'mp-bar'; const fill = document.createElement('i'); bar.appendChild(fill)
       const tip = document.createElement('div'); tip.className = 'mp-tip'
-      tip.textContent = `${label} (group ${g.group}, encoder ${n}, cc ${number} ch ${channel ?? 'any'}): ${(g.descs && g.descs[label]) || ''}  Drag up/down, wheel, click = push, shift = fine.`
+      // label case is the convention: UPPER a knob, Capitalised a switch you turn, lowercase a push-only button
+      const kind = /^[a-z]/.test(label) ? 'push-only button: click' : (/^[A-Z][a-z]/.test(label) ? 'switch: turn to flip' : 'knob: drag up/down or wheel, shift = fine')
+      tip.textContent = `${label} (group ${g.group}, encoder ${n}, cc ${number} ch ${channel ?? 'any'}) [${kind}]: ${(g.descs && g.descs[label]) || ''}`
       cell.appendChild(lab); cell.appendChild(val); cell.appendChild(bar); cell.appendChild(tip)
       grid.appendChild(cell)
       const rec = { cell, val, fill, number, channel, push, pushed: false }
