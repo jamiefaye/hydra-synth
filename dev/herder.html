@@ -55,51 +55,76 @@
       const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
       const { install, ec4 } = await import('../extensions/midi/index.js')
       const { mountPanel } = await import('../extensions/midi/ui/panel.js')
-      const hydra = await createHydra({ canvas, width: 1280, height: 720, detectAudio: false, makeGlobal: true, numOutputs: 4, useWGSL: mode === 'gpu' })
+      const hydra = await createHydra({ canvas, width: 1280, height: 720, detectAudio: false, makeGlobal: true, numOutputs: 4, filter: 'linear', useWGSL: mode === 'gpu' })
       window.__hydra = hydra
       const midi = await install(hydra, { profile: ec4 })
 
       // ---- controls, as labelled on the device (dev/herder-ec4-labels.json)
-      const LOOP = ['GAIN','BRT','ZOOM','ROT','X','Y','HUE','SAT','BLUR','MIRR','DLAY','SEED','MZM','SFRQ','SKAL','PRST']
-      const SW   = ['AtoB','BtoA','KEYA','KEYB','SEDA','SEDB','XFAD','PERI','SDLY','RVRS','FRZA','FRZB','GRID','----','----','VIEW']
+      // Groups by what a knob belongs to (camera, switcher, monitor, seed, rig), after Rust's split;
+      // PLAY is a view: aliases of the knobs a set rides, one value in two places (midi.alias).
+      // Label case says what the finger does: UPPER = a knob you turn (push = fine where it has it),
+      // Capitalised = a switch you turn, lowercase = a push-only button. Same on the EC4's OLED.
+      const pad = (a) => a.concat(Array(16 - a.length).fill('----'))
+      const CAM  = pad(['GAIN','ZOOM','ROT','X','Y','BLUR','DLAY','PRST','PTCH','YAW','LENS','PDLY']); CAM[15] = 'home'
+      const SW   = pad(['XFAD','PERI','Rvrs','Frza','Frzb','Grid','Void']); SW[15] = 'view'
       const MON  = []; for (let m = 1; m <= 4; m++) MON.push(`${m}HUE`, `${m}SAT`, `${m}BRT`, `${m}CON`)
-      const GROUPS = { 1: LOOP, 2: LOOP, 3: SW, 4: MON }
+      const SEED = pad(['LEVA','LEVB','SFRQ','SKAL','SDLY','Kind'])
+      const RIG  = pad(['MIRA','MZMA','MIRB','MZMB','AtoB','BtoA','KEYA','KEYB'])
+      const PLAY = pad(['GNA','ZMA','RTA','LVA','GNB','ZMB','RTB','LVB','XFAD','PERI','SDLY','Void','SKAL'])
+      const GROUPS = { 1: CAM, 2: CAM, 3: SW, 4: MON, 5: SEED, 6: RIG, 7: PLAY }
 
-      const loopControls = (g) => ({
-        gain:   midi.cc([g, 1],  { min: 0.5, max: 2.5, init: 1.02, curve: 'log', steps: 200, fine: 10 }),
-        bright: midi.cc([g, 2],  { min: -0.3, max: 0.3, init: 0, steps: 200, fine: 10 }),
-        zoom:   midi.cc([g, 3],  { min: 0.8, max: 1.25, init: 1.02, curve: 'log', steps: 200, fine: 10 }),
-        rot:    midi.cc([g, 4],  { min: 0, max: 6.283, init: 0.02, wrap: true, steps: 360, fine: 10 }),
-        x:      midi.cc([g, 5],  { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
-        y:      midi.cc([g, 6],  { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
-        hue:    midi.cc([g, 7],  { min: -0.1, max: 0.1, init: 0.005, steps: 200, fine: 10 }),
-        sat:    midi.cc([g, 8],  { min: 0.5, max: 1.5, init: 1.0, steps: 100, fine: 10 }),
-        blur:   midi.cc([g, 9],  { min: 0.0005, max: 0.02, init: 0.003, curve: 'log', steps: 100, fine: 10 }),
-        mirror: midi.cc([g, 10], { min: 0, max: 1, init: 0.35, steps: 100, fine: 10 }),
-        delay:  midi.cc([g, 11], { min: 1, max: 29, init: 1, steps: 28 }),
-        seed:   midi.cc([g, 12], { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),
-        mzm:    midi.cc([g, 13], { min: 0.5, max: 2, init: 0.9, curve: 'log', steps: 100, fine: 10 }),
-        sfrq:   midi.cc([g, 14], { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
-        skal:   midi.cc([g, 15], { min: 0, max: 12, init: 3, steps: 12 }),
-        persist: midi.cc([g, 16], { min: 0, max: 1, init: 0, steps: 100 })
+      const camControls = (g) => ({   // key order = CAM label order (the dump relies on it)
+        gain:   midi.cc([g, 1], { min: 0.5, max: 2.5, init: 1.02, curve: 'log', steps: 200, fine: 10 }),
+        zoom:   midi.cc([g, 2], { min: 0.5, max: 2, init: 1.02, curve: 'log', steps: 300, fine: 10 }),   // unity mid-travel, ~0.5% a detent (Rust's step)
+        rot:    midi.cc([g, 3], { min: 0, max: 6.283, init: 0.02, wrap: true, steps: 360, fine: 10 }),
+        x:      midi.cc([g, 4], { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
+        y:      midi.cc([g, 5], { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
+        blur:   midi.cc([g, 6], { min: 0, max: 0.02, init: 0.003, curve: 'exp', steps: 100, fine: 10 }),   // 0 = sharp lens (bilinear sampling still softens a fraction of a texel)
+        delay:  midi.cc([g, 7], { min: 1, max: 29, init: 1, steps: 28 }),
+        persist: midi.cc([g, 8], { min: 0, max: 1, init: 0, steps: 100 }),
+        pitch:  midi.cc([g, 9], { min: -0.7, max: 0.7, init: 0, steps: 200, fine: 10 }),
+        yaw:    midi.cc([g, 10], { min: -0.7, max: 0.7, init: 0, steps: 200, fine: 10 }),
+        lens:   midi.cc([g, 11], { min: 1, max: 6, init: 2.5, curve: 'log', steps: 100, fine: 10 }),
+        pdly:   midi.cc([g, 12], { min: 1, max: 29, init: 15, steps: 28 })
       })
-      const A = loopControls(1)
-      const B = loopControls(2)
-      const S = {
-        atob: midi.cc([3, 1],  { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        btoa: midi.cc([3, 2],  { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        keya: midi.cc([3, 3],  { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        keyb: midi.cc([3, 4],  { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        seda: midi.cc([3, 5],  { min: 0, max: 1, init: 1, steps: 100 }),   // seed level multiplier per loop
-        sedb: midi.cc([3, 6],  { min: 0, max: 1, init: 1, steps: 100 }),
-        xfad: midi.cc([3, 7],  { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        peri: midi.cc([3, 8],  { min: 0, max: 8, init: 0, steps: 64 }),   // seconds, 0 = off
-        sdly: midi.cc([3, 9],  { min: 1, max: 29, init: 1, steps: 28 }),
-        rvrs: midi.cc([3, 10], { min: 0, max: 1, init: 0, steps: 1 }),
-        frza: midi.cc([3, 11], { min: 0, max: 1, init: 0, steps: 1 }),
-        frzb: midi.cc([3, 12], { min: 0, max: 1, init: 0, steps: 1 }),
-        grid: midi.cc([3, 13], { min: 0, max: 1, init: 0, steps: 1 })
+      const A = camControls(1)
+      const B = camControls(2)
+      // HOME (push on encoder 16): the camera square on the monitor again. Pose only; gain, blur,
+      // delay and lens are the loop's character, not where the camera points.
+      const POSE = ['zoom', 'rot', 'x', 'y', 'pitch', 'yaw']
+      const home = (L) => { for (const k of POSE) L[k].reset(); midi.refresh() }
+      const homePush = [midi.note([1, 16], { toggle: true }), midi.note([2, 16], { toggle: true })]
+      const lastHome = homePush.map(f => f())
+      const S = {   // switchers: what is played
+        xfad: midi.cc([3, 1], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
+        peri: midi.cc([3, 2], { min: 0, max: 8, init: 0, steps: 64 }),   // seconds, 0 = off
+        rvrs: midi.cc([3, 3], { min: 0, max: 1, init: 0, steps: 1 }),
+        frza: midi.cc([3, 4], { min: 0, max: 1, init: 0, steps: 1 }),
+        frzb: midi.cc([3, 5], { min: 0, max: 1, init: 0, steps: 1 }),
+        grid: midi.cc([3, 6], { min: 0, max: 1, init: 0, steps: 1 }),
+        void: midi.cc([3, 7], { min: 0, max: 1, init: 1, steps: 1 })    // black beyond the monitor (srcb/blurb) or wrap (src/blur)
       }
+      const SD = {  // the seed: one light coming in, two doors
+        leva: midi.cc([5, 1], { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),
+        levb: midi.cc([5, 2], { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),
+        sfrq: midi.cc([5, 3], { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
+        skal: midi.cc([5, 4], { min: 0, max: 12, init: 0, steps: 12 }),   // 0 = the seed as itself
+        sdly: midi.cc([5, 5], { min: 1, max: 29, init: 1, steps: 28 }),
+        kind: midi.cc([5, 6], { min: 0, max: 5, init: 0, steps: 5 })    // osc noise voronoi cam screen sketch
+      }
+      const R = {   // the rig: glass and cabling, set per piece
+        mira: midi.cc([6, 1], { min: 0, max: 1, init: 0.35, steps: 100, fine: 10 }),
+        mzma: midi.cc([6, 2], { min: 0.5, max: 2, init: 0.9, curve: 'log', steps: 100, fine: 10 }),
+        mirb: midi.cc([6, 3], { min: 0, max: 1, init: 0.35, steps: 100, fine: 10 }),
+        mzmb: midi.cc([6, 4], { min: 0.5, max: 2, init: 0.9, curve: 'log', steps: 100, fine: 10 }),
+        atob: midi.cc([6, 5], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
+        btoa: midi.cc([6, 6], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
+        keya: midi.cc([6, 7], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
+        keyb: midi.cc([6, 8], { min: 0, max: 1, init: 0, steps: 100, fine: 10 })
+      }
+      // PLAY: the knobs a set rides, aliased from their homes (turn either, both displays follow)
+      const playOf = [[1, 1], [1, 2], [1, 3], [5, 1], [2, 1], [2, 2], [2, 3], [5, 2], [3, 1], [3, 2], [5, 5], [3, 7], [5, 4]]
+      playOf.forEach((home, i) => midi.alias([7, i + 1], home))
       const mon = (m) => ({
         hue: midi.cc([4, (m - 1) * 4 + 1], { min: -0.5, max: 0.5, init: 0, steps: 100, fine: 10 }),
         sat: midi.cc([4, (m - 1) * 4 + 2], { min: 0, max: 2, init: 1, steps: 100, fine: 10 }),
@@ -107,7 +132,7 @@
         con: midi.cc([4, (m - 1) * 4 + 4], { min: 0.5, max: 2, init: 1, curve: 'log', steps: 100, fine: 10 })
       })
       const M = [null, mon(1), mon(2), mon(3), mon(4)]   // 1 = A direct, 2 = A mirror, 3 = B direct, 4 = B mirror
-      const P = { A, B, S, M }
+      const P = { A, B, S, M, SD, R }
 
       o0.setDepth(30); o1.setDepth(30); o2.setDepth(30)
 
@@ -124,9 +149,8 @@
         if (kind === 'video' && s0kind !== 'video:' + seedUrl) { if (seedUrl) { s0.initVideo(seedUrl); s0kind = 'video:' + seedUrl } }
         if (kind === 'image' && s0kind !== 'image:' + seedUrl) { if (seedUrl) { s0.initImage(seedUrl); s0kind = 'image:' + seedUrl } }
       }
-      // the seed sketch uses loop A's SFRQ/SKAL knobs (one seed, two loops)
-      const kalOn = () => Math.round(A.skal()) >= 2
-      const kal = (chain) => kalOn() ? chain.kaleid(() => Math.max(2, Math.round(A.skal()))) : chain
+      const kalOn = () => Math.round(SD.skal()) >= 2
+      const kal = (chain) => kalOn() ? chain.kaleid(() => Math.max(2, Math.round(SD.skal()))) : chain
       // ---- user code: a seed expression, or roughshod
       const editor = document.getElementById('editor'), codeBox = document.getElementById('code'), everr = document.getElementById('everr')
       try { const saved = localStorage.getItem('herder.code'); if (saved) codeBox.value = saved } catch (e) { /* no storage */ }
@@ -141,29 +165,29 @@
       const seedChain = () => {
         switch (seedKind) {
           case 'sketch': {
-            try { everr.textContent = ''; return kal(evalSeed()) } catch (e) { everr.textContent = e.message; return kal(osc(A.sfrq, 0.05, 1)) }
+            try { everr.textContent = ''; return kal(evalSeed()) } catch (e) { everr.textContent = e.message; return kal(osc(SD.sfrq, 0.05, 1)) }
           }
-          case 'noise': return kal(noise(A.sfrq, 0.1).brightness(0.4).contrast(1.6))
-          case 'voronoi': return kal(voronoi(A.sfrq, 0.3, 0.3))
+          case 'noise': return kal(noise(SD.sfrq, 0.1).brightness(0.4).contrast(1.6))
+          case 'voronoi': return kal(voronoi(SD.sfrq, 0.3, 0.3))
           case 'cam': case 'screen': case 'video': case 'image': ensureSource(seedKind); return kal(src(s0))
-          default: return kal(osc(A.sfrq, 0.05, 1))
+          default: return kal(osc(SD.sfrq, 0.05, 1))
         }
       }
       // the seed as seen by the loops: o2, delayed by SDLY frames
-      const seedTex = () => o2.delay(() => Math.round(S.sdly()))
+      const seedTex = () => o2.delay(() => Math.round(SD.sdly()))
 
       // ---- one loop: own output, own controls, the other loop's output for the cross-link
       const monitor = (chain, m) => chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
-      const loop = (self, other, L, monDirect, monMirror, link, key, seedLevel) => {
-        const camera = blur(self.delay(() => Math.round(L.delay())), L.blur)
-        const direct = monitor(camera, monDirect).scale(L.zoom).rotate(L.rot).scroll(L.x, L.y)
-        const reflected = monitor(src(self).scale(L.mzm, -1, 1), monMirror)
+      const loop = (self, other, L, monDirect, monMirror, glass, link, key, amount) => {
+        const dark = S.void() > 0.5                              // a camera sees an unlit room past the monitor
+        const camera = (dark ? blurb : blur)(self.delay(() => Math.round(L.delay())), L.blur)
+        const direct = monitor(camera, monDirect).scale(L.zoom).offset(L.x, L.y).tilt(L.pitch, L.yaw, L.lens).rotate(L.rot)
+        const reflected = monitor((dark ? srcb : src)(self).scale(glass.mzm, -1, 1), monMirror)
         let chain = direct
-          .blend(reflected, L.mirror)                          // beam splitter
+          .blend(reflected, glass.mirror)                      // beam splitter
           .blend(src(other), link)                             // cross-link from the other loop
-          .hue(L.hue).saturate(L.sat).contrast(L.gain).brightness(L.bright)
-          .blend(src(self.delay(15)), L.persist)
-        const amount = () => L.seed() * seedLevel()
+          .contrast(L.gain)                                    // loop gain: the camera's exposure
+          .blend(src(self.delay(() => Math.round(L.pdly()))), L.persist)   // PRST at PDLY frames back
         if (key() > 0.005) {
           // keyed: the seed replaces pixels only where its luminance passes the key (issue 71 in lightherder)
           chain = chain.layer(src(seedTex()).luma(key, 0.1).mult(solid(1, 1, 1, amount), 1))
@@ -175,21 +199,23 @@
 
       // ---- build everything (called again when a chain's shape changes: seed kind, kaleid, key, freeze)
       let built = {}
-      const shape = () => JSON.stringify({ seedKind, kal: kalOn(), keya: S.keya() > 0.005, keyb: S.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5 })
+      const shape = () => JSON.stringify({ seedKind, kal: kalOn(), keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
       const build = () => {
         seedChain().out(o2)
         const swap = S.rvrs() > 0.5
         const [oa, ob] = swap ? [o1, o0] : [o0, o1]
-        if (S.frza() > 0.5) src(o0.delay(1)).out(o0); else loop(oa, ob, A, 1, 2, S.btoa, S.keya, S.seda).out(o0)
-        if (S.frzb() > 0.5) src(o1.delay(1)).out(o1); else loop(ob, oa, B, 3, 4, S.atob, S.keyb, S.sedb).out(o1)
+        if (S.frza() > 0.5) src(o0.delay(1)).out(o0); else loop(oa, ob, A, 1, 2, { mirror: R.mira, mzm: R.mzma }, R.btoa, R.keya, SD.leva).out(o0)
+        if (S.frzb() > 0.5) src(o1.delay(1)).out(o1); else loop(ob, oa, B, 3, 4, { mirror: R.mirb, mzm: R.mzmb }, R.atob, R.keyb, SD.levb).out(o1)
         // program: A crossfaded with B; PERI > 0 flips the crossfade every PERI seconds
         const xf = () => { const p = S.peri(); const x = S.xfad(); if (p <= 0.05) return x; return (Math.floor(time / p) % 2) ? 1 - x : x }
         src(o0).blend(src(o1), xf).out(o3)
         built = shape()
       }
+      let lastKindKnob = Math.round(SD.kind())
       const setSeed = (kind, url) => {
         seedKind = kind; if (url !== undefined) seedUrl = url
         seedSel.value = kind
+        const i = seedOrder.indexOf(kind); if (i >= 0 && Math.round(SD.kind()) !== i) { SD.kind.set(i); lastKindKnob = i }
         urlBox.style.display = (kind === 'video' || kind === 'image') ? '' : 'none'
         build()
       }
@@ -223,44 +249,76 @@
 
       // ---- HUD: header + one group's 4x4 block; [ and ] change the group shown
       const DESC = {
-        GAIN: 'Loop gain: contrast on the camera path. Fractals live just above 1. Push for fine.',
-        BRT: 'Brightness offset on the camera path, the other half of loop gain.',
-        ZOOM: 'Camera distance per pass: above 1 zooms in (tunnel), below 1 recedes.',
+        GAIN: 'Loop gain: the camera\'s exposure, contrast on the camera path. Fractals live just above 1. Push for fine.',
+        ZOOM: 'Magnification per pass (lens zoom, not a dolly): above 1 zooms in (tunnel), below 1 recedes into the void. 0.5 to 2, unity mid-travel.',
         ROT: 'Camera rotation per pass in radians, wraps. With zoom this makes spirals.',
-        X: 'Camera offset per pass, sideways.', Y: 'Camera offset per pass, up and down.',
-        HUE: 'Hue drift per pass.', SAT: 'Saturation multiplier per pass.',
-        BLUR: 'Optical softening radius (fraction of width). Too little crystallizes, too much loses detail.',
-        MIRR: 'Beam splitter reflectance: how much of the mirrored monitor the camera sees.',
-        DLAY: 'Camera delay in frames (1 to 29). Higher lags and breathes; move slowly.',
-        SEED: 'How much of the seed enters this loop (times SEDA/SEDB on GR03).',
-        MZM: 'Mirror zoom: optical distance of the reflected monitor.',
-        SFRQ: 'Seed frequency or scale (loop A knob drives the shared seed).', SKAL: 'Seed kaleidoscope sides; below 2 = off (loop A knob).',
-        PRST: 'Persistence: an extra echo from 15 frames back.',
+        X: 'Camera off the monitor\'s axis, sideways.', Y: 'Camera off the monitor\'s axis, up and down.',
+        BLUR: 'Lens focus: softening radius as a fraction of width. 0 = sharp (sampling still softens a fraction of a texel).',
+        DLAY: 'Camera delay in frames (1 to 29), a frame delay box after the camera. Higher lags and breathes.',
+        PRST: 'Persistence: how much of the frame PDLY frames back is blended in (a comb filter; ours, not Blair\'s).',
+        PDLY: 'Persistence delay in frames: 1 smears along the motion like a slow shutter, 15 echoes.',
+        PTCH: 'Camera pitch: the monitor\'s top leans away (keystone). None of the rigs has this.', YAW: 'Camera yaw: the monitor\'s right edge leans away.',
+        LENS: 'Lens: camera distance for the perspective, 1 very wide to 6 long. Sets how strong pitch and yaw keystone.',
+        home: 'push: camera square on the monitor again (zoom, roll, x, y, pitch, yaw to their starting values). Gain, blur, delay and lens stay.',
+        XFAD: 'Program crossfade: 0 shows loop A, 1 shows loop B.', PERI: 'Period in seconds for rhythmic reversal of the crossfade; 0 = off.',
+        Rvrs: 'Reverse: swap which output each loop reads as itself.',
+        Frza: 'Freeze loop A (holds the last frame).', Frzb: 'Freeze loop B.', Grid: 'Show all four outputs.',
+        Void: 'Black beyond the monitor: the camera sees an unlit room past the screen, so a receding or turning loop walks into black. Off wraps like src() (tiles).',
+        view: 'push: toggle grid',
+        LEVA: 'How much of the seed enters loop A.', LEVB: 'How much of the seed enters loop B.',
+        SFRQ: 'Seed frequency or scale.', SKAL: 'Seed kaleidoscope sides; below 2 = off.',
+        SDLY: 'Seed delay in frames before it enters the loops.', Kind: 'Seed kind: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch.',
+        MIRA: 'Loop A beam splitter: how much of the mirrored monitor camera A sees (fixed glass on Blair\'s rig).', MZMA: 'Loop A mirror zoom: optical distance of the reflected monitor.',
+        MIRB: 'Loop B beam splitter reflectance.', MZMB: 'Loop B mirror zoom.',
         AtoB: 'Cross-link: how much of loop A the camera of loop B sees.', BtoA: 'Cross-link: how much of loop B the camera of loop A sees.',
         KEYA: 'Luma key threshold for the seed entering A. Above 0 the seed is keyed per pixel instead of crossfaded.',
         KEYB: 'Luma key threshold for the seed entering B.',
-        SEDA: 'Seed level multiplier for loop A (with SEED on GR01).', SEDB: 'Seed level multiplier for loop B (with SEED on GR02).',
-        XFAD: 'Program crossfade: 0 shows loop A, 1 shows loop B.', PERI: 'Period in seconds for rhythmic reversal of the crossfade; 0 = off.',
-        SDLY: 'Seed delay in frames before it enters the loops.', RVRS: 'Reverse: swap which output each loop reads as itself.',
-        FRZA: 'Freeze loop A (holds the last frame).', FRZB: 'Freeze loop B.', GRID: 'Show all four outputs.', '----': 'unassigned', VIEW: 'push: toggle grid'
+        GNA: 'Gain A (same knob as CAMA GAIN).', ZMA: 'Zoom A (CAMA ZOOM).', RTA: 'Rotation A (CAMA ROT).', LVA: 'Seed level A (SEED LEVA).',
+        GNB: 'Gain B (CAMB GAIN).', ZMB: 'Zoom B (CAMB ZOOM).', RTB: 'Rotation B (CAMB ROT).', LVB: 'Seed level B (SEED LEVB).',
+        '----': 'unassigned'
       }
       for (let m = 1; m <= 4; m++) { const who = ['A direct', 'A mirror', 'B direct', 'B mirror'][m - 1]; DESC[`${m}HUE`] = `Monitor ${m} (${who}) hue.`; DESC[`${m}SAT`] = `Monitor ${m} (${who}) saturation.`; DESC[`${m}BRT`] = `Monitor ${m} (${who}) brightness.`; DESC[`${m}CON`] = `Monitor ${m} (${who}) contrast.` }
       // ---- the virtual surface: all four groups as draggable numbers (drag, wheel, click = push, shift = fine)
       const head = document.getElementById('headtext')
-      const panel = mountPanel(document.getElementById('panel'), midi, {
-        groups: [
-          { group: 1, title: 'LOPA loop A', labels: LOOP, descs: DESC },
-          { group: 2, title: 'LOPB loop B', labels: LOOP, descs: DESC },
+      const panelGroups = [
+          { group: 1, title: 'CAMA camera A', labels: CAM, descs: DESC },
+          { group: 2, title: 'CAMB camera B', labels: CAM, descs: DESC },
           { group: 3, title: 'SWCH switchers', labels: SW, descs: DESC },
-          { group: 4, title: 'MONS monitors', labels: MON, descs: DESC }
-        ]
-      })
+          { group: 4, title: 'MONS monitors', labels: MON, descs: DESC },
+          { group: 5, title: 'SEED', labels: SEED, descs: DESC },
+          { group: 6, title: 'RIG glass and links', labels: RIG, descs: DESC },
+          { group: 7, title: 'PLAY (aliases)', labels: PLAY, descs: DESC }
+      ]
+      const panelHost = document.getElementById('panel')
+      let panel = mountPanel(panelHost, midi, { groups: panelGroups })
+      // ---- the controls in a window of their own ('p', or ?panel=window): the canvas stays clean for
+      // a recording or a projector, the knobs live on the laptop screen. Same controller object, so
+      // nothing is synced; the popup's keys are forwarded to this page. Closing it puts the panel back.
+      let popup = null
+      const openPanelWindow = () => {
+        if (popup && !popup.closed) { popup.focus(); return }
+        popup = window.open('', 'herder-panel', 'width=1180,height=720')
+        if (!popup) { head.textContent = 'popup blocked: allow popups for this page'; return }
+        const d = popup.document
+        d.title = 'Herder controls'
+        d.body.style.cssText = 'margin: 8px; background: #111; color: #ccc; font-family: monospace;'
+        d.body.innerHTML = ''
+        panel.destroy(); panelHost.style.display = 'none'
+        panel = mountPanel(d.body, midi, { groups: panelGroups })
+        d.addEventListener('keydown', (e) => document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey })))
+        const back = () => { if (panelHost.style.display === 'none') { panel.destroy(); panelHost.style.display = ''; panel = mountPanel(panelHost, midi, { groups: panelGroups }) } }
+        popup.addEventListener('pagehide', back)
+      }
+      const closePanelWindow = () => { if (popup && !popup.closed) popup.close(); popup = null }
+      if (q.get('panel') === 'window') setTimeout(openPanelWindow, 0)
       const refreshHud = () => {
-        head.textContent = `${mode}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  e edit  b rebuild  r reset  d dump  h hide   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        head.textContent = `${mode}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  e edit  b rebuild  r reset  d dump  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
       }
       setInterval(() => {
         if (viewPush() !== lastViewPush) { lastViewPush = viewPush(); setView(view === 'grid' ? 'program' : 'grid') }
         const g = S.grid() > 0.5; if (g !== lastGrid) { lastGrid = g; setView(g ? 'grid' : 'program') }
+        const k = Math.round(SD.kind()); if (k !== lastKindKnob) { lastKindKnob = k; setSeed(seedOrder[k]) }
+        homePush.forEach((f, i) => { if (f() !== lastHome[i]) { lastHome[i] = f(); home(i ? B : A) } })
         if (shape() !== built) build()
         if (q.get('h')) { hud.style.display = 'none'; return }
         refreshHud()
@@ -270,8 +328,9 @@
         if (e.key === 'e') { editor.style.display = editor.style.display === 'none' || !editor.style.display ? 'block' : 'none'; if (editor.style.display === 'block') codeBox.focus() }
         if (e.key === 'b') build()
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
+        if (e.key === 'p') { if (popup && !popup.closed) closePanelWindow(); else openPanelWindow() }
         if (e.key === '0') setView('grid'); if (e.key === '1') setView('a'); if (e.key === '2') setView('b'); if (e.key === '3') setView('seed'); if (e.key === '4') setView('program')
-        if (e.key === 'r') { for (const o of [A, B, S, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
+        if (e.key === 'r') { for (const o of [A, B, S, SD, R, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
         if (e.key === 's') setSeed(seedOrder[(seedOrder.indexOf(seedKind) + 1) % seedOrder.length])
       })
       // ---- state dump: 'd' logs everything as JSON (and copies it to the clipboard)
@@ -284,7 +343,7 @@
           ring: { o0: o0.depth, o1: o1.depth, o2: o2.depth },
           midi: { inputs: midi.inputs, outputs: midi.outputs, profile: midi.profile && midi.profile.name, mode: midi.state.defaults.mode },
           groups: {
-            LOPA: groupOf(A, LOOP), LOPB: groupOf(B, LOOP), SWCH: groupOf(S, SW),
+            CAMA: groupOf(A, CAM), CAMB: groupOf(B, CAM), SWCH: groupOf(S, SW), SEED: groupOf(SD, SEED), RIG: groupOf(R, RIG),
             MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => [['hue', M[m].hue], ['sat', M[m].sat], ['brt', M[m].brt], ['con', M[m].con]].map(([k, f]) => [`${m}${k.toUpperCase()}`, +f().toFixed(5)])))
           },
           snapshot: midi.snapshot()   // raw "channel:cc" -> value, what midi.restore() takes
@@ -295,7 +354,7 @@
         return state
       }
       document.addEventListener('keydown', (e) => { if (e.key === 'd') dump() })
-      window.__herder = { P, midi, panel, setSeed, setView, build, dump, applyCode, codeBox, get seedKind () { return seedKind }, get view () { return view } }
+      window.__herder = { P, midi, get panel () { return panel }, openPanelWindow, closePanelWindow, setSeed, setView, build, dump, applyCode, codeBox, get seedKind () { return seedKind }, get view () { return view } }
     </script>
   </body>
 </html>

@@ -1,0 +1,682 @@
+{
+ "_about": "Faderfox EC4 setup 2 as a Korg nanoKONTROL2 for bddap-bot/lightherder: encoders send the nano's fader (CC 0-7) and rotary (CC 16-23) controls absolute on ch 1; pushes send the nano's buttons as CC 127 on press, 0 on release (push mode Key). Apply with: node extensions/midi/tools/ec4-label.js apply <backup.syx> <out.syx> dev/lightherder-ec4-labels.json",
+ "_pushes": {
+  "NANO": {
+   "1-5": "focus monitor upper A, lower A, upper B, lower B, rotating (M1-5)",
+   "6": "select: monitor on program / own camera (R8)",
+   "7": "reverse the focused switcher (R5)",
+   "8": "cut: hold to throw the switcher (marker prev)",
+   "9-11": "focus camera A, B, 3 (S1-3)",
+   "12": "rewind: last knob back to identity",
+   "13-16": "focus switcher A, B, C, D (R1-4)"
+  },
+  "XTRA": {
+   "1": "flip x (R6)",
+   "2": "flip y (R7)",
+   "3": "blank every monitor (marker next)",
+   "4": "stop: reset every knob",
+   "5": "cycle: overlay on/off",
+   "6": "forward: solo the focused monitor",
+   "7": "marker set: write a frame",
+   "8": "record while held",
+   "9-16": "same as NANO"
+  }
+ },
+ "setupName": {
+  "2": "NANO"
+ },
+ "groupName": {
+  "2": {
+   "1": "NANO",
+   "2": "XTRA"
+  }
+ },
+ "encoders": {
+  "2": {
+   "1": {
+    "1": {
+     "name": "HUE",
+     "type": "CCab",
+     "channel": 1,
+     "number": 0,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 48,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "2": {
+     "name": "SAT",
+     "type": "CCab",
+     "channel": 1,
+     "number": 1,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 49,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "3": {
+     "name": "BRT",
+     "type": "CCab",
+     "channel": 1,
+     "number": 2,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 50,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "4": {
+     "name": "CON",
+     "type": "CCab",
+     "channel": 1,
+     "number": 3,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 51,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "5": {
+     "name": "TEMP",
+     "type": "CCab",
+     "channel": 1,
+     "number": 4,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 52,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "6": {
+     "name": "SHRP",
+     "type": "CCab",
+     "channel": 1,
+     "number": 5,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 71,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "7": {
+     "name": "PERD",
+     "type": "CCab",
+     "channel": 1,
+     "number": 6,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 68,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "8": {
+     "name": "XFAD",
+     "type": "CCab",
+     "channel": 1,
+     "number": 7,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 61,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "9": {
+     "name": "ZOOM",
+     "type": "CCab",
+     "channel": 1,
+     "number": 16,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 32,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "10": {
+     "name": "ROT",
+     "type": "CCab",
+     "channel": 1,
+     "number": 17,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 33,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "11": {
+     "name": "DLAY",
+     "type": "CCab",
+     "channel": 1,
+     "number": 18,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 34,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "12": {
+     "name": "RATE",
+     "type": "CCab",
+     "channel": 1,
+     "number": 19,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 43,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "13": {
+     "name": "PREC",
+     "type": "CCab",
+     "channel": 1,
+     "number": 20,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 64,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "14": {
+     "name": "----",
+     "type": "CCab",
+     "channel": 1,
+     "number": 21,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 65,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "15": {
+     "name": "----",
+     "type": "CCab",
+     "channel": 1,
+     "number": 22,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 66,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "16": {
+     "name": "----",
+     "type": "CCab",
+     "channel": 1,
+     "number": 23,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 67,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    }
+   },
+   "2": {
+    "1": {
+     "name": "HUE",
+     "type": "CCab",
+     "channel": 1,
+     "number": 0,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 69,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "2": {
+     "name": "SAT",
+     "type": "CCab",
+     "channel": 1,
+     "number": 1,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 70,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "3": {
+     "name": "BRT",
+     "type": "CCab",
+     "channel": 1,
+     "number": 2,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 62,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "4": {
+     "name": "CON",
+     "type": "CCab",
+     "channel": 1,
+     "number": 3,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 42,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "5": {
+     "name": "TEMP",
+     "type": "CCab",
+     "channel": 1,
+     "number": 4,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 46,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "6": {
+     "name": "SHRP",
+     "type": "CCab",
+     "channel": 1,
+     "number": 5,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 44,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "7": {
+     "name": "PERD",
+     "type": "CCab",
+     "channel": 1,
+     "number": 6,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 60,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "8": {
+     "name": "XFAD",
+     "type": "CCab",
+     "channel": 1,
+     "number": 7,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 45,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "9": {
+     "name": "ZOOM",
+     "type": "CCab",
+     "channel": 1,
+     "number": 16,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 32,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "10": {
+     "name": "ROT",
+     "type": "CCab",
+     "channel": 1,
+     "number": 17,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 33,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "11": {
+     "name": "DLAY",
+     "type": "CCab",
+     "channel": 1,
+     "number": 18,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 34,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "12": {
+     "name": "RATE",
+     "type": "CCab",
+     "channel": 1,
+     "number": 19,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 43,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "13": {
+     "name": "PREC",
+     "type": "CCab",
+     "channel": 1,
+     "number": 20,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 64,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "14": {
+     "name": "----",
+     "type": "CCab",
+     "channel": 1,
+     "number": 21,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 65,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "15": {
+     "name": "----",
+     "type": "CCab",
+     "channel": 1,
+     "number": 22,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 66,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "16": {
+     "name": "----",
+     "type": "CCab",
+     "channel": 1,
+     "number": 23,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc1",
+     "scale": "127",
+     "push": {
+      "type": "CC",
+      "channel": 1,
+      "number": 67,
+      "mode": 0,
+      "display": 0,
+      "lower": 0,
+      "upper": 127,
+      "link": 0
+     }
+    }
+   }
+  }
+ }
+}
