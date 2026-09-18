@@ -5,7 +5,7 @@
     <title>Herder, two loops</title>
     <style>
       body { margin: 0; background: black; color: #ccc; font-family: monospace; font-size: 12px; overflow: hidden; }
-      canvas { width: 100vw; height: 100vh; display: block; }
+      canvas { width: 100vw; height: 100vh; display: block; object-fit: contain; background: black; }
       #hud { position: fixed; left: 8px; bottom: 8px; font-size: 11px; }
       #hudhead { background: rgba(0,0,0,0.55); padding: 3px 6px; margin-bottom: 4px; white-space: pre; display: flex; gap: 12px; align-items: center; }
       #hudhead select, #hudhead input, #editor textarea, #editor button, #editor label { font: inherit; background: #111; color: #ddd; border: 1px solid #444; }
@@ -20,7 +20,7 @@
     <div id="hud">
       <div id="hudhead">
         <span id="headtext">loading</span>
-        <a href="HERDER.md" target="_blank" style="color:#9cf">manual</a>
+        <a href="manual.html" target="_blank" style="color:#9cf">manual</a>
         <span>seed <select id="seed">
           <option value="osc">osc + kaleid</option>
           <option value="noise">noise</option>
@@ -46,18 +46,29 @@
       //   o0 loop A (GR01)   o1 loop B (GR02)   o2 the seed   o3 program = A crossfaded with B (GR03 XFAD)
       //   GR03 switcher panel: cross-links, luma keys, crossfade, period, seed delay, freezes, grid
       //   GR04 monitors: hue/sat/brightness/contrast of the four monitors (A direct, A mirror, B direct, B mirror)
-      // Query: mode = gl | gpu, seed = osc|noise|voronoi|cam|screen|video|image, url = for video/image, h = hide hud
+      // Query: mode = gl | gpu, seed = osc|noise|voronoi|cam|screen|video|image, url = for video/image, h = hide hud,
+      //   res = WxH (the loops' resolution for the run; default the display's device pixels), panel = window
       const q = new URLSearchParams(location.search)
       const mode = q.get('mode') || 'gpu'
       const canvas = document.getElementById('c')
       const hud = document.getElementById('hud')
-      canvas.width = 1280; canvas.height = 720
+      // The resolution is fixed for the run, as on a real rig: the window shows it letterboxed and a
+      // resize rescales the view instead of emptying the frame ring. Default: the display's device
+      // pixels (3840x2160 on a 4K screen at Retina scaling); ?res=1920x1080 for a weaker machine.
+      const dpr = window.devicePixelRatio || 1
+      const resq = /^(\d+)x(\d+)$/.exec(q.get('res') || '')
+      const W = Math.min(7680, resq ? +resq[1] : Math.round(window.innerWidth * dpr))
+      const H = Math.min(4320, resq ? +resq[2] : Math.round(window.innerHeight * dpr))
+      canvas.width = W; canvas.height = H
 
       const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
       const { install, ec4 } = await import('../extensions/midi/index.js')
       const { mountPanel } = await import('../extensions/midi/ui/panel.js')
-      const hydra = await createHydra({ canvas, width: 1280, height: 720, detectAudio: false, makeGlobal: true, numOutputs: 4, filter: 'linear', useWGSL: mode === 'gpu' })
+      const hydra = await createHydra({ canvas, width: W, height: H, detectAudio: false, makeGlobal: true, numOutputs: 4, filter: 'linear', useWGSL: mode === 'gpu' })
       window.__hydra = hydra
+      if (hydra._vertexResizeObserver) { hydra._vertexResizeObserver.disconnect(); delete hydra._vertexResizeObserver }   // the window may change; the loops do not
+      // frames per second, from the page's own animation frames
+      let fps = 0; { let n = 0, t0 = performance.now(); const count = (t) => { n++; if (t - t0 >= 1000) { fps = Math.round(n * 1000 / (t - t0)); n = 0; t0 = t } requestAnimationFrame(count) }; requestAnimationFrame(count) }
       const midi = await install(hydra, { profile: ec4 })
 
       // ---- controls, as labelled on the device (dev/herder-ec4-labels.json)
@@ -295,7 +306,7 @@
       // ---- the controls in a window of their own ('p', or ?panel=window): the canvas stays clean for
       // a recording or a projector, the knobs live on the laptop screen. Same controller object, so
       // nothing is synced; the popup's keys are forwarded to this page. Closing it puts the panel back.
-      let popup = null
+      let popup = null, popupHead = null
       const openPanelWindow = () => {
         if (popup && !popup.closed) { popup.focus(); return }
         popup = window.open('', 'herder-panel', 'width=1180,height=720')
@@ -304,16 +315,20 @@
         d.title = 'Herder controls'
         d.body.style.cssText = 'margin: 8px; background: #111; color: #ccc; font-family: monospace;'
         d.body.innerHTML = ''
-        panel.destroy(); panelHost.style.display = 'none'
+        // the header line goes with the controls, and the main window's HUD goes away: that is the point
+        popupHead = d.createElement('div'); popupHead.style.cssText = 'white-space: pre; margin-bottom: 6px; font-size: 12px;'
+        d.body.appendChild(popupHead)
+        panel.destroy(); panelHost.style.display = 'none'; hud.style.display = 'none'
         panel = mountPanel(d.body, midi, { groups: panelGroups })
         d.addEventListener('keydown', (e) => document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey })))
-        const back = () => { if (panelHost.style.display === 'none') { panel.destroy(); panelHost.style.display = ''; panel = mountPanel(panelHost, midi, { groups: panelGroups }) } }
+        const back = () => { if (panelHost.style.display === 'none') { panel.destroy(); panelHost.style.display = ''; hud.style.display = q.get('h') ? 'none' : ''; popupHead = null; panel = mountPanel(panelHost, midi, { groups: panelGroups }) } }
         popup.addEventListener('pagehide', back)
       }
       const closePanelWindow = () => { if (popup && !popup.closed) popup.close(); popup = null }
       if (q.get('panel') === 'window') setTimeout(openPanelWindow, 0)
       const refreshHud = () => {
-        head.textContent = `${mode}  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  e edit  b rebuild  r reset  d dump  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        head.textContent = `${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  e edit  b rebuild  r reset  d dump  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        if (popupHead) popupHead.textContent = head.textContent
       }
       setInterval(() => {
         if (viewPush() !== lastViewPush) { lastViewPush = viewPush(); setView(view === 'grid' ? 'program' : 'grid') }
@@ -321,7 +336,7 @@
         const k = Math.round(SD.kind()); if (k !== lastKindKnob) { lastKindKnob = k; setSeed(seedOrder[k]) }
         homePush.forEach((f, i) => { if (f() !== lastHome[i]) { lastHome[i] = f(); home(i ? B : A) } })
         if (shape() !== built) build()
-        if (q.get('h')) { hud.style.display = 'none'; return }
+        if (q.get('h') && !popupHead) { hud.style.display = 'none'; return }
         refreshHud()
       }, 200)
       document.addEventListener('keydown', (e) => {

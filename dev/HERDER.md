@@ -120,7 +120,10 @@ Row 3: XFAD PERI SDLY Void. Row 4: SKAL.
 | p | the controls in a window of their own (close it, or `p` again, to bring them back) |
 
 URL parameters: `mode=gpu|gl` (WebGPU is the default), `seed=osc|noise|voronoi|cam|screen|video|image|sketch`,
-`url=` for a video or image seed, `panel=window`, `h=1` to start with the HUD hidden.
+`url=` for a video or image seed, `panel=window`, `h=1` to start with the HUD hidden, `res=WxH` for the
+loops' resolution. The resolution is fixed for the run, by default the display's device pixels (3840x2160
+on a 4K screen); the window shows it letterboxed and resizing does not disturb the loops. The HUD shows
+the resolution and the frame rate; if it drops below 60, `res=1920x1080`.
 
 The editor's seed mode takes a Hydra chain, e.g. `osc(12, 0.05, 1).kaleid(5)`; a trailing `.out()`
 is ignored. Roughshod mode runs whatever you type with the whole synth in reach.

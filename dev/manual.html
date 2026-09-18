@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Herder: manual</title>
+    <style>
+      body { margin: 0 auto; max-width: 52em; padding: 2em 1.2em; background: #111; color: #ddd; font: 15px/1.5 system-ui, sans-serif; }
+      a { color: #9cf; } code { background: #222; padding: 0 .3em; border-radius: 3px; font-size: .95em; }
+      pre { background: #222; padding: .8em; overflow-x: auto; }
+      table { border-collapse: collapse; margin: .8em 0; } td, th { border: 1px solid #333; padding: .3em .6em; text-align: left; vertical-align: top; }
+      th { background: #1c1c1c; } h1, h2, h3 { color: #fff; } h2 { margin-top: 2em; border-bottom: 1px solid #333; }
+    </style>
+  </head>
+  <body>
+    <div id="doc">Loading the manual…</div>
+    <script type="module">
+      // HERDER.md is the manual's one source; this page only renders it.
+      import { marked } from 'https://cdn.jsdelivr.net/npm/marked@12/lib/marked.esm.js'
+      const md = await fetch('HERDER.md').then(r => r.ok ? r.text() : Promise.reject(new Error(r.status + ' ' + r.statusText)))
+      document.getElementById('doc').innerHTML = marked.parse(md)
+    </script>
+    <noscript>The manual is <a href="HERDER.md">HERDER.md</a>.</noscript>
+  </body>
+</html>

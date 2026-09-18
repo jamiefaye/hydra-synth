@@ -12,7 +12,7 @@ export default defineConfig({
     minify: false,
     sourcemap: true,
     rollupOptions: {
-      input: { herder: path.resolve(__dirname, 'dev/herder.html') }
+      input: { herder: path.resolve(__dirname, 'dev/herder.html'), manual: path.resolve(__dirname, 'dev/manual.html') }
     }
   },
   define: { 'global': '{}' }
