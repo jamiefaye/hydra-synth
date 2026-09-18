@@ -6,7 +6,7 @@
  */
 
 // WebGPU imports (from extension's wgsl folder)
-import { wgslHydra } from './wgsl/wgsl-hydra.js'
+import { wgslHydra, setSamplerFilter } from './wgsl/wgsl-hydra.js'
 import { OutputWgsl } from './wgsl/outputWgsl.js'
 
 // Extension-specific imports
@@ -81,6 +81,7 @@ export async function createHydra({
   useWGSL = false,
   canvas,
   precision,
+  filter = 'nearest',   // output texture sampling: 'nearest' (hydra's look) or 'linear' (smooth feedback)
   extendTransforms = {},
   gpuDevice = null,
   preserveDrawingBuffer = false
@@ -235,6 +236,7 @@ export async function createHydra({
   // Initialize based on mode
   if (useWGSL) {
     // WebGPU mode
+    setSamplerFilter(filter)
     hydra.wgslHydra = new wgslHydra(hydra, hydra.canvas, numOutputs, gpuDevice)
 
     // Initialize outputs
@@ -299,6 +301,7 @@ export async function createHydra({
         width: hydra.width,
         height: hydra.height,
         precision: hydra.precision,
+        filter,
         label: `o${index}`
       })
       o.id = index

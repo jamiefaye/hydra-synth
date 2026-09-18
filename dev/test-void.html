@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hydra void sampling test</title>
+    <style>
+      body { margin: 0; background: #222; }
+      canvas { width: 640px; height: 360px; display: block; }
+      #status { position: fixed; top: 4px; left: 4px; color: white; font-family: monospace; font-size: 12px; background: rgba(0,0,0,0.5); padding: 2px 4px; white-space: pre; }
+    </style>
+  </head>
+  <body>
+    <div id="status">Loading...</div>
+    <canvas id="c" width="640" height="360"></canvas>
+    <script type="module">
+      // mode = core | gl | gpu. o1 is solid white; o0 = srcb(o1).scale(0.5) must be white in the
+      // centre and black in the corners; o2 = src(o1).scale(0.5) wraps and stays white everywhere;
+      // o3 = blurb(o1).scale(0.5) is like o0. Results go to the console as VOID-TEST ... and to
+      // the title so a headless run can read them.
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'core'
+      const status = document.getElementById('status')
+      const canvas = document.getElementById('c')
+      const say = (t) => { status.textContent = t; console.log('VOID-TEST', t); document.title = t }
+      try {
+        let hydra
+        const opts = { canvas, width: 640, height: 360, detectAudio: false, makeGlobal: true, numOutputs: 4, filter: 'linear', preserveDrawingBuffer: true }
+        if (mode === 'core') {
+          const HydraRenderer = (await import('../src/hydra-synth.js')).default
+          hydra = new HydraRenderer(opts)
+          await hydra.ready()
+        } else {
+          const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+          hydra = await createHydra({ ...opts, useWGSL: mode === 'gpu' })
+        }
+        window.__hydra = hydra
+        solid(1, 1, 1, 1).out(o1)
+        srcb(o1).scale(0.5).out(o0)
+        src(o1).scale(0.5).out(o2)
+        blurb(o1, 0.01).scale(0.5).out(o3)
+        const probe = document.createElement('canvas'); probe.width = 640; probe.height = 360
+        const ctx = probe.getContext('2d', { willReadFrequently: true })
+        const px = (x, y) => { const d = ctx.getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2]] }
+        const results = {}
+        for (const [name, out] of [['srcb', o0], ['src', o2], ['blurb', o3]]) {
+          render(out)
+          for (let i = 0; i < 3; i++) hydra.tick(16)
+          if (mode === 'gpu') {
+            // WebGPU: copy the output's current texture to a buffer and map it (rows top to bottom;
+            // the channel order is the canvas format's, bgra on most hosts, so a grey reads the same).
+            const device = hydra.wgslHydra.device, tex = out.getCurrentTexture()
+            const w = 640, h = 360, bpr = w * 4
+            const buf = device.createBuffer({ size: bpr * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+            const enc = device.createCommandEncoder()
+            enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: bpr }, { width: w, height: h })
+            device.queue.submit([enc.finish()])
+            await buf.mapAsync(GPUMapMode.READ)
+            const d = new Uint8Array(buf.getMappedRange())
+            const at = (x, y) => { const i = (y * w + x) * 4; return [d[i], d[i + 1], d[i + 2]] }
+            results[name] = { centre: at(320, 180), corner: at(4, 4), edge: at(60, 180) }
+            buf.unmap()
+          } else {
+            // WebGL: read the output's own framebuffer (rows bottom to top), no canvas timing.
+            const w = 640, h = 360
+            const d = hydra.regl.read({ framebuffer: out.getCurrent() })
+            const at = (x, y) => { const i = ((h - 1 - y) * w + x) * 4; return [d[i], d[i + 1], d[i + 2]] }
+            results[name] = { centre: at(320, 180), corner: at(4, 4), edge: at(60, 180) }
+          }
+        }
+        const ok = results.srcb.centre[0] > 200 && results.srcb.corner[0] < 10 && results.src.corner[0] > 200 && results.blurb.centre[0] > 200 && results.blurb.corner[0] < 10
+        say(`${mode} ${ok ? 'PASS' : 'FAIL'} ` + JSON.stringify(results))
+      } catch (e) {
+        console.error(e); say(`${mode} ERROR ${e.message}`)
+      }
+    </script>
+  </body>
+</html>

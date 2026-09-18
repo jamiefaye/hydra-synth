@@ -34,6 +34,7 @@ export class WebGL1Renderer extends RendererInterface {
   init(canvas, options = {}) {
     const {
       precision = 'mediump',
+      filter = 'nearest',
       width = canvas.width || 1280,
       height = canvas.height || 720,
       pb = null,
@@ -46,6 +47,7 @@ export class WebGL1Renderer extends RendererInterface {
     this._width = width
     this._height = height
     this._precision = precision
+    this._filter = filter
     this._pb = pb
 
     // Initialize regl context
@@ -161,6 +163,7 @@ export class WebGL1Renderer extends RendererInterface {
       width: options.width || this._width,
       height: options.height || this._height,
       precision: this._precision,
+      filter: this._filter,
       label: options.label || `o${index}`
     })
     output.id = index

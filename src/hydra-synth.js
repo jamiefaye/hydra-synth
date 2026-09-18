@@ -29,6 +29,7 @@ class HydraRenderer {
     enableStreamCapture = true,
     canvas,
     precision,
+    filter = 'nearest', // output texture sampling: 'nearest' (hydra's look) or 'linear' (smooth feedback)
     extendTransforms = {}, // add your own functions on init
     debug = false // enable non-error console logging
   } = {}) {
@@ -105,6 +106,7 @@ class HydraRenderer {
     this.renderer = new WebGL1Renderer()
     this.renderer.init(this.canvas, {
       precision: this.precision,
+      filter,
       width: this.width,
       height: this.height,
       pb: this.pb,

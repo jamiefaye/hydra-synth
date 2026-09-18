@@ -1,9 +1,10 @@
 //const transforms = require('./glsl-transforms.js')
 import { normalizeDepth, delayedIndex, makeDelayProxy } from './lib/frame-ring.js'
 
-var Output = function ({ regl, precision, label = "", width, height, depth = 2 }) {
+var Output = function ({ regl, precision, filter = 'nearest', label = "", width, height, depth = 2 }) {
   this.regl = regl
   this.precision = precision
+  this.filter = filter
   this.label = label
   this.positionBuffer = this.regl.buffer([
     [-2, 0],
@@ -28,7 +29,8 @@ var Output = function ({ regl, precision, label = "", width, height, depth = 2 }
 Output.prototype._makeFbos = function (depth, width, height) {
   return (Array(depth)).fill().map(() => this.regl.framebuffer({
     color: this.regl.texture({
-      mag: 'nearest',
+      mag: this.filter,
+      min: this.filter,
       width: width,
       height: height,
       format: 'rgba'

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hydra tilt test</title>
+    <style>
+      body { margin: 0; background: #222; }
+      canvas { width: 640px; height: 360px; display: block; }
+      #status { position: fixed; top: 4px; left: 4px; color: white; font-family: monospace; font-size: 12px; background: rgba(0,0,0,0.5); padding: 2px 4px; white-space: pre; }
+    </style>
+  </head>
+  <body>
+    <div id="status">Loading...</div>
+    <canvas id="c" width="640" height="360"></canvas>
+    <script type="module">
+      // mode = core | gl | gpu. o1 white. o0 = srcb(o1).tilt(0, 0) is the identity (all white);
+      // o2 = srcb(o1).tilt(0, 0.6) (yaw) and o3 = srcb(o1).tilt(0.6, 0) (pitch) keep the centre and
+      // lose at least one corner to black. Reports VOID-TEST-style in the title and console.
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'core'
+      const status = document.getElementById('status')
+      const canvas = document.getElementById('c')
+      const say = (t) => { status.textContent = t; console.log('TILT-TEST', t); document.title = t }
+      try {
+        let hydra
+        const opts = { canvas, width: 640, height: 360, detectAudio: false, makeGlobal: true, numOutputs: 4, preserveDrawingBuffer: true }
+        if (mode === 'core') {
+          const HydraRenderer = (await import('../src/hydra-synth.js')).default
+          hydra = new HydraRenderer(opts); await hydra.ready()
+        } else {
+          const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+          hydra = await createHydra({ ...opts, useWGSL: mode === 'gpu' })
+        }
+        window.__hydra = hydra
+        solid(1, 1, 1, 1).out(o1)
+        srcb(o1).tilt(0, 0).out(o0)
+        srcb(o1).tilt(0, 0.6).out(o2)
+        srcb(o1).tilt(0.6, 0).out(o3)
+        const w = 640, h = 360
+        const read = async (out) => {
+          if (mode === 'gpu') {
+            const device = hydra.wgslHydra.device, tex = out.getCurrentTexture(), bpr = w * 4
+            const buf = device.createBuffer({ size: bpr * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+            const enc = device.createCommandEncoder()
+            enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: bpr }, { width: w, height: h })
+            device.queue.submit([enc.finish()]); await buf.mapAsync(GPUMapMode.READ)
+            const d = new Uint8Array(buf.getMappedRange()).slice(); buf.unmap()
+            return (x, y) => d[(y * w + x) * 4]
+          }
+          const d = hydra.regl.read({ framebuffer: out.getCurrent() })
+          return (x, y) => d[((h - 1 - y) * w + x) * 4]
+        }
+        const results = {}
+        for (const [name, out] of [['identity', o0], ['yaw', o2], ['pitch', o3]]) {
+          render(out); for (let i = 0; i < 3; i++) hydra.tick(16)
+          const at = await read(out)
+          results[name] = { centre: at(320, 180), corners: [at(4, 4), at(635, 4), at(4, 355), at(635, 355)] }
+        }
+        const ok = results.identity.centre > 250 && results.identity.corners.every(v => v > 250)
+          && results.yaw.centre > 250 && results.yaw.corners.some(v => v < 5)
+          && results.pitch.centre > 250 && results.pitch.corners.some(v => v < 5)
+        say(`${mode} ${ok ? 'PASS' : 'FAIL'} ` + JSON.stringify(results))
+      } catch (e) { console.error(e); say(`${mode} ERROR ${e.message}`) }
+    </script>
+  </body>
+</html>

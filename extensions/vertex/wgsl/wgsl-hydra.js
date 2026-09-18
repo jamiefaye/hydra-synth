@@ -8,6 +8,9 @@ import { computeSkinningMatrices, applySkinning } from '../geometry.js';
 // Used for testing to avoid a flood of console error messages.
 const oneShot = false;
 let fired = false;
+// Texture sampling for every texture uniform: 'nearest' (hydra's default) or 'linear'.
+let samplerFilter = 'nearest';
+export function setSamplerFilter(filter) { samplerFilter = filter === 'linear' ? 'linear' : 'nearest'; }
 
 const trace = false;
 
@@ -1665,7 +1668,7 @@ class uniformTextureListEntry {
 		}
 
 	createSamplerOrBuffers(device) {
-			this.sampler = device.createSampler();
+			this.sampler = device.createSampler({ magFilter: samplerFilter, minFilter: samplerFilter });
 			return this.sampler;
 	}
 	
