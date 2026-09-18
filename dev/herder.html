@@ -7,7 +7,8 @@
       body { margin: 0; background: black; color: #ccc; font-family: monospace; font-size: 12px; overflow: hidden; }
       canvas { width: 100vw; height: 100vh; display: block; object-fit: contain; background: black; }
       #hud { position: fixed; left: 8px; bottom: 8px; font-size: 11px; }
-      #hudhead { background: rgba(0,0,0,0.55); padding: 3px 6px; margin-bottom: 4px; white-space: pre; display: flex; gap: 12px; align-items: center; }
+      #hudhead { background: rgba(0,0,0,0.55); padding: 3px 6px; margin-bottom: 4px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+      #headtext { white-space: pre-wrap; }
       #hudhead select, #hudhead input, #editor textarea, #editor button, #editor label { font: inherit; background: #111; color: #ddd; border: 1px solid #444; }
       #editor { display: none; background: rgba(0,0,0,0.7); padding: 6px 8px; margin-bottom: 4px; }
       #editor textarea { width: 60em; height: 7em; display: block; margin: 4px 0; }
@@ -19,9 +20,7 @@
     <canvas id="c"></canvas>
     <div id="hud">
       <div id="hudhead">
-        <span id="headtext">loading</span>
-        <a href="manual.html" target="_blank" style="color:#9cf">manual</a>
-        <span>seed <select id="seed">
+        <span id="seedbox">seed <select id="seed">
           <option value="osc">osc + kaleid</option>
           <option value="noise">noise</option>
           <option value="voronoi">voronoi</option>
@@ -31,6 +30,8 @@
           <option value="image">image url</option>
           <option value="sketch">sketch (e to edit)</option>
         </select> <input id="url" placeholder="url" size="24" style="display:none" /></span>
+        <a href="manual.html" target="_blank" style="color:#9cf">manual</a>
+        <span id="headtext">loading</span>
       </div>
       <div id="editor">
         <div>Hydra code. <label><input type="radio" name="emode" value="seed" checked /> seed: a chain (no out() needed) that becomes the seed on o2, loops untouched</label>
@@ -307,6 +308,7 @@
       // a recording or a projector, the knobs live on the laptop screen. Same controller object, so
       // nothing is synced; the popup's keys are forwarded to this page. Closing it puts the panel back.
       let popup = null, popupHead = null
+      const seedBox = document.getElementById('seedbox'), hudHead = document.getElementById('hudhead')
       const openPanelWindow = () => {
         if (popup && !popup.closed) { popup.focus(); return }
         popup = window.open('', 'herder-panel', 'width=1180,height=720')
@@ -316,12 +318,24 @@
         d.body.style.cssText = 'margin: 8px; background: #111; color: #ccc; font-family: monospace;'
         d.body.innerHTML = ''
         // the header line goes with the controls, and the main window's HUD goes away: that is the point
-        popupHead = d.createElement('div'); popupHead.style.cssText = 'white-space: pre; margin-bottom: 6px; font-size: 12px;'
-        d.body.appendChild(popupHead)
+        // the seed selector and the manual link move over with their handlers; the status is mirrored
+        const bar = d.createElement('div'); bar.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin-bottom: 6px; font-size: 12px;'
+        bar.appendChild(d.adoptNode(seedBox))
+        seedBox.querySelectorAll('select, input').forEach(el => { el.style.cssText = 'font: inherit; background: #111; color: #ddd; border: 1px solid #444;' })
+        const link = d.createElement('a'); link.href = new URL('manual.html', location.href).href; link.target = '_blank'; link.textContent = 'manual'; link.style.color = '#9cf'
+        bar.appendChild(link)
+        popupHead = d.createElement('span'); popupHead.style.whiteSpace = 'pre-wrap'
+        bar.appendChild(popupHead)
+        d.body.appendChild(bar)
         panel.destroy(); panelHost.style.display = 'none'; hud.style.display = 'none'
         panel = mountPanel(d.body, midi, { groups: panelGroups })
         d.addEventListener('keydown', (e) => document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey })))
-        const back = () => { if (panelHost.style.display === 'none') { panel.destroy(); panelHost.style.display = ''; hud.style.display = q.get('h') ? 'none' : ''; popupHead = null; panel = mountPanel(panelHost, midi, { groups: panelGroups }) } }
+        const back = () => {
+          if (panelHost.style.display !== 'none') return
+          hudHead.insertBefore(document.adoptNode(seedBox), hudHead.firstChild)
+          panel.destroy(); panelHost.style.display = ''; hud.style.display = q.get('h') ? 'none' : ''; popupHead = null
+          panel = mountPanel(panelHost, midi, { groups: panelGroups })
+        }
         popup.addEventListener('pagehide', back)
       }
       const closePanelWindow = () => { if (popup && !popup.closed) popup.close(); popup = null }

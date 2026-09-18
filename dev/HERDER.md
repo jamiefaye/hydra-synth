@@ -1,6 +1,6 @@
 # The Herder
 
-A video-feedback instrument in Hydra, after Dave Blair's Light Herder: cameras pointed at the
+A video-feedback instrument in Hydra, after Dave Blair's [Light Herder](https://www.thelightherder.com/): cameras pointed at the
 monitors they draw to, a beam splitter between two monitors, switchers that mix what the cameras
 see, and one seed, the only light the rig did not make. Everything here is a model of that rig,
 played from a Faderfox EC4 or from the virtual panel on the page.
@@ -146,6 +146,9 @@ Full screen is Ctrl+Cmd+F on the Mac; `h` hides the HUD; `p` puts the controls o
 A hidden tab stops rendering (browsers pause animation frames), so keep the page visible.
 
 ## Where it differs from Blair's rig
+
+The rig itself: https://www.thelightherder.com/ . A faithful software copy in Rust, which this
+borrows its grammar from: https://github.com/bddap-bot/lightherder .
 
 The glass ratio, the cross-links and the keys are knobs here; on the rig the glass is fixed and the
 switchers do the mixing. Pitch and yaw exist here and on no rig. PRST is a parallel tap none of the
