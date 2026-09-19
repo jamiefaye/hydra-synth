@@ -82,6 +82,12 @@ your finger does:
 Four monitors, A direct, A mirror, B direct, B mirror: HUE, SAT, BRT, CON each, ahead of the
 cameras. The front panel of Blair's monitors. Inside the loop, so these compound too.
 
+There are two colour paths, and `c` flips between them (the header says which; a patch records it as `colour`).
+*matrix*, the default, is described next. *chain* is Hydra's own `hue().saturate().brightness().contrast()`: its HSV hue
+holds the brightest channel and full saturation, so turning a colour sheds luminance, and a loop tuned on it can run at a
+higher GAIN than the matrix allows, which keeps luminance. Patches saved before the matrix existed open on the chain, so
+they look as they were tuned.
+
 The four knobs of a monitor are composed into one colour matrix and applied in a single multiply (`colormat()`).
 HUE turns the chroma plane and SAT scales it, in NTSC luma/chroma as on lightherder; BRT lifts; CON is a gain about
 mid-grey. It behaves on light past white, which the loops now carry, and with the knobs at rest it is exactly the
@@ -149,6 +155,7 @@ against A and pulls back as A pushes in).
 | w | write a patch: the same JSON to a file (a save dialog in Chrome, a download elsewhere) |
 | g | record a gesture; `g` again and it loops, as a macro in the first free slot (see Automation) |
 | G | stop all automation; the macros keep their slots |
+| c | the monitors' colour path: matrix or chain (see MONS) |
 | m | the macro manager |
 | option-1 .. option-0 | run or stop macro slots 1 to 10; with shift, restart from the top |
 | 5 | view: seed 2 |

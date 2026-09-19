@@ -1172,6 +1172,8 @@ wgsl:
   // but can push a channel below zero; a plain floor (max 0) then raises the luminance, and in a feedback loop
   // that is a gain the knobs never asked for. Here the colour is pulled toward its own luminance just far enough
   // for the lowest channel to reach zero: hue and luminance stay. In-gamut colours pass through untouched, exactly.
+  // Not for a feedback path: applied every pass it bleeds chroma away (an overdriven loop goes white, a quiet one grey).
+  // There a plain floor is the better rail, as on real monitors; this is for a single pass that must not gain light.
   name: 'ingamut',
   type: 'color',
   inputs: [],

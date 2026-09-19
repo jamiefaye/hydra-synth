@@ -260,15 +260,16 @@
         const off = con * brt + 0.5 * (1 - con)
         return [...m[0], ...m[1], ...m[2]].map(x => x * con).concat([off, off, off])
       }
+      let colourPath = q.get('colour') === 'chain' ? 'chain' : 'matrix'
       const monitor = (chain, m) => {
-        // ?colour=chain is the front panel as it was (Hydra's hue, saturate, brightness, contrast in a row), for telling
-        // the two apart on the same page: it goes through HSV, and at rest it is the identity only to rounding
-        if (q.get('colour') === 'chain') return chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
+        // colourPath 'chain' is the front panel as it was: Hydra's hue, saturate, brightness, contrast in a row. Its HSV hue
+        // holds the brightest channel and full saturation, so turning a colour sheds luminance, and patches tuned on it run
+        // hotter on the matrix, which keeps luminance. Patches from before the matrix open on the chain ('c' flips it).
+        if (colourPath === 'chain') return chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
         const k = M[m]; let key = '', twelve = null
         const at = (i) => () => { const now = `${k.hue()},${k.sat()},${k.brt()},${k.con()}`; if (now !== key) { key = now; twelve = colourOf(k.hue(), k.sat(), k.brt(), k.con()) } return twelve[i] }
-        // ingamut: turning or boosting chroma can ask for negative light; bring it back along its own luminance, so that
-        // HUE and SAT never add light to the loop (a plain floor does, and the centre of a spiral climbs to white)
-        return chain.colormat(...Array.from({ length: 12 }, (_, i) => at(i))).ingamut()
+        // (not ingamut() here: pulling colours toward their luminance every pass bleeds the chroma out of a loop)
+        return chain.colormat(...Array.from({ length: 12 }, (_, i) => at(i)))
       }
       const loop = (self, other, L, monDirect, monMirror, glass, link, key, seeds) => {
         const dark = S.void() > 0.5                              // a camera sees an unlit room past the monitor
@@ -297,7 +298,7 @@
 
       // ---- build everything (called again when a chain's shape changes: seed kind, kaleid, key, freeze)
       let built = {}
-      const shape = () => JSON.stringify({ seedKind, kal: kalOf(SD.kal1), sb: seedKind2(), kalb: kalOf(SD.kal2), c1: seedKind === 'cam' ? Math.round(SD.cam1()) : 0, c2: seedKind2() === 'cam' ? Math.round(SD.cam2()) : 0, s2a: SD.s2a() > 0.001, s1b: SD.s1b() > 0.001, bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
+      const shape = () => JSON.stringify({ seedKind, colourPath, kal: kalOf(SD.kal1), sb: seedKind2(), kalb: kalOf(SD.kal2), c1: seedKind === 'cam' ? Math.round(SD.cam1()) : 0, c2: seedKind2() === 'cam' ? Math.round(SD.cam2()) : 0, s2a: SD.s2a() > 0.001, s1b: SD.s1b() > 0.001, bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
       const build = () => {
         seedChainOf(seedKind, SD.frq1, SD.kal1, codes.seed, s0, 's0').out(o2)
         const ownB = seedKind2() !== 'same'   // o4 keeps a thirty-frame ring only while loop B has a seed of its own
@@ -482,12 +483,12 @@
       const resetAll = () => { for (const o of [A, B, S, SD, R, PL, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
       // which copy is this: the dev server runs the source as it stands, a deployed page says what it was built from
       const BUILD = (typeof __HERDER_BUILD__ !== 'undefined') ? `build ${__HERDER_BUILD__}` : 'DEV (live source)'
-      const WHERE = `${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'local' : location.hostname}  ${BUILD}${q.get('colour') === 'chain' ? '  colour: old chain' : ''}`
+      const WHERE = `${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'local' : location.hostname}  ${BUILD}`
       let note = '', noteUntil = 0   // a message (saved, opened, ...) leads the header for a few seconds
       const refreshHud = () => {
         const running = auto.macros.filter(m => m.running)
         const autoLine = (auto.rec ? `REC ${((performance.now() - auto.rec.t0) / 1000).toFixed(1)} s   ` : '') + (auto.macros.length ? `macros ${running.map(m => m.slot).join(' ') || '-'} of ${auto.macros.length}   ` : '') + (auto.glides.size ? `gliding ${auto.glides.size}   ` : '')
-        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 1 4 program 5 seed 2  s next seed 1  e edit  b rebuild  r reset  d dump  w write patch  o open patch  g gesture  G stop all  m macros (opt-1..0 run them)  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  colour: ${colourPath}  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 1 4 program 5 seed 2  s next seed 1  e edit  b rebuild  r reset  d dump  w write patch  o open patch  c colour path  g gesture  G stop all  m macros (opt-1..0 run them)  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
         if (popupHead) popupHead.textContent = head.textContent
       }
       setInterval(() => {
@@ -520,6 +521,7 @@
           when: new Date().toISOString(),
           page: 'herder', mode, time: +time.toFixed(3),
           seed: { kind: seedKind, url: seedUrl || null }, view,
+          colour: colourPath,   // 'matrix' or 'chain': how the monitors' colour knobs are applied
           ring: { o0: o0.depth, o1: o1.depth, o2: o2.depth },
           midi: { inputs: midi.inputs, outputs: midi.outputs, profile: midi.profile && midi.profile.name, mode: midi.state.defaults.mode },
           groups: Object.fromEntries(Object.entries(KNOBS).map(([g, ks]) => [g, Object.fromEntries(Object.entries(ks).map(([label, f]) => [label, +f().toFixed(5)]))])),
@@ -786,6 +788,9 @@
         const kind = state.seed && state.seed.kind
         if (kind && SEED_KINDS.includes(kind)) part('seed', () => { lastKindKnob = Math.round(SD.knd1()); setSeed(kind, typeof state.seed.url === 'string' ? state.seed.url : '') })   // rebuilds the loops
         else { if (kind) skipped.push(`seed.kind ${kind}`); if (['code', 'code1', 'code2', 'codeB'].some(c => typeof state[c] === 'string')) part('code', build) }
+        // a whole patch with no `colour` was saved before the matrix and was tuned on the chain; a partial one leaves it be
+        const wantColour = (state.colour === 'chain' || state.colour === 'matrix') ? state.colour : ((state.when && state.groups && !('colour' in state)) ? 'chain' : null)
+        if (wantColour && wantColour !== colourPath) part('colour', () => { colourPath = wantColour; build() })
         if (state.view) { const v = VIEW_WAS[state.view] || state.view; if (views[v]) part('view', () => setView(v)); else skipped.push(`view ${state.view}`) }
         part('refresh', () => midi.refresh())
         return skipped
@@ -828,6 +833,7 @@
         if (e.ctrlKey || e.metaKey || e.altKey) return
         if (e.key === 'd') dump(); if (e.key === 'w') savePatch(); if (e.key === 'o') openPatch()
         if (e.key === 'g') { if (auto.rec) stopRec(); else startRec() } if (e.key === 'G') stopAuto()
+        if (e.key === 'c') { colourPath = colourPath === 'chain' ? 'matrix' : 'chain'; build(); say(`monitor colour: ${colourPath === 'chain' ? 'chain (Hydra hue/saturate/brightness/contrast, as older patches were tuned)' : 'matrix (one multiply, keeps luminance)'}`) }
         if (e.key === 'm') { if (macroWin && !macroWin.closed) macroWin.close(); else openMacroWindow() }
       })
       Object.assign(window.herder, { apply: applyState, glideTo, record: startRec, loop: stopRec, stop: stopAuto, sequence: startSequence, auto, state: stateOf, tick: autoTick, macro: addMacro, toggle: toggleMacro, remove: removeMacro, macros: () => auto.macros.map(describeMacro), set: drive, colourOf, openMacros: () => openMacroWindow(), get macroWindow () { return macroWin } })
