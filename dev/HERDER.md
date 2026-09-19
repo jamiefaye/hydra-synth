@@ -187,7 +187,8 @@ what you want back.
 **Macros.** Sixteen slots, any number running at once, three kinds:
 
 - *gesture*: press `g` (or the `rec` push), turn knobs, press it again. The moves loop at the length you
-  played them, in the first free slot. Record again for another, with its own length, so they drift
+  played them, in the first free slot. To choose the slot, end the recording with option-n (or MACR push n)
+  instead: it goes into slot n, replacing what was there. Record again for another, with its own length, so they drift
   against each other.
 - *sequence*: partial patches applied one after another, each then waiting its `wait` seconds (default 1);
   `"loop": true` starts over. Each step may glide.

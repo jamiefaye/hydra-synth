@@ -582,19 +582,21 @@
       }
       const removeMacro = (slot) => { auto.macros = auto.macros.filter(m => m.slot !== slot) }
       const toggleMacro = (slot, restart) => {
+        if (auto.rec) { stopRec(slot); return }   // while recording, a slot's key or push ends the take into that slot
         const m = macroAt(slot); if (!m) { say(`macro slot ${slot} is empty`); return }
         if (m.running && !restart) { stopMacro(m); say(`macro ${slot} ${m.name}: stopped`) } else { startMacro(m); say(`macro ${slot} ${m.name}: ${m.error ? 'error: ' + m.error : 'running'}`) }
       }
       const describeMacro = (m) => Object.assign({ slot: m.slot, name: m.name, kind: m.kind, running: m.running, loop: m.loop },
         m.kind === 'gesture' ? { len: Math.round(m.len), events: m.events } : m.kind === 'sequence' ? { steps: m.steps } : { code: m.code })
-      const startRec = () => { auto.rec = { t0: performance.now(), events: [] }; say('recording a gesture: turn knobs, g (or rec) again to loop it') }
-      const stopRec = () => {
+      const startRec = () => { auto.rec = { t0: performance.now(), events: [] }; say('recording a gesture: turn knobs; g (or rec) loops it in the first free slot, option-n (or MACR push n) in slot n') }
+      const stopRec = (slot) => {   // into `slot`, replacing what is there; or the first free one
         const r = auto.rec; auto.rec = null
         if (!r) return
         const len = performance.now() - r.t0
         if (!r.events.length || len < 100) { say('nothing recorded'); return }
-        const m = addMacro({ kind: 'gesture', len, events: r.events })
-        say(m ? `macro ${m.slot}: gesture loops every ${(len / 1000).toFixed(1)} s (${[...m.keys].join(' ')})` : 'no free macro slot')
+        const was = slot && macroAt(slot)
+        const m = addMacro({ kind: 'gesture', slot, len, events: r.events })
+        say(m ? `macro ${m.slot}${was ? ' (replacing ' + was.name + ')' : ''}: gesture loops every ${(len / 1000).toFixed(1)} s (${[...m.keys].join(' ')})` : 'no free macro slot')
       }
       const stopAuto = () => { auto.rec = null; auto.macros.forEach(stopMacro); auto.glides.clear(); say('automation stopped (macros keep their slots: option-n runs one again, m manages them)') }
       const startSequence = (steps, loop) => addMacro({ kind: 'sequence', steps, loop })
@@ -653,7 +655,7 @@
           [data-box] button, [data-box] input, [data-box] select, [data-box] textarea { font: inherit; background: #1a1a1a; color: #ddd; border: 1px solid #444; } [data-box] button { cursor: pointer; }
           [data-box] .on { color: #fd6; } [data-box] .err { color: #f88; white-space: normal; } [data-box] textarea { width: 100%; height: 12em; box-sizing: border-box; } [data-box] .dim { color: #777; }
         </style>
-        <div class="dim">option-1 .. option-0 run or stop slots 1 to 10 (shift restarts); the EC4's MACR pushes do all 16; G stops everything. Saved with a patch (w).</div>
+        <div class="dim">option-1 .. option-0 run or stop slots 1 to 10 (shift restarts; while recording a gesture, they end it into that slot); the EC4's MACR pushes do all 16; G stops everything. Saved with a patch (w).</div>
         <table><thead><tr><th>slot</th><th>name</th><th>kind</th><th>state</th><th></th></tr></thead><tbody data-id="rows"></tbody></table>
         <p>code macro: the body of a generator. <span class="dim">yield 2 waits two seconds, a bare yield one frame. herder.apply(patch), herder.glideTo('CAMA.ROT', 3, 5), herder.k['SWCH.XFAD'](), and all of Hydra are in reach.</span></p>
         <div>slot <select data-id="slot"></select> name <input data-id="name" size="18" /> <label><input type="checkbox" data-id="loop" /> start over when it ends</label>
