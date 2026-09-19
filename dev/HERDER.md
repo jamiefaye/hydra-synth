@@ -84,28 +84,32 @@ cameras. The front panel of Blair's monitors. Inside the loop, so these compound
 
 ### SEED
 
-Two seeds into two loops, a 2 x 2 matrix: rows are the loops, columns the seeds. It sits as a block at
-the top left of the group, with each seed's own knobs to its right:
+Loops are letters and seeds are numbers, everywhere: S2A is seed 2 into loop A. Two seeds into two loops
+is a 2 x 2 matrix, rows the loops and columns the seeds, and it sits as a block at the top left of the
+group with each seed's own knobs to its right:
 
 ```
-LEVA  S2A  | SFRQ SKAL     loop A takes seed 1 (LEVA) and seed 2 (S2A)     seed 1: frequency, kaleid
-S1B   LEVB | FRQB KALB     loop B takes seed 1 (S1B) and seed 2 (LEVB)     seed 2: frequency, kaleid
-Kind  KndB   SDLY Cam1     what each seed is, the delay both share, seed 1's camera
-cuta  cutb   cutx Cam2     the cuts, seed 2's camera
+S1A   S2A  | FRQ1 KAL1     loop A takes seed 1 and seed 2          seed 1: frequency, kaleid
+S1B   S2B  | FRQ2 KAL2     loop B takes seed 1 and seed 2          seed 2: frequency, kaleid
+Knd1  Cam1   Knd2 Cam2     what each seed is and, if a camera, which one
+cuta  cutb   cutx SDLY     the cuts; the delay both seeds share
 ```
 
 | encoder | control | what it does |
 |---|---|---|
-| 1, 2 | LEVA, S2A | loop A: how much of seed 1, of seed 2. |
-| 5, 6 | S1B, LEVB | loop B: how much of seed 1, of seed 2. |
-| 3, 4 | SFRQ, SKAL | seed 1: frequency or scale; kaleidoscope sides, below 2 off. |
-| 7, 8 | FRQB, KALB | seed 2: the same. |
-| 9 | Kind | seed 1: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch. |
-| 10 | KndB | seed 2: 0 seed 1 again (it costs nothing, and LEVB then feeds loop B from seed 1 as before), then 1 osc, 2 noise, 3 voronoi, 4 cam, 5 screen, 6 sketch (the editor's "seed B" text). View `5` shows it. |
-| 11 | SDLY | seed delay in frames before it enters the loops. |
-| 12, 16 | Cam1, Cam2 | which camera each seed looks through when its kind is cam: 0 the first the browser lists, 1 the second (where Cam2 starts), so two cameras can feed the two seeds. The header names them beside each seed's selector. |
-| 13, 14 | cuta, cutb | hold: cut a loop's own seed in whole, the switcher's foot pedal. Release and the level knob stands again; what was dropped in echoes round. |
+| 1, 2 | S1A, S2A | loop A: how much of seed 1, of seed 2. |
+| 5, 6 | S1B, S2B | loop B: how much of seed 1, of seed 2. |
+| 3, 4 | FRQ1, KAL1 | seed 1: frequency or scale; kaleidoscope sides, below 2 off. |
+| 7, 8 | FRQ2, KAL2 | seed 2: the same. |
+| 9 | Knd1 | seed 1: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch (the editor's seed 1 text). |
+| 11 | Knd2 | seed 2: 0 seed 1 again (it costs nothing, and S2B then feeds loop B from seed 1), then 1 osc, 2 noise, 3 voronoi, 4 cam, 5 screen, 6 sketch (the editor's seed 2 text). View `5` shows it. |
+| 10, 12 | Cam1, Cam2 | which camera a seed looks through when its kind is cam: 0 the first the browser lists, 1 the second (where Cam2 starts), so two cameras can feed the two seeds. The header names them beside each seed's selector. |
+| 13, 14 | cuta, cutb | hold: cut a loop's own seed in whole (seed 1 into A, seed 2 into B), the switcher's foot pedal. Release and the level knob stands again; what was dropped in echoes round. |
 | 15 | cutx | hold: throw the program crossfade to its other end. |
+| 16 | SDLY | seed delay in frames before the seeds enter the loops. |
+
+Patches saved under the earlier names (LEVA, LEVB, SFRQ, SKAL, FRQB, KALB, Kind, KndB, ATOB, BTOA, `code`,
+`codeB`) still open.
 
 ### RIG: the glass and the cabling
 
@@ -113,7 +117,7 @@ cuta  cutb   cutx Cam2     the cuts, seed 2's camera
 |---|---|---|
 | 1, 3 | MIRA, MIRB | beam splitter: how much of the mirrored monitor each camera sees. |
 | 2, 4 | MZMA, MZMB | mirror zoom: the reflected monitor's optical distance. |
-| 5, 6 | AtoB, BtoA | cross-links: how much of the other loop each camera sees. |
+| 5, 6 | ATOB, BTOA | cross-links: how much of the other loop each camera sees. |
 | 7, 8 | KEYA, KEYB | luma key for the seed entering A, B. Above 0 the seed is keyed per pixel, not crossfaded. |
 
 ### PLAY: what a set rides
@@ -121,8 +125,8 @@ cuta  cutb   cutx Cam2     the cuts, seed 2's camera
 Aliases of knobs that live elsewhere. Turn either, both displays follow, and a push on the alias
 is the fine push for its home knob.
 
-Row 1: GNA ZMA RTA LVA (loop A's gain, zoom, rotation, seed level). Row 2: the same for B.
-Row 3: XFAD PERI SDLY Void. Row 4: SKAL, then three knobs of PLAY's own: RBTH and ZBTH turn and zoom
+Row 1: GNA ZMA RTA S1A (loop A's gain, zoom, rotation, seed level). Row 2: the same for B.
+Row 3: XFAD PERI SDLY Void. Row 4: KAL1, then three knobs of PLAY's own: RBTH and ZBTH turn and zoom
 both cameras at once, on top of each one's ROT and ZOOM, and Cntr sends camera B the other way (it turns
 against A and pulls back as A pushes in).
 
@@ -139,7 +143,7 @@ against A and pulls back as A pushes in).
 | w | write a patch: the same JSON to a file (a save dialog in Chrome, a download elsewhere) |
 | g | record a gesture; `g` again and it loops (see Automation) |
 | G | stop all automation: gestures, glides, sequence |
-| 5 | view: loop B's own seed |
+| 5 | view: seed 2 |
 | o | open a patch; dropping the file on the page does the same. Knobs, seed and sketch code come back and the EC4's displays follow; the picture regrows from the seed |
 | h | hide the HUD |
 | p | the controls in a window of their own (close it, or `p` again, to bring them back) |

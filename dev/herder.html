@@ -20,7 +20,7 @@
     <canvas id="c"></canvas>
     <div id="hud">
       <div id="hudhead">
-        <span id="seedbox">seed <select id="seed">
+        <span id="seedbox">seed 1 <select id="seed">
           <option value="osc">osc + kaleid</option>
           <option value="noise">noise</option>
           <option value="voronoi">voronoi</option>
@@ -30,21 +30,21 @@
           <option value="image">image url</option>
           <option value="sketch">sketch (e to edit)</option>
         </select> <select id="cam1" title="seed 1's camera" style="display:none"></select> <input id="url" placeholder="url" size="24" style="display:none" />
-        seed 2 <select id="seedb">
+        seed 2 <select id="seed2">
           <option value="same">= seed 1</option>
           <option value="osc">osc + kaleid</option>
           <option value="noise">noise</option>
           <option value="voronoi">voronoi</option>
           <option value="cam">camera</option>
           <option value="screen">screen</option>
-          <option value="sketch">sketch (e, seed B)</option>
+          <option value="sketch">sketch (e, seed 2)</option>
         </select> <select id="cam2" title="seed 2's camera" style="display:none"></select></span>
         <a href="manual.html" target="_blank" style="color:#9cf">manual</a>
         <span id="headtext">loading</span>
       </div>
       <div id="editor">
-        <div>Hydra code. <label><input type="radio" name="emode" value="seed" checked /> seed: a chain (no out() needed) that becomes the seed on o2, loops untouched</label>
-        <label><input type="radio" name="emode" value="seedb" /> seed B: the same for loop B's own seed (o4)</label>
+        <div>Hydra code. <label><input type="radio" name="emode" value="seed" checked /> seed 1: a chain (no out() needed) that becomes the seed on o2, loops untouched</label>
+        <label><input type="radio" name="emode" value="seed2" /> seed 2: the same for the second seed (o4)</label>
         <label><input type="radio" name="emode" value="raw" /> roughshod: run as-is, anything goes (b rebuilds the loops)</label>
         <span style="float:right">ctrl+enter apply, esc close</span></div>
         <textarea id="code" spellcheck="false">osc(12, 0.05, 1).kaleid(5).rotate(() => time * 0.1)</textarea>
@@ -54,7 +54,7 @@
     </div>
     <script type="module">
       // Two Light Herder loops on the EC4.
-      //   o0 loop A (GR01)   o1 loop B (GR02)   o2 the seed   o3 program = A crossfaded with B (GR03 XFAD)   o4 loop B's own seed (SEED KndB)
+      //   o0 loop A (GR01)   o1 loop B (GR02)   o2 seed 1   o3 program = A crossfaded with B (GR03 XFAD)   o4 seed 2 (SEED Knd2)
       //   GR03 switcher panel: cross-links, luma keys, crossfade, period, seed delay, freezes, grid
       //   GR04 monitors: hue/sat/brightness/contrast of the four monitors (A direct, A mirror, B direct, B mirror)
       // Query: mode = gl | gpu, seed = osc|noise|voronoi|cam|screen|video|image, url = for video/image, h = hide hud,
@@ -92,9 +92,9 @@
       const CAM  = pad(['GAIN','ZOOM','ROT','X','Y','BLUR','DLAY','PRST','PTCH','YAW','LENS','PDLY']); CAM[15] = 'home'
       const SW   = pad(['XFAD','PERI','Rvrs','Frza','Frzb','Grid','Void','GLID','rec','clr']); SW[15] = 'view'
       const MON  = []; for (let m = 1; m <= 4; m++) MON.push(`${m}HUE`, `${m}SAT`, `${m}BRT`, `${m}CON`)
-      const SEED = pad(['LEVA','S2A','SFRQ','SKAL','S1B','LEVB','FRQB','KALB','Kind','KndB','SDLY','Cam1','cuta','cutb','cutx','Cam2'])
-      const RIG  = pad(['MIRA','MZMA','MIRB','MZMB','AtoB','BtoA','KEYA','KEYB'])
-      const PLAY = pad(['GNA','ZMA','RTA','LVA','GNB','ZMB','RTB','LVB','XFAD','PERI','SDLY','Void','SKAL','RBTH','ZBTH','Cntr'])
+      const SEED = pad(['S1A','S2A','FRQ1','KAL1','S1B','S2B','FRQ2','KAL2','Knd1','Cam1','Knd2','Cam2','cuta','cutb','cutx','SDLY'])
+      const RIG  = pad(['MIRA','MZMA','MIRB','MZMB','ATOB','BTOA','KEYA','KEYB'])
+      const PLAY = pad(['GNA','ZMA','RTA','S1A','GNB','ZMB','RTB','S2B','XFAD','PERI','SDLY','Void','KAL1','RBTH','ZBTH','Cntr'])
       const GROUPS = { 1: CAM, 2: CAM, 3: SW, 4: MON, 5: SEED, 6: RIG, 7: PLAY }
 
       const camControls = (g) => ({   // key order = CAM label order (the dump relies on it)
@@ -129,26 +129,26 @@
         void: midi.cc([3, 7], { min: 0, max: 1, init: 1, steps: 1 }),   // black beyond the monitor (srcb/blurb) or wrap (src/blur)
         glid: midi.cc([3, 8], { min: 0, max: 30, init: 0, steps: 120 })  // seconds an opened patch takes to arrive
       }
-      // Two seeds into two loops, a 2 x 2 matrix: rows are the loops, columns the seeds, and it sits as a block
-      // at the top left of the group with each seed's own knobs to its right.
-      //   LEVA  S2A  | SFRQ SKAL      loop A takes seed 1 (LEVA) and seed 2 (S2A)      seed 1: frequency, kaleid
-      //   S1B   LEVB | FRQB KALB      loop B takes seed 1 (S1B) and seed 2 (LEVB)      seed 2: frequency, kaleid
-      //   Kind  KndB   SDLY Cam1      what each seed is; KndB 0 = seed 2 is seed 1 again, which costs nothing
-      //   cuta  cutb   cutx Cam2      Cam1, Cam2: which camera each seed looks through when it is a camera
+      // Two seeds into two loops, a 2 x 2 matrix. Loops are letters, seeds are numbers, everywhere: S2A is seed 2
+      // into loop A. The matrix sits as a block at the top left of the group, each seed's own knobs to its right.
+      //   S1A   S2A  | FRQ1 KAL1      loop A takes seed 1 and seed 2       seed 1: frequency, kaleid
+      //   S1B   S2B  | FRQ2 KAL2      loop B takes seed 1 and seed 2       seed 2: frequency, kaleid
+      //   Knd1  Cam1   Knd2 Cam2      what each seed is and, if a camera, which; Knd2 0 = seed 2 is seed 1 again (free)
+      //   cuta  cutb   cutx SDLY      the cuts; the delay both seeds share
       const SD = {
-        leva: midi.cc([5, 1], { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),
+        s1a:  midi.cc([5, 1], { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),
         s2a:  midi.cc([5, 2], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        sfrq: midi.cc([5, 3], { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
-        skal: midi.cc([5, 4], { min: 0, max: 12, init: 0, steps: 12 }),   // 0 = the seed as itself
+        frq1: midi.cc([5, 3], { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
+        kal1: midi.cc([5, 4], { min: 0, max: 12, init: 0, steps: 12 }),   // 0 = the seed as itself
         s1b:  midi.cc([5, 5], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        levb: midi.cc([5, 6], { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),
-        frqb: midi.cc([5, 7], { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
-        kalb: midi.cc([5, 8], { min: 0, max: 12, init: 0, steps: 12 }),
-        kind: midi.cc([5, 9], { min: 0, max: 5, init: 0, steps: 5 }),    // seed 1: osc noise voronoi cam screen sketch
-        kndb: midi.cc([5, 10], { min: 0, max: 6, init: 0, steps: 6 }),   // seed 2: 0 = seed 1 again, then osc noise voronoi cam screen sketch
-        sdly: midi.cc([5, 11], { min: 1, max: 29, init: 1, steps: 28 }),
-        cam1: midi.cc([5, 12], { min: 0, max: 5, init: 0, steps: 5 }),   // which camera seed 1 looks through when its kind is cam
-        cam2: midi.cc([5, 16], { min: 0, max: 5, init: 1, steps: 5 })    // and seed 2: the second camera by default
+        s2b:  midi.cc([5, 6], { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),
+        frq2: midi.cc([5, 7], { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
+        kal2: midi.cc([5, 8], { min: 0, max: 12, init: 0, steps: 12 }),
+        knd1: midi.cc([5, 9], { min: 0, max: 5, init: 0, steps: 5 }),    // osc noise voronoi cam screen sketch
+        cam1: midi.cc([5, 10], { min: 0, max: 5, init: 0, steps: 5 }),   // which camera seed 1 looks through when it is a camera
+        knd2: midi.cc([5, 11], { min: 0, max: 6, init: 0, steps: 6 }),   // 0 = seed 1 again, then osc noise voronoi cam screen sketch
+        cam2: midi.cc([5, 12], { min: 0, max: 5, init: 1, steps: 5 }),   // seed 2's camera: the second one by default
+        sdly: midi.cc([5, 16], { min: 1, max: 29, init: 1, steps: 28 })
       }
       // cut: the switcher's foot pedal. While held the seed goes in whole (cuta, cutb) or the program flips to
       // its other end (cutx); on release the knob's value stands again and what was dropped in echoes round.
@@ -164,7 +164,7 @@
         keyb: midi.cc([6, 8], { min: 0, max: 1, init: 0.35, steps: 100, fine: 10 })
       }
       // PLAY: the knobs a set rides, aliased from their homes (turn either, both displays follow)
-      const playOf = [[1, 1], [1, 2], [1, 3], [5, 1], [2, 1], [2, 2], [2, 3], [5, 6], [3, 1], [3, 2], [5, 11], [3, 7], [5, 4]]
+      const playOf = [[1, 1], [1, 2], [1, 3], [5, 1], [2, 1], [2, 2], [2, 3], [5, 6], [3, 1], [3, 2], [5, 16], [3, 7], [5, 4]]
       playOf.forEach((home, i) => midi.alias([7, i + 1], home))
       const PL = {   // PLAY's own knobs: both cameras at once, on top of each one's ROT and ZOOM
         rbth: midi.cc([7, 14], { min: 0, max: 6.283, init: 0, wrap: true, steps: 360, fine: 10 }),
@@ -182,7 +182,7 @@
       // every knob by group and label, as the HUD names them; and flat, 'CAMA.ZOOM' -> the knob
       const KNOBS = {
         CAMA: Object.fromEntries(Object.values(A).map((f, i) => [CAM[i], f])), CAMB: Object.fromEntries(Object.values(B).map((f, i) => [CAM[i], f])),
-        SWCH: Object.fromEntries(Object.values(S).map((f, i) => [SW[i], f])), SEED: { LEVA: SD.leva, S2A: SD.s2a, SFRQ: SD.sfrq, SKAL: SD.skal, S1B: SD.s1b, LEVB: SD.levb, FRQB: SD.frqb, KALB: SD.kalb, Kind: SD.kind, KndB: SD.kndb, SDLY: SD.sdly, Cam1: SD.cam1, Cam2: SD.cam2 },
+        SWCH: Object.fromEntries(Object.values(S).map((f, i) => [SW[i], f])), SEED: { S1A: SD.s1a, S2A: SD.s2a, FRQ1: SD.frq1, KAL1: SD.kal1, S1B: SD.s1b, S2B: SD.s2b, FRQ2: SD.frq2, KAL2: SD.kal2, Knd1: SD.knd1, Cam1: SD.cam1, Knd2: SD.knd2, Cam2: SD.cam2, SDLY: SD.sdly },   // by name: the cut pushes sit between the knobs
         RIG: Object.fromEntries(Object.values(R).map((f, i) => [RIG[i], f])), PLAY: { RBTH: PL.rbth, ZBTH: PL.zbth, Cntr: PL.cntr },
         MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => ['hue', 'sat', 'brt', 'con'].map(k => [`${m}${k.toUpperCase()}`, M[m][k]])))
       }
@@ -190,7 +190,7 @@
       for (const [g, ks] of Object.entries(KNOBS)) for (const [label, f] of Object.entries(ks)) flat[`${g}.${label}`] = f
       // herder: the page's own mechanism, for sketches and roughshod code to reach into. A seed may read a knob
       // (osc(() => herder.k['CAMA.ZOOM']() * 20)); roughshod code may set them, glide, record. Filled in further down.
-      window.herder = { k: flat, knobs: KNOBS, out: { a: o0, b: o1, seed: o2, program: o3, seedB: o4 } }
+      window.herder = { k: flat, knobs: KNOBS, out: { a: o0, b: o1, seed1: o2, seed2: o4, program: o3 } }
 
       o0.setDepth(30); o1.setDepth(30); o2.setDepth(30)
 
@@ -211,8 +211,8 @@
       }
       // ---- user code: a seed expression for A, one for B, or roughshod. One text box, three texts.
       const editor = document.getElementById('editor'), codeBox = document.getElementById('code'), everr = document.getElementById('everr')
-      const codes = { seed: codeBox.value, seedb: 'shape(4, 0.3, 0.01).rotate(() => time * 0.2)', raw: '' }
-      const CODE_KEYS = { seed: 'herder.code', seedb: 'herder.codeB', raw: 'herder.codeRaw' }
+      const codes = { seed: codeBox.value, seed2: 'shape(4, 0.3, 0.01).rotate(() => time * 0.2)', raw: '' }
+      const CODE_KEYS = { seed: 'herder.code', seed2: 'herder.codeB', raw: 'herder.codeRaw' }
       for (const k of Object.keys(codes)) { try { const saved = localStorage.getItem(CODE_KEYS[k]); if (saved) codes[k] = saved } catch (e) { /* no storage */ } }
       const editMode = () => document.querySelector('input[name=emode]:checked').value
       let shownCode = editMode(); codeBox.value = codes[shownCode]
@@ -238,11 +238,11 @@
           default: return kal(osc(frq, 0.05, 1))
         }
       }
-      const seedOrderB = ['same', 'osc', 'noise', 'voronoi', 'cam', 'screen', 'sketch']
-      const seedKindB = () => seedOrderB[Math.round(SD.kndb())] || 'same'
+      const seedOrder2 = ['same', 'osc', 'noise', 'voronoi', 'cam', 'screen', 'sketch']
+      const seedKind2 = () => seedOrder2[Math.round(SD.knd2())] || 'same'
       // the seed as seen by a loop, delayed by SDLY frames: o2, or for loop B its own seed on o4
-      const seedTexA = () => o2.delay(() => Math.round(SD.sdly()))
-      const seedTexB = () => seedKindB() === 'same' ? seedTexA() : o4.delay(() => Math.round(SD.sdly()))
+      const seedTex1 = () => o2.delay(() => Math.round(SD.sdly()))
+      const seedTex2 = () => seedKind2() === 'same' ? seedTex1() : o4.delay(() => Math.round(SD.sdly()))
 
       // ---- one loop: own output, own controls, the other loop's output for the cross-link
       const monitor = (chain, m) => chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
@@ -273,15 +273,15 @@
 
       // ---- build everything (called again when a chain's shape changes: seed kind, kaleid, key, freeze)
       let built = {}
-      const shape = () => JSON.stringify({ seedKind, kal: kalOf(SD.skal), sb: seedKindB(), kalb: kalOf(SD.kalb), c1: seedKind === 'cam' ? Math.round(SD.cam1()) : 0, c2: seedKindB() === 'cam' ? Math.round(SD.cam2()) : 0, s2a: SD.s2a() > 0.001, s1b: SD.s1b() > 0.001, bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
+      const shape = () => JSON.stringify({ seedKind, kal: kalOf(SD.kal1), sb: seedKind2(), kalb: kalOf(SD.kal2), c1: seedKind === 'cam' ? Math.round(SD.cam1()) : 0, c2: seedKind2() === 'cam' ? Math.round(SD.cam2()) : 0, s2a: SD.s2a() > 0.001, s1b: SD.s1b() > 0.001, bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
       const build = () => {
-        seedChainOf(seedKind, SD.sfrq, SD.skal, codes.seed, s0, 's0').out(o2)
-        const ownB = seedKindB() !== 'same'   // o4 keeps a thirty-frame ring only while loop B has a seed of its own
-        if (ownB) { if (o4.depth !== 30) o4.setDepth(30); seedChainOf(seedKindB(), SD.frqb, SD.kalb, codes.seedb, s1, 's1').out(o4) } else { if (o4.depth !== 2) o4.setDepth(2); solid(0, 0, 0, 1).out(o4) }
+        seedChainOf(seedKind, SD.frq1, SD.kal1, codes.seed, s0, 's0').out(o2)
+        const ownB = seedKind2() !== 'same'   // o4 keeps a thirty-frame ring only while loop B has a seed of its own
+        if (ownB) { if (o4.depth !== 30) o4.setDepth(30); seedChainOf(seedKind2(), SD.frq2, SD.kal2, codes.seed2, s1, 's1').out(o4) } else { if (o4.depth !== 2) o4.setDepth(2); solid(0, 0, 0, 1).out(o4) }
         const lev = (knob, cut) => () => cut() ? 1 : knob()
         // the matrix: a loop's own seed first (with its cut), then the other seed if its knob is up at all
-        const seedsA = [{ tex: seedTexA, amount: lev(SD.leva, CUT.a) }].concat(SD.s2a() > 0.001 ? [{ tex: seedTexB, amount: SD.s2a }] : [])
-        const seedsB = [{ tex: seedTexB, amount: lev(SD.levb, CUT.b) }].concat(SD.s1b() > 0.001 ? [{ tex: seedTexA, amount: SD.s1b }] : [])
+        const seedsA = [{ tex: seedTex1, amount: lev(SD.s1a, CUT.a) }].concat(SD.s2a() > 0.001 ? [{ tex: seedTex2, amount: SD.s2a }] : [])
+        const seedsB = [{ tex: seedTex2, amount: lev(SD.s2b, CUT.b) }].concat(SD.s1b() > 0.001 ? [{ tex: seedTex1, amount: SD.s1b }] : [])
         const swap = S.rvrs() > 0.5
         const [oa, ob] = swap ? [o1, o0] : [o0, o1]
         if (S.frza() > 0.5) src(o0.delay(1)).out(o0); else loop(oa, ob, A, 1, 2, { mirror: R.mira, mzm: R.mzma }, R.btoa, R.keya, seedsA).out(o0)
@@ -291,18 +291,18 @@
         src(o0).blend(src(o1), xf).out(o3)
         built = shape()
       }
-      let lastKindKnob = Math.round(SD.kind())
+      let lastKindKnob = Math.round(SD.knd1())
       const setSeed = (kind, url) => {
         seedKind = kind; if (url !== undefined) seedUrl = url
         seedSel.value = kind
-        const i = seedOrder.indexOf(kind); if (i >= 0 && Math.round(SD.kind()) !== i) { SD.kind.set(i); lastKindKnob = i }
+        const i = seedOrder.indexOf(kind); if (i >= 0 && Math.round(SD.knd1()) !== i) { SD.knd1.set(i); lastKindKnob = i }
         urlBox.style.display = (kind === 'video' || kind === 'image') ? '' : 'none'
         build()
       }
       seedSel.onchange = () => setSeed(seedSel.value)
-      // seed 2's kind and the two camera pickers are faces of knobs (KndB, Cam1, Cam2): set either, the other follows
-      const seedbSel = document.getElementById('seedb'), camSel = [document.getElementById('cam1'), document.getElementById('cam2')]
-      seedbSel.onchange = () => { SD.kndb.set(Math.max(0, seedOrderB.indexOf(seedbSel.value))); midi.refresh() }
+      // seed 2's kind and the two camera pickers are faces of knobs (Knd2, Cam1, Cam2): set either, the other follows
+      const seed2Sel = document.getElementById('seed2'), camSel = [document.getElementById('cam1'), document.getElementById('cam2')]
+      seed2Sel.onchange = () => { SD.knd2.set(Math.max(0, seedOrder2.indexOf(seed2Sel.value))); midi.refresh() }
       camSel.forEach((el, i) => { el.onchange = () => { (i ? SD.cam2 : SD.cam1).set(+el.value); midi.refresh() } })
       let camNames = []
       const listCameras = () => {
@@ -315,7 +315,7 @@
         }).catch(() => {})
       }
       const syncSeedFaces = () => {
-        const kb = seedKindB(); if (seedbSel.value !== kb) seedbSel.value = kb
+        const kb = seedKind2(); if (seed2Sel.value !== kb) seed2Sel.value = kb
         const show = [seedKind === 'cam', kb === 'cam']
         camSel.forEach((el, i) => { el.style.display = show[i] ? '' : 'none'; const v = String(Math.round((i ? SD.cam2 : SD.cam1)())); if (el.value !== v) el.value = v })
         if (show[0] || show[1]) listCameras()   // names appear once the camera permission is given
@@ -325,7 +325,8 @@
 
       // ---- views
       let view = 'program'
-      const views = { program: () => render(o3), a: () => render(o0), b: () => render(o1), seed: () => render(o2), seedb: () => render(o4), grid: () => render() }
+      const views = { program: () => render(o3), a: () => render(o0), b: () => render(o1), seed1: () => render(o2), seed2: () => render(o4), grid: () => render() }
+      const VIEW_WAS = { seed: 'seed1', seedb: 'seed2' }   // names from before seeds were numbered
       const setView = (v) => { view = v; views[v]() }
       const viewPush = midi.note([3, 16], { toggle: true })
       let lastViewPush = viewPush(), lastGrid = S.grid() > 0.5
@@ -336,7 +337,7 @@
         keepCode()
         everr.textContent = ''
         if (shownCode === 'seed') setSeed('sketch')
-        else if (shownCode === 'seedb') { SD.kndb.set(seedOrderB.indexOf('sketch')); midi.refresh(); build() }
+        else if (shownCode === 'seed2') { SD.knd2.set(seedOrder2.indexOf('sketch')); midi.refresh(); build() }
         else {
           try { (0, eval)(codeBox.value) } catch (e) { everr.textContent = e.message }   // roughshod: whatever it does, it does
         }
@@ -366,22 +367,23 @@
         Frza: 'Freeze loop A (holds the last frame).', Frzb: 'Freeze loop B.', Grid: 'Show all four outputs.',
         Void: 'Black beyond the monitor: the camera sees an unlit room past the screen, so a receding or turning loop walks into black. Off wraps like src() (tiles).',
         view: 'push: toggle grid',
-        LEVA: 'Seed 1 into loop A. With S2A, S1B and LEVB a 2 x 2 matrix: rows the loops, columns the seeds.', LEVB: 'Seed 2 into loop B (while KndB is 0, seed 2 is seed 1 again).',
-        S2A: 'Seed 2 into loop A.', S1B: 'Seed 1 into loop B.',
+        S1A: 'Seed 1 into loop A. S1A S2A / S1B S2B is a 2 x 2 matrix: rows the loops, columns the seeds.', S2A: 'Seed 2 into loop A.',
+        S1B: 'Seed 1 into loop B.', S2B: 'Seed 2 into loop B (while Knd2 is 0, seed 2 is seed 1 again).',
+        FRQ1: 'Seed 1 frequency or scale.', KAL1: 'Seed 1 kaleidoscope sides; below 2 = off.',
+        FRQ2: 'Seed 2 frequency or scale.', KAL2: 'Seed 2 kaleidoscope sides; below 2 = off.',
+        Knd1: 'Seed 1: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch (the editor\'s seed 1 text).',
+        Knd2: 'Seed 2: 0 = seed 1 again (costs nothing), then 1 osc, 2 noise, 3 voronoi, 4 cam, 5 screen, 6 sketch (the editor\'s seed 2 text). View 5 shows it.',
         Cam1: 'Which camera seed 1 looks through when it is a camera (0 = the first the browser lists; the header names them).', Cam2: 'Which camera seed 2 looks through. Starts on the second camera.',
-        SFRQ: 'Seed frequency or scale.', SKAL: 'Seed kaleidoscope sides; below 2 = off.',
-        SDLY: 'Seed delay in frames before it enters the loops.', Kind: 'Seed kind: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch.',
+        SDLY: 'Seed delay in frames before the seeds enter the loops.',
         MIRA: 'Loop A beam splitter: how much of the mirrored monitor camera A sees (fixed glass on Blair\'s rig).', MZMA: 'Loop A mirror zoom: optical distance of the reflected monitor.',
         MIRB: 'Loop B beam splitter reflectance.', MZMB: 'Loop B mirror zoom.',
-        AtoB: 'Cross-link: how much of loop A the camera of loop B sees.', BtoA: 'Cross-link: how much of loop B the camera of loop A sees.',
+        ATOB: 'Cross-link: how much of loop A the camera of loop B sees.', BTOA: 'Cross-link: how much of loop B the camera of loop A sees.',
         KEYA: 'Luma key threshold for the seed entering A. Above 0 the seed is keyed per pixel instead of crossfaded.',
         KEYB: 'Luma key threshold for the seed entering B.',
-        GNA: 'Gain A (same knob as CAMA GAIN).', ZMA: 'Zoom A (CAMA ZOOM).', RTA: 'Rotation A (CAMA ROT).', LVA: 'Seed level A (SEED LEVA).',
-        GNB: 'Gain B (CAMB GAIN).', ZMB: 'Zoom B (CAMB ZOOM).', RTB: 'Rotation B (CAMB ROT).', LVB: 'Seed level B (SEED LEVB).',
-        KndB: 'Seed 2: 0 = seed 1 again (costs nothing), then 1 osc, 2 noise, 3 voronoi, 4 cam (second source), 5 screen, 6 sketch (the editor\'s seed B text). View 5 shows it.',
-        FRQB: 'Seed B frequency or scale.', KALB: 'Seed B kaleidoscope sides; below 2 = off.',
-        cuta: 'hold: cut the seed into loop A whole (the switcher\'s foot pedal). Release and LEVA stands again; what was dropped in echoes round.',
-        cutb: 'hold: cut the seed into loop B whole.', cutx: 'hold: throw the program crossfade to its other end.',
+        GNA: 'Gain A (same knob as CAMA GAIN).', ZMA: 'Zoom A (CAMA ZOOM).', RTA: 'Rotation A (CAMA ROT).',
+        GNB: 'Gain B (CAMB GAIN).', ZMB: 'Zoom B (CAMB ZOOM).', RTB: 'Rotation B (CAMB ROT).',
+        cuta: 'hold: cut seed 1 into loop A whole (the switcher\'s foot pedal). Release and S1A stands again; what was dropped in echoes round.',
+        cutb: 'hold: cut seed 2 into loop B whole.', cutx: 'hold: throw the program crossfade to its other end.',
         RBTH: 'Rotation of both cameras at once, on top of each one\'s ROT.', ZBTH: 'Zoom of both cameras at once, a factor on each one\'s ZOOM.',
         Cntr: 'Contra: camera B takes RBTH and ZBTH the other way (turns against A, zooms out as A zooms in).',
         GLID: 'Glide: seconds an opened patch takes to arrive (0 = at once). A file\'s own "glide" wins. Switches never glide.',
@@ -456,13 +458,13 @@
       let note = '', noteUntil = 0   // a message (saved, opened, ...) leads the header for a few seconds
       const refreshHud = () => {
         const autoLine = (auto.rec ? `REC ${((performance.now() - auto.rec.t0) / 1000).toFixed(1)} s   ` : '') + (auto.layers.length ? `gestures ${auto.layers.length}   ` : '') + (auto.glides.size ? `gliding ${auto.glides.size}   ` : '') + (auto.seq ? `sequence ${auto.seq.i + 1}/${auto.seq.steps.length}   ` : '')
-        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program 5 seed B  s seed  e edit  b rebuild  r reset  d dump  w write patch  o open patch  g gesture  G stop automation  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 1 4 program 5 seed 2  s next seed 1  e edit  b rebuild  r reset  d dump  w write patch  o open patch  g gesture  G stop automation  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
         if (popupHead) popupHead.textContent = head.textContent
       }
       setInterval(() => {
         if (viewPush() !== lastViewPush) { lastViewPush = viewPush(); setView(view === 'grid' ? 'program' : 'grid') }
         const g = S.grid() > 0.5; if (g !== lastGrid) { lastGrid = g; setView(g ? 'grid' : 'program') }
-        const k = Math.round(SD.kind()); if (k !== lastKindKnob) { lastKindKnob = k; setSeed(seedOrder[k]) }
+        const k = Math.round(SD.knd1()); if (k !== lastKindKnob) { lastKindKnob = k; setSeed(seedOrder[k]) }
         homePush.forEach((f, i) => { if (f() !== lastHome[i]) { lastHome[i] = f(); home(i ? B : A) } })
         if (shape() !== built) build()
         syncSeedFaces()
@@ -475,7 +477,7 @@
         if (e.key === 'b') build()
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
         if (e.key === 'p') { if (popup && !popup.closed) closePanelWindow(); else openPanelWindow() }
-        if (e.key === '0') setView('grid'); if (e.key === '1') setView('a'); if (e.key === '2') setView('b'); if (e.key === '3') setView('seed'); if (e.key === '4') setView('program'); if (e.key === '5') setView('seedb')
+        if (e.key === '0') setView('grid'); if (e.key === '1') setView('a'); if (e.key === '2') setView('b'); if (e.key === '3') setView('seed1'); if (e.key === '4') setView('program'); if (e.key === '5') setView('seed2')
         if (e.key === 'r') resetAll()
         if (e.key === 's') setSeed(seedOrder[(seedOrder.indexOf(seedKind) + 1) % seedOrder.length])
       })
@@ -488,7 +490,7 @@
           ring: { o0: o0.depth, o1: o1.depth, o2: o2.depth },
           midi: { inputs: midi.inputs, outputs: midi.outputs, profile: midi.profile && midi.profile.name, mode: midi.state.defaults.mode },
           groups: Object.fromEntries(Object.entries(KNOBS).map(([g, ks]) => [g, Object.fromEntries(Object.entries(ks).map(([label, f]) => [label, +f().toFixed(5)]))])),
-          code: (keepCode(), codes.seed), codeB: codes.seedb,
+          code1: (keepCode(), codes.seed), code2: codes.seed2,
           gestures: auto.layers.map(L => ({ len: Math.round(L.len), events: L.events })),
           snapshot: midi.snapshot()   // raw "channel:cc" -> value, what midi.restore() takes
         }
@@ -578,6 +580,8 @@
         if (recPush() !== lastRecPush) { lastRecPush = recPush(); if (auto.rec) stopRec(); else startRec() }
         if (clrPush() !== lastClr) { lastClr = clrPush(); if (lastClr) stopAuto() }
       }, 50)
+      // labels from before loops were letters and seeds numbers everywhere; patches saved then still open
+      const LABEL_WAS = { LEVA: 'S1A', LEVB: 'S2B', SFRQ: 'FRQ1', SKAL: 'KAL1', FRQB: 'FRQ2', KALB: 'KAL2', Kind: 'Knd1', KndB: 'Knd2', AtoB: 'ATOB', BtoA: 'BTOA' }
       const SEED_KINDS = ['osc', 'noise', 'voronoi', 'cam', 'screen', 'video', 'image', 'sketch']
       const applyState = (state) => {
         const skipped = []
@@ -589,7 +593,7 @@
         if (state.reset) for (const k in flat) targets[k] = flat[k].config.init
         if (state.groups && typeof state.groups === 'object') {
           for (const [g, knobs] of Object.entries(state.groups)) for (const [label, raw] of Object.entries((knobs && typeof knobs === 'object') ? knobs : {})) {
-            const k = `${g}.${label}`, v = typeof raw === 'string' ? parseFloat(raw) : raw
+            const k = `${g}.${LABEL_WAS[label] || label}`, v = typeof raw === 'string' ? parseFloat(raw) : raw
             if (!flat[k] || !Number.isFinite(v)) { skipped.push(k); continue }
             targets[k] = v
           }
@@ -602,15 +606,15 @@
           }).filter(L => L.events.length)
         })
         if ('sequence' in state && state.sequence !== undefined) part('sequence', () => startSequence(state.sequence, state.loop))
-        for (const [key, slot] of [['code', 'seed'], ['codeB', 'seedb']]) {
+        for (const [key, slot] of [['code', 'seed'], ['codeB', 'seed2'], ['code1', 'seed'], ['code2', 'seed2']]) {   // code, codeB: the names before seeds were numbered
           if (typeof state[key] !== 'string') continue
           codes[slot] = state[key]; if (shownCode === slot) codeBox.value = state[key]
           try { localStorage.setItem(CODE_KEYS[slot], state[key]) } catch (e) { /* no storage */ }
         }
         const kind = state.seed && state.seed.kind
-        if (kind && SEED_KINDS.includes(kind)) part('seed', () => { lastKindKnob = Math.round(SD.kind()); setSeed(kind, typeof state.seed.url === 'string' ? state.seed.url : '') })   // rebuilds the loops
-        else { if (kind) skipped.push(`seed.kind ${kind}`); if ((typeof state.code === 'string' && seedKind === 'sketch') || typeof state.codeB === 'string') part('code', build) }
-        if (state.view) { if (views[state.view]) part('view', () => setView(state.view)); else skipped.push(`view ${state.view}`) }
+        if (kind && SEED_KINDS.includes(kind)) part('seed', () => { lastKindKnob = Math.round(SD.knd1()); setSeed(kind, typeof state.seed.url === 'string' ? state.seed.url : '') })   // rebuilds the loops
+        else { if (kind) skipped.push(`seed.kind ${kind}`); if (['code', 'code1', 'code2', 'codeB'].some(c => typeof state[c] === 'string')) part('code', build) }
+        if (state.view) { const v = VIEW_WAS[state.view] || state.view; if (views[v]) part('view', () => setView(v)); else skipped.push(`view ${state.view}`) }
         part('refresh', () => midi.refresh())
         return skipped
       }
