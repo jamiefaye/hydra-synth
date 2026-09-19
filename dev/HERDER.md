@@ -70,8 +70,11 @@ your finger does:
 | 2 | PERI | period in seconds for rhythmic reversal of the crossfade; 0 off. |
 | 3 | Rvrs | swap which output each loop reads as itself. |
 | 4, 5 | Frza, Frzb | freeze a loop on its last frame. |
-| 6 | Grid | show all four outputs. |
+| 6 | Grid | show all the outputs. |
 | 7 | Void | black beyond the monitor (on) or wrap (off). |
+| 8 | GLID | glide: seconds an opened patch takes to arrive; 0 at once. Switches never glide. |
+| 9 | rec | push: record a gesture; push again and it loops (the `g` key). |
+| 10 | clr | push: stop all automation (the `G` key). |
 | 16 | view | push: toggle the grid view. |
 
 ### MONS: the monitors
@@ -88,6 +91,10 @@ cameras. The front panel of Blair's monitors. Inside the loop, so these compound
 | 4 | SKAL | kaleidoscope sides on the seed; below 2 off. Starts off. |
 | 5 | SDLY | seed delay in frames before it enters the loops. |
 | 6 | Kind | the seed: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch. |
+| 7 | KndB | loop B's seed: 0 the same seed as A, then 1 osc, 2 noise, 3 voronoi, 4 cam, 5 screen, 6 sketch (the editor's "seed B" text). View `5` shows it. |
+| 8, 9 | FRQB, KALB | seed B's frequency and kaleidoscope. |
+| 10, 11 | cuta, cutb | hold: cut the seed into the loop whole, the switcher's foot pedal. Release and the level knob stands again; what was dropped in echoes round. |
+| 12 | cutx | hold: throw the program crossfade to its other end. |
 
 ### RIG: the glass and the cabling
 
@@ -104,7 +111,9 @@ Aliases of knobs that live elsewhere. Turn either, both displays follow, and a p
 is the fine push for its home knob.
 
 Row 1: GNA ZMA RTA LVA (loop A's gain, zoom, rotation, seed level). Row 2: the same for B.
-Row 3: XFAD PERI SDLY Void. Row 4: SKAL.
+Row 3: XFAD PERI SDLY Void. Row 4: SKAL, then three knobs of PLAY's own: RBTH and ZBTH turn and zoom
+both cameras at once, on top of each one's ROT and ZOOM, and Cntr sends camera B the other way (it turns
+against A and pulls back as A pushes in).
 
 ## Keys and the page
 
@@ -117,6 +126,9 @@ Row 3: XFAD PERI SDLY Void. Row 4: SKAL.
 | r | reset every knob |
 | d | dump the whole state as JSON to the console and clipboard |
 | w | write a patch: the same JSON to a file (a save dialog in Chrome, a download elsewhere) |
+| g | record a gesture; `g` again and it loops (see Automation) |
+| G | stop all automation: gestures, glides, sequence |
+| 5 | view: loop B's own seed |
 | o | open a patch; dropping the file on the page does the same. Knobs, seed and sketch code come back and the EC4's displays follow; the picture regrows from the seed |
 | h | hide the HUD |
 | p | the controls in a window of their own (close it, or `p` again, to bring them back) |
@@ -143,6 +155,40 @@ the resolution and the frame rate; if it drops below 60, `res=1920x1080`.
 
 The editor's seed mode takes a Hydra chain, e.g. `osc(12, 0.05, 1).kaleid(5)`; a trailing `.out()`
 is ignored. Roughshod mode runs whatever you type with the whole synth in reach.
+
+## Automation
+
+Three things move knobs besides your hands, and your hands always win: turn a knob that the machine is
+moving and it drops out of every gesture and glide, so you play over the machine by touching what you
+want back.
+
+**Gestures.** Press `g` (or the `rec` push), turn knobs, press it again: the moves loop, at the length
+you played them. Record again and the new pass is another layer with its own length, so layers drift
+against each other. `G` (or `clr`) clears everything. Gestures are saved in a patch (`gestures`) and
+come back when it is opened.
+
+**Glides.** With GLID above 0 an opened patch arrives over that many seconds instead of at once; a
+file's own `"glide": 4` wins over the knob. Rotation takes the short way round, zoom and gain move in
+ratio, switches jump.
+
+**Sequences.** A patch may carry a list of partial patches. Each is applied, then waits its `wait`
+seconds (default 1) before the next; `"loop": true` starts over. Each step may glide.
+
+```json
+{ "loop": true, "sequence": [
+  { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 0.97, "ROT": 0.1 } } },
+  { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 1.04, "ROT": 6.18 } } },
+  { "wait": 0.2, "groups": { "SWCH": { "Rvrs": 1 } } },
+  { "wait": 4, "groups": { "SWCH": { "Rvrs": 0 } } }
+] }
+```
+
+**From code.** The page's own mechanism is `herder`, there for a seed sketch or roughshod code to reach
+into. A seed can read a knob: `osc(() => herder.k['CAMA.ZOOM']() * 20)`. Roughshod code can do what the
+keys do: `herder.apply(patch)` (a partial patch, returns what it skipped), `herder.glideTo('CAMB.ROT', 3, 5)`,
+`herder.record()`, `herder.loop()`, `herder.stop()`, `herder.sequence(steps, loop)`, `herder.state()`;
+`herder.knobs` is every knob by group and label, `herder.out` the outputs by role (a, b, seed, program,
+seedB). A generator that yields its waits can play a set with `herder.apply(step); yield dt`.
 
 ## The EC4
 

@@ -802,7 +802,7 @@
      }
     },
     "8": {
-     "name": "----",
+     "name": "GLID",
      "type": "CCR2",
      "channel": 1,
      "number": 39,
@@ -822,7 +822,7 @@
      }
     },
     "9": {
-     "name": "----",
+     "name": "rec",
      "type": "CCR2",
      "channel": 1,
      "number": 40,
@@ -842,7 +842,7 @@
      }
     },
     "10": {
-     "name": "----",
+     "name": "clr",
      "type": "CCR2",
      "channel": 1,
      "number": 41,
@@ -1426,7 +1426,7 @@
      }
     },
     "7": {
-     "name": "----",
+     "name": "KndB",
      "type": "CCR2",
      "channel": 1,
      "number": 70,
@@ -1446,7 +1446,7 @@
      }
     },
     "8": {
-     "name": "----",
+     "name": "FRQB",
      "type": "CCR2",
      "channel": 1,
      "number": 71,
@@ -1466,7 +1466,7 @@
      }
     },
     "9": {
-     "name": "----",
+     "name": "KALB",
      "type": "CCR2",
      "channel": 1,
      "number": 72,
@@ -1486,7 +1486,7 @@
      }
     },
     "10": {
-     "name": "----",
+     "name": "cuta",
      "type": "CCR2",
      "channel": 1,
      "number": 73,
@@ -1506,7 +1506,7 @@
      }
     },
     "11": {
-     "name": "----",
+     "name": "cutb",
      "type": "CCR2",
      "channel": 1,
      "number": 74,
@@ -1526,7 +1526,7 @@
      }
     },
     "12": {
-     "name": "----",
+     "name": "cutx",
      "type": "CCR2",
      "channel": 1,
      "number": 75,
@@ -2210,7 +2210,7 @@
      }
     },
     "14": {
-     "name": "----",
+     "name": "RBTH",
      "type": "CCR2",
      "channel": 1,
      "number": 109,
@@ -2230,7 +2230,7 @@
      }
     },
     "15": {
-     "name": "----",
+     "name": "ZBTH",
      "type": "CCR2",
      "channel": 1,
      "number": 110,
@@ -2250,7 +2250,7 @@
      }
     },
     "16": {
-     "name": "----",
+     "name": "Cntr",
      "type": "CCR2",
      "channel": 1,
      "number": 111,
