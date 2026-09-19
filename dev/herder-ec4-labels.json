@@ -1526,7 +1526,7 @@
      }
     },
     "12": {
-     "name": "----",
+     "name": "Cam1",
      "type": "CCR2",
      "channel": 1,
      "number": 75,
@@ -1606,7 +1606,7 @@
      }
     },
     "16": {
-     "name": "----",
+     "name": "Cam2",
      "type": "CCR2",
      "channel": 1,
      "number": 79,

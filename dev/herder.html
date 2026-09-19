@@ -29,7 +29,16 @@
           <option value="video">video url</option>
           <option value="image">image url</option>
           <option value="sketch">sketch (e to edit)</option>
-        </select> <input id="url" placeholder="url" size="24" style="display:none" /></span>
+        </select> <select id="cam1" title="seed 1's camera" style="display:none"></select> <input id="url" placeholder="url" size="24" style="display:none" />
+        seed 2 <select id="seedb">
+          <option value="same">= seed 1</option>
+          <option value="osc">osc + kaleid</option>
+          <option value="noise">noise</option>
+          <option value="voronoi">voronoi</option>
+          <option value="cam">camera</option>
+          <option value="screen">screen</option>
+          <option value="sketch">sketch (e, seed B)</option>
+        </select> <select id="cam2" title="seed 2's camera" style="display:none"></select></span>
         <a href="manual.html" target="_blank" style="color:#9cf">manual</a>
         <span id="headtext">loading</span>
       </div>
@@ -83,7 +92,7 @@
       const CAM  = pad(['GAIN','ZOOM','ROT','X','Y','BLUR','DLAY','PRST','PTCH','YAW','LENS','PDLY']); CAM[15] = 'home'
       const SW   = pad(['XFAD','PERI','Rvrs','Frza','Frzb','Grid','Void','GLID','rec','clr']); SW[15] = 'view'
       const MON  = []; for (let m = 1; m <= 4; m++) MON.push(`${m}HUE`, `${m}SAT`, `${m}BRT`, `${m}CON`)
-      const SEED = pad(['LEVA','S2A','SFRQ','SKAL','S1B','LEVB','FRQB','KALB','Kind','KndB','SDLY','----','cuta','cutb','cutx'])
+      const SEED = pad(['LEVA','S2A','SFRQ','SKAL','S1B','LEVB','FRQB','KALB','Kind','KndB','SDLY','Cam1','cuta','cutb','cutx','Cam2'])
       const RIG  = pad(['MIRA','MZMA','MIRB','MZMB','AtoB','BtoA','KEYA','KEYB'])
       const PLAY = pad(['GNA','ZMA','RTA','LVA','GNB','ZMB','RTB','LVB','XFAD','PERI','SDLY','Void','SKAL','RBTH','ZBTH','Cntr'])
       const GROUPS = { 1: CAM, 2: CAM, 3: SW, 4: MON, 5: SEED, 6: RIG, 7: PLAY }
@@ -124,8 +133,8 @@
       // at the top left of the group with each seed's own knobs to its right.
       //   LEVA  S2A  | SFRQ SKAL      loop A takes seed 1 (LEVA) and seed 2 (S2A)      seed 1: frequency, kaleid
       //   S1B   LEVB | FRQB KALB      loop B takes seed 1 (S1B) and seed 2 (LEVB)      seed 2: frequency, kaleid
-      //   Kind  KndB   SDLY           what each seed is; KndB 0 = seed 2 is seed 1 again, which costs nothing
-      //   cuta  cutb   cutx           (key order below = label order; the dump and the patches rely on it)
+      //   Kind  KndB   SDLY Cam1      what each seed is; KndB 0 = seed 2 is seed 1 again, which costs nothing
+      //   cuta  cutb   cutx Cam2      Cam1, Cam2: which camera each seed looks through when it is a camera
       const SD = {
         leva: midi.cc([5, 1], { min: 0, max: 1, init: 0.08, steps: 100, fine: 10 }),
         s2a:  midi.cc([5, 2], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
@@ -137,7 +146,9 @@
         kalb: midi.cc([5, 8], { min: 0, max: 12, init: 0, steps: 12 }),
         kind: midi.cc([5, 9], { min: 0, max: 5, init: 0, steps: 5 }),    // seed 1: osc noise voronoi cam screen sketch
         kndb: midi.cc([5, 10], { min: 0, max: 6, init: 0, steps: 6 }),   // seed 2: 0 = seed 1 again, then osc noise voronoi cam screen sketch
-        sdly: midi.cc([5, 11], { min: 1, max: 29, init: 1, steps: 28 })
+        sdly: midi.cc([5, 11], { min: 1, max: 29, init: 1, steps: 28 }),
+        cam1: midi.cc([5, 12], { min: 0, max: 5, init: 0, steps: 5 }),   // which camera seed 1 looks through when its kind is cam
+        cam2: midi.cc([5, 16], { min: 0, max: 5, init: 1, steps: 5 })    // and seed 2: the second camera by default
       }
       // cut: the switcher's foot pedal. While held the seed goes in whole (cuta, cutb) or the program flips to
       // its other end (cutx); on release the knob's value stands again and what was dropped in echoes round.
@@ -171,7 +182,7 @@
       // every knob by group and label, as the HUD names them; and flat, 'CAMA.ZOOM' -> the knob
       const KNOBS = {
         CAMA: Object.fromEntries(Object.values(A).map((f, i) => [CAM[i], f])), CAMB: Object.fromEntries(Object.values(B).map((f, i) => [CAM[i], f])),
-        SWCH: Object.fromEntries(Object.values(S).map((f, i) => [SW[i], f])), SEED: Object.fromEntries(Object.values(SD).map((f, i) => [SEED[i], f])),
+        SWCH: Object.fromEntries(Object.values(S).map((f, i) => [SW[i], f])), SEED: { LEVA: SD.leva, S2A: SD.s2a, SFRQ: SD.sfrq, SKAL: SD.skal, S1B: SD.s1b, LEVB: SD.levb, FRQB: SD.frqb, KALB: SD.kalb, Kind: SD.kind, KndB: SD.kndb, SDLY: SD.sdly, Cam1: SD.cam1, Cam2: SD.cam2 },
         RIG: Object.fromEntries(Object.values(R).map((f, i) => [RIG[i], f])), PLAY: { RBTH: PL.rbth, ZBTH: PL.zbth, Cntr: PL.cntr },
         MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => ['hue', 'sat', 'brt', 'con'].map(k => [`${m}${k.toUpperCase()}`, M[m][k]])))
       }
@@ -191,9 +202,10 @@
       seedSel.value = seedKind; urlBox.value = seedUrl
       const srcKind = { s0: null, s1: null }
       const ensureSource = (kind, sN = s0, slot = 's0') => {
-        const want = (kind === 'video' || kind === 'image') ? kind + ':' + seedUrl : kind
+        const cam = Math.round((slot === 's0' ? SD.cam1 : SD.cam2)())
+        const want = (kind === 'video' || kind === 'image') ? kind + ':' + seedUrl : (kind === 'cam' ? 'cam:' + cam : kind)
         if (srcKind[slot] === want) return
-        if (kind === 'cam') sN.initCam(); else if (kind === 'screen') sN.initScreen()
+        if (kind === 'cam') sN.initCam(cam); else if (kind === 'screen') sN.initScreen()
         else if (kind === 'video') { if (!seedUrl) return; sN.initVideo(seedUrl) } else if (kind === 'image') { if (!seedUrl) return; sN.initImage(seedUrl) } else return
         srcKind[slot] = want
       }
@@ -261,7 +273,7 @@
 
       // ---- build everything (called again when a chain's shape changes: seed kind, kaleid, key, freeze)
       let built = {}
-      const shape = () => JSON.stringify({ seedKind, kal: kalOf(SD.skal), sb: seedKindB(), kalb: kalOf(SD.kalb), s2a: SD.s2a() > 0.001, s1b: SD.s1b() > 0.001, bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
+      const shape = () => JSON.stringify({ seedKind, kal: kalOf(SD.skal), sb: seedKindB(), kalb: kalOf(SD.kalb), c1: seedKind === 'cam' ? Math.round(SD.cam1()) : 0, c2: seedKindB() === 'cam' ? Math.round(SD.cam2()) : 0, s2a: SD.s2a() > 0.001, s1b: SD.s1b() > 0.001, bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
       const build = () => {
         seedChainOf(seedKind, SD.sfrq, SD.skal, codes.seed, s0, 's0').out(o2)
         const ownB = seedKindB() !== 'same'   // o4 keeps a thirty-frame ring only while loop B has a seed of its own
@@ -288,6 +300,26 @@
         build()
       }
       seedSel.onchange = () => setSeed(seedSel.value)
+      // seed 2's kind and the two camera pickers are faces of knobs (KndB, Cam1, Cam2): set either, the other follows
+      const seedbSel = document.getElementById('seedb'), camSel = [document.getElementById('cam1'), document.getElementById('cam2')]
+      seedbSel.onchange = () => { SD.kndb.set(Math.max(0, seedOrderB.indexOf(seedbSel.value))); midi.refresh() }
+      camSel.forEach((el, i) => { el.onchange = () => { (i ? SD.cam2 : SD.cam1).set(+el.value); midi.refresh() } })
+      let camNames = []
+      const listCameras = () => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return
+        navigator.mediaDevices.enumerateDevices().then(ds => {
+          const names = ds.filter(d => d.kind === 'videoinput').map((d, i) => d.label || `camera ${i}`)
+          if (names.join('|') === camNames.join('|')) return
+          camNames = names
+          camSel.forEach(el => { el.innerHTML = ''; names.forEach((n, i) => { const o = el.ownerDocument.createElement('option'); o.value = i; o.textContent = `${i}: ${n}`; el.appendChild(o) }) })
+        }).catch(() => {})
+      }
+      const syncSeedFaces = () => {
+        const kb = seedKindB(); if (seedbSel.value !== kb) seedbSel.value = kb
+        const show = [seedKind === 'cam', kb === 'cam']
+        camSel.forEach((el, i) => { el.style.display = show[i] ? '' : 'none'; const v = String(Math.round((i ? SD.cam2 : SD.cam1)())); if (el.value !== v) el.value = v })
+        if (show[0] || show[1]) listCameras()   // names appear once the camera permission is given
+      }
       urlBox.onchange = () => setSeed(seedKind, urlBox.value)
       const seedOrder = ['osc', 'noise', 'voronoi', 'cam', 'screen', 'sketch']
 
@@ -336,6 +368,7 @@
         view: 'push: toggle grid',
         LEVA: 'Seed 1 into loop A. With S2A, S1B and LEVB a 2 x 2 matrix: rows the loops, columns the seeds.', LEVB: 'Seed 2 into loop B (while KndB is 0, seed 2 is seed 1 again).',
         S2A: 'Seed 2 into loop A.', S1B: 'Seed 1 into loop B.',
+        Cam1: 'Which camera seed 1 looks through when it is a camera (0 = the first the browser lists; the header names them).', Cam2: 'Which camera seed 2 looks through. Starts on the second camera.',
         SFRQ: 'Seed frequency or scale.', SKAL: 'Seed kaleidoscope sides; below 2 = off.',
         SDLY: 'Seed delay in frames before it enters the loops.', Kind: 'Seed kind: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch.',
         MIRA: 'Loop A beam splitter: how much of the mirrored monitor camera A sees (fixed glass on Blair\'s rig).', MZMA: 'Loop A mirror zoom: optical distance of the reflected monitor.',
@@ -432,6 +465,7 @@
         const k = Math.round(SD.kind()); if (k !== lastKindKnob) { lastKindKnob = k; setSeed(seedOrder[k]) }
         homePush.forEach((f, i) => { if (f() !== lastHome[i]) { lastHome[i] = f(); home(i ? B : A) } })
         if (shape() !== built) build()
+        syncSeedFaces()
         if (q.get('h') && !popupHead) { hud.style.display = 'none'; return }
         refreshHud()
       }, 200)
@@ -447,17 +481,13 @@
       })
       // ---- state: 'd' logs it as JSON (and copies it to the clipboard), 'w' writes it to a file, 'o' opens one
       const stateOf = () => {
-        const groupOf = (obj, labels) => Object.fromEntries(Object.values(obj).map((f, i) => [labels[i], +f().toFixed(5)]))
         const state = {
           when: new Date().toISOString(),
           page: 'herder', mode, time: +time.toFixed(3),
           seed: { kind: seedKind, url: seedUrl || null }, view,
           ring: { o0: o0.depth, o1: o1.depth, o2: o2.depth },
           midi: { inputs: midi.inputs, outputs: midi.outputs, profile: midi.profile && midi.profile.name, mode: midi.state.defaults.mode },
-          groups: {
-            CAMA: groupOf(A, CAM), CAMB: groupOf(B, CAM), SWCH: groupOf(S, SW), SEED: groupOf(SD, SEED), RIG: groupOf(R, RIG), PLAY: { RBTH: +PL.rbth().toFixed(5), ZBTH: +PL.zbth().toFixed(5), Cntr: PL.cntr() },
-            MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => [['hue', M[m].hue], ['sat', M[m].sat], ['brt', M[m].brt], ['con', M[m].con]].map(([k, f]) => [`${m}${k.toUpperCase()}`, +f().toFixed(5)])))
-          },
+          groups: Object.fromEntries(Object.entries(KNOBS).map(([g, ks]) => [g, Object.fromEntries(Object.entries(ks).map(([label, f]) => [label, +f().toFixed(5)]))])),
           code: (keepCode(), codes.seed), codeB: codes.seedb,
           gestures: auto.layers.map(L => ({ len: Math.round(L.len), events: L.events })),
           snapshot: midi.snapshot()   // raw "channel:cc" -> value, what midi.restore() takes

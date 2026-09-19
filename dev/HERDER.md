@@ -90,8 +90,8 @@ the top left of the group, with each seed's own knobs to its right:
 ```
 LEVA  S2A  | SFRQ SKAL     loop A takes seed 1 (LEVA) and seed 2 (S2A)     seed 1: frequency, kaleid
 S1B   LEVB | FRQB KALB     loop B takes seed 1 (S1B) and seed 2 (LEVB)     seed 2: frequency, kaleid
-Kind  KndB   SDLY ----     what each seed is, and the delay both share
-cuta  cutb   cutx ----
+Kind  KndB   SDLY Cam1     what each seed is, the delay both share, seed 1's camera
+cuta  cutb   cutx Cam2     the cuts, seed 2's camera
 ```
 
 | encoder | control | what it does |
@@ -103,6 +103,7 @@ cuta  cutb   cutx ----
 | 9 | Kind | seed 1: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch. |
 | 10 | KndB | seed 2: 0 seed 1 again (it costs nothing, and LEVB then feeds loop B from seed 1 as before), then 1 osc, 2 noise, 3 voronoi, 4 cam, 5 screen, 6 sketch (the editor's "seed B" text). View `5` shows it. |
 | 11 | SDLY | seed delay in frames before it enters the loops. |
+| 12, 16 | Cam1, Cam2 | which camera each seed looks through when its kind is cam: 0 the first the browser lists, 1 the second (where Cam2 starts), so two cameras can feed the two seeds. The header names them beside each seed's selector. |
 | 13, 14 | cuta, cutb | hold: cut a loop's own seed in whole, the switcher's foot pedal. Release and the level knob stands again; what was dropped in echoes round. |
 | 15 | cutx | hold: throw the program crossfade to its other end. |
 
