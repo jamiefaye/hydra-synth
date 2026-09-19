@@ -95,7 +95,8 @@
       const SEED = pad(['S1A','S2A','FRQ1','KAL1','S1B','S2B','FRQ2','KAL2','Knd1','Cam1','Knd2','Cam2','cuta','cutb','cutx','SDLY'])
       const RIG  = pad(['MIRA','MZMA','MIRB','MZMB','ATOB','BTOA','KEYA','KEYB'])
       const PLAY = pad(['GNA','ZMA','RTA','S1A','GNB','ZMB','RTB','S2B','XFAD','PERI','SDLY','Void','KAL1','RBTH','ZBTH','Cntr'])
-      const GROUPS = { 1: CAM, 2: CAM, 3: SW, 4: MON, 5: SEED, 6: RIG, 7: PLAY }
+      const MACR = Array.from({ length: 16 }, (_, i) => 'm' + String(i + 1).padStart(2, '0'))   // pushes: macro slots
+      const GROUPS = { 1: CAM, 2: CAM, 3: SW, 4: MON, 5: SEED, 6: RIG, 7: PLAY, 8: MACR }
 
       const camControls = (g) => ({   // key order = CAM label order (the dump relies on it)
         gain:   midi.cc([g, 1], { min: 0.8, max: 1.25, init: 1, curve: 'log', steps: 200, fine: 10 }),
@@ -391,6 +392,7 @@
         clr: 'push: stop all automation (gestures, glides, sequence).',
         '----': 'unassigned'
       }
+      for (const l of MACR) DESC[l] = `push: run or stop macro slot ${+l.slice(1)} (option-${+l.slice(1) % 10} on the keyboard for slots 1 to 10; shift restarts it). m opens the manager.`
       for (let m = 1; m <= 4; m++) { const who = ['A direct', 'A mirror', 'B direct', 'B mirror'][m - 1]; DESC[`${m}HUE`] = `Monitor ${m} (${who}) hue.`; DESC[`${m}SAT`] = `Monitor ${m} (${who}) saturation.`; DESC[`${m}BRT`] = `Monitor ${m} (${who}) brightness.`; DESC[`${m}CON`] = `Monitor ${m} (${who}) contrast.` }
       // ---- the virtual surface: all four groups as draggable numbers (drag, wheel, click = push, shift = fine)
       const head = document.getElementById('headtext')
@@ -401,7 +403,8 @@
           { group: 4, title: 'MONS monitors', labels: MON, descs: DESC },
           { group: 5, title: 'SEED', labels: SEED, descs: DESC },
           { group: 6, title: 'RIG glass and links', labels: RIG, descs: DESC },
-          { group: 7, title: 'PLAY (aliases)', labels: PLAY, descs: DESC }
+          { group: 7, title: 'PLAY (aliases)', labels: PLAY, descs: DESC },
+          { group: 8, title: 'MACR macros (m manages)', labels: MACR, descs: DESC }
       ]
       const panelHost = document.getElementById('panel')
       // Click a group's title and the EC4 jumps to it (sysex select); the title of the group the EC4 is on is lit,
@@ -420,9 +423,11 @@
       // nothing is synced; the popup's keys are forwarded to this page. Closing it puts the panel back.
       let popup = null, popupHead = null
       const seedBox = document.getElementById('seedbox'), hudHead = document.getElementById('hudhead')
+      const PAGE_ID = Math.random().toString(36).slice(2, 8)   // so two herder pages never share a pop-up
+      const forwardKeys = (d) => d.addEventListener('keydown', (e) => { if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return; document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, code: e.code, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey })) })
       const openPanelWindow = () => {
         if (popup && !popup.closed) { popup.focus(); return }
-        popup = window.open('', 'herder-panel', 'width=1180,height=720')
+        popup = window.open('', 'herder-panel-' + PAGE_ID, 'width=1180,height=720')
         if (!popup) { head.textContent = 'popup blocked: allow popups for this page'; return }
         const d = popup.document
         d.title = 'Herder controls'
@@ -440,7 +445,7 @@
         d.body.appendChild(bar)
         panel.destroy(); panelHost.style.display = 'none'; hud.style.display = 'none'
         panel = mountPanel(d.body, midi, panelOpts); markGroup()
-        d.addEventListener('keydown', (e) => document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey })))
+        forwardKeys(d)
         const back = () => {
           if (panelHost.style.display !== 'none') return
           hudHead.insertBefore(document.adoptNode(seedBox), hudHead.firstChild)
@@ -457,8 +462,9 @@
       const WHERE = `${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'local' : location.hostname}  ${BUILD}`
       let note = '', noteUntil = 0   // a message (saved, opened, ...) leads the header for a few seconds
       const refreshHud = () => {
-        const autoLine = (auto.rec ? `REC ${((performance.now() - auto.rec.t0) / 1000).toFixed(1)} s   ` : '') + (auto.layers.length ? `gestures ${auto.layers.length}   ` : '') + (auto.glides.size ? `gliding ${auto.glides.size}   ` : '') + (auto.seq ? `sequence ${auto.seq.i + 1}/${auto.seq.steps.length}   ` : '')
-        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 1 4 program 5 seed 2  s next seed 1  e edit  b rebuild  r reset  d dump  w write patch  o open patch  g gesture  G stop automation  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        const running = auto.macros.filter(m => m.running)
+        const autoLine = (auto.rec ? `REC ${((performance.now() - auto.rec.t0) / 1000).toFixed(1)} s   ` : '') + (auto.macros.length ? `macros ${running.map(m => m.slot).join(' ') || '-'} of ${auto.macros.length}   ` : '') + (auto.glides.size ? `gliding ${auto.glides.size}   ` : '')
+        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 1 4 program 5 seed 2  s next seed 1  e edit  b rebuild  r reset  d dump  w write patch  o open patch  g gesture  G stop all  m macros (opt-1..0 run them)  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
         if (popupHead) popupHead.textContent = head.textContent
       }
       setInterval(() => {
@@ -473,6 +479,10 @@
       }, 200)
       document.addEventListener('keydown', (e) => {
         if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return   // typing, not flying
+        // option-1 .. option-0: macro slots 1 to 10 (shift restarts). The physical key, since option changes the character.
+        const digit = /^Digit(\d)$/.exec(e.code || '')
+        if (e.altKey && digit && !e.metaKey && !e.ctrlKey) { e.preventDefault(); toggleMacro(+digit[1] || 10, e.shiftKey); return }
+        if (e.altKey || e.metaKey || e.ctrlKey) return
         if (e.key === 'e') { editor.style.display = editor.style.display === 'none' || !editor.style.display ? 'block' : 'none'; if (editor.style.display === 'block') codeBox.focus() }
         if (e.key === 'b') build()
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
@@ -492,8 +502,7 @@
           groups: Object.fromEntries(Object.entries(KNOBS).map(([g, ks]) => [g, Object.fromEntries(Object.entries(ks).map(([label, f]) => [label, +f().toFixed(5)]))])),
           code1: (keepCode(), codes.seed), code2: codes.seed2,
           codeRaw: codes.raw,   // the roughshod text: kept and restored, never run by opening a patch
-          gestures: auto.layers.map(L => ({ len: Math.round(L.len), events: L.events })),
-          ...(auto.seq ? { sequence: auto.seq.steps, loop: auto.seq.loop } : {}),
+          macros: auto.macros.map(describeMacro),
           snapshot: midi.snapshot()   // raw "channel:cc" -> value, what midi.restore() takes
         }
         return state
@@ -515,14 +524,18 @@
       // The show must go on: opening a patch never throws and never stops the picture. Each part is taken
       // if it can be used and skipped if not (a number as a string is a number, a value past a knob's range
       // goes to the end of the range), and what was skipped is named in the header and the console.
-      // ---- automation. Three things move knobs besides hands, all through the same door (drive):
-      //   gestures  knob moves recorded while 'g' (or the rec push) is on; on stop they loop, each pass a layer
-      //   glides    an opened patch arriving over GLID seconds (or the file's "glide") instead of at once
-      //   sequence  a patch's "sequence": partial patches applied one after another, each then waiting its "wait"
-      // Hands win: a knob the player turns drops out of every layer and glide, so you play over the machine
-      // by touching what you want back. A knob is "turned by hand" when its value changed and it was not us.
+      // ---- automation. Besides hands, macros move knobs, and an opened patch may glide in. All through one door (drive).
+      // A macro sits in one of 16 slots and is one of three kinds:
+      //   gesture   knob moves recorded while 'g' (or the rec push) is on; they loop at the length played
+      //   sequence  partial patches applied one after another, each then waiting its "wait" seconds
+      //   code      the body of a generator: plain JavaScript with Hydra and `herder` in reach, where `yield 2` waits
+      //             two seconds and a bare `yield` waits a frame. It ends when it returns (or loops if told to).
+      // Any number run at once. Slot n is toggled by option-n (shift restarts it), by push n of the EC4's MACR group,
+      // and by the manager window ('m'). Hands win: a knob the player turns drops out of every gesture and glide.
+      const SLOTS = 16
+      const GeneratorFunction = Object.getPrototypeOf(function * () {}).constructor
       const seen = {}; for (const k in flat) seen[k] = flat[k]()
-      const auto = { layers: [], rec: null, glides: new Map(), seq: null }
+      const auto = { macros: [], rec: null, glides: new Map(), get layers () { return auto.macros.filter(m => m.kind === 'gesture' && m.running) } }
       const drive = (k, v) => { const f = flat[k]; if (!f || !Number.isFinite(v)) return; f.set(Math.min(Math.max(v, f.config.min), f.config.max)); seen[k] = f() }
       const glideTo = (k, to, seconds) => {
         const f = flat[k]; if (!f) return
@@ -534,54 +547,168 @@
         else at = (e) => from + (to - from) * e
         auto.glides.set(k, { t0: performance.now(), ms: seconds * 1000, at })
       }
+      const macroAt = (slot) => auto.macros.find(m => m.slot === slot)
+      const freeSlot = () => { for (let n = 1; n <= SLOTS; n++) if (!macroAt(n)) return n; return 0 }
+      function * walkSteps (m) { do { for (const st of m.steps) { applyState(Object.assign({}, st, { sequence: undefined, macros: undefined })); yield Math.max(0.05, Number(st.wait) || 1) } } while (m.loop) }
+      const startMacro = (m) => {
+        m.error = ''
+        try {
+          if (m.kind === 'gesture') { m.t0 = performance.now(); m.ph = 0 } else {
+            m.gen = m.kind === 'sequence' ? walkSteps(m) : new GeneratorFunction('herder', m.code)(window.herder)
+            m.wakeAt = performance.now()
+          }
+          m.running = true
+        } catch (e) { m.error = e.message; m.running = false }
+      }
+      const stopMacro = (m) => { m.running = false; m.gen = null }
+      // put a macro in a slot (its own, or the first free one); the description is plain data, as a patch holds it
+      const addMacro = (desc, run = true) => {
+        if (!desc || typeof desc !== 'object') return null
+        const kind = ['gesture', 'sequence', 'code'].includes(desc.kind) ? desc.kind : (Array.isArray(desc.steps) ? 'sequence' : Array.isArray(desc.events) ? 'gesture' : 'code')
+        let slot = Math.round(Number(desc.slot)); if (!(slot >= 1 && slot <= SLOTS)) slot = freeSlot()
+        if (!slot) return null
+        const m = { slot, kind, name: String(desc.name || `${kind} ${slot}`).slice(0, 40), loop: desc.loop !== false && kind !== 'code' ? true : !!desc.loop, running: false, error: '' }
+        if (kind === 'gesture') {
+          m.events = (Array.isArray(desc.events) ? desc.events : []).filter(e => Array.isArray(e) && flat[e[1]] && Number.isFinite(e[0]) && Number.isFinite(e[2]))
+          m.len = Number(desc.len); m.keys = new Set(m.events.map(e => e[1]))
+          if (!m.events.length || !(m.len > 0)) return null
+        } else if (kind === 'sequence') {
+          m.steps = (Array.isArray(desc.steps) ? desc.steps : []).filter(st => st && typeof st === 'object'); m.loop = !!desc.loop
+          if (!m.steps.length) return null
+        } else { m.code = String(desc.code || ''); if (!m.code.trim()) return null }
+        auto.macros = auto.macros.filter(x => x.slot !== slot).concat(m).sort((a, b) => a.slot - b.slot)
+        if (run && desc.running !== false) startMacro(m)
+        return m
+      }
+      const removeMacro = (slot) => { auto.macros = auto.macros.filter(m => m.slot !== slot) }
+      const toggleMacro = (slot, restart) => {
+        const m = macroAt(slot); if (!m) { say(`macro slot ${slot} is empty`); return }
+        if (m.running && !restart) { stopMacro(m); say(`macro ${slot} ${m.name}: stopped`) } else { startMacro(m); say(`macro ${slot} ${m.name}: ${m.error ? 'error: ' + m.error : 'running'}`) }
+      }
+      const describeMacro = (m) => Object.assign({ slot: m.slot, name: m.name, kind: m.kind, running: m.running, loop: m.loop },
+        m.kind === 'gesture' ? { len: Math.round(m.len), events: m.events } : m.kind === 'sequence' ? { steps: m.steps } : { code: m.code })
       const startRec = () => { auto.rec = { t0: performance.now(), events: [] }; say('recording a gesture: turn knobs, g (or rec) again to loop it') }
       const stopRec = () => {
         const r = auto.rec; auto.rec = null
         if (!r) return
         const len = performance.now() - r.t0
         if (!r.events.length || len < 100) { say('nothing recorded'); return }
-        auto.layers.push({ t0: performance.now(), len, ph: 0, events: r.events, keys: new Set(r.events.map(e => e[1])) })
-        say(`gesture ${auto.layers.length} loops every ${(len / 1000).toFixed(1)} s (${[...new Set(r.events.map(e => e[1]))].join(' ')})`)
+        const m = addMacro({ kind: 'gesture', len, events: r.events })
+        say(m ? `macro ${m.slot}: gesture loops every ${(len / 1000).toFixed(1)} s (${[...m.keys].join(' ')})` : 'no free macro slot')
       }
-      const stopAuto = () => { auto.rec = null; auto.layers = []; auto.glides.clear(); auto.seq = null; say('automation stopped: gestures, glides and sequence cleared') }
-      const startSequence = (steps, loop) => {
-        const usable = (Array.isArray(steps) ? steps : []).filter(st => st && typeof st === 'object')
-        auto.seq = usable.length ? { steps: usable, i: 0, at: performance.now(), loop: !!loop } : null
-      }
+      const stopAuto = () => { auto.rec = null; auto.macros.forEach(stopMacro); auto.glides.clear(); say('automation stopped (macros keep their slots: option-n runs one again, m manages them)') }
+      const startSequence = (steps, loop) => addMacro({ kind: 'sequence', steps, loop })
       const autoTick = () => {
         const now = performance.now()
         try {
           for (const k in flat) {                                  // hands
             const v = flat[k](); if (v === seen[k]) continue
             seen[k] = v; auto.glides.delete(k)
-            for (const L of auto.layers) if (L.keys.has(k)) { L.keys.delete(k); L.events = L.events.filter(e => e[1] !== k) }
+            for (const m of auto.macros) if (m.kind === 'gesture' && m.keys.has(k)) { m.keys.delete(k); m.events = m.events.filter(e => e[1] !== k) }
             if (auto.rec) auto.rec.events.push([Math.round(now - auto.rec.t0), k, +v.toFixed(5)])
           }
-          auto.layers = auto.layers.filter(L => L.events.length)
-          for (const L of auto.layers) {                           // gestures
-            const ph = (now - L.t0) % L.len, from = L.ph, wrapped = ph < from
-            for (const [t, k, v] of L.events) if (wrapped ? (t > from || t <= ph) : (t > from && t <= ph)) drive(k, v)
-            L.ph = ph
+          auto.macros = auto.macros.filter(m => m.kind !== 'gesture' || m.events.length)
+          for (const m of auto.macros) {
+            if (!m.running) continue
+            if (m.kind === 'gesture') {
+              const ph = (now - m.t0) % m.len, from = m.ph, wrapped = ph < from
+              for (const [t, k, v] of m.events) if (wrapped ? (t > from || t <= ph) : (t > from && t <= ph)) drive(k, v)
+              m.ph = ph
+              if (wrapped && !m.loop) stopMacro(m)
+            } else if (now >= m.wakeAt) {
+              try {
+                const r = m.gen.next()
+                if (r.done) { if (m.loop && m.kind === 'code') startMacro(m); else stopMacro(m) } else m.wakeAt = now + Math.max(0, Number(r.value) || 0) * 1000
+              } catch (e) { m.error = e.message; stopMacro(m); console.warn(`[herder] macro ${m.slot} ${m.name}:`, e) }
+            }
           }
           for (const [k, g] of auto.glides) {                      // glides
             const u = Math.min(1, (now - g.t0) / g.ms); drive(k, g.at(u * u * (3 - 2 * u)))
             if (u >= 1) auto.glides.delete(k)
           }
-          const q = auto.seq                                       // sequence
-          if (q && now >= q.at) {
-            const st = q.steps[q.i]; applyState(Object.assign({}, st, { sequence: undefined }))
-            q.at = now + Math.max(0.05, Number(st.wait) || 1) * 1000
-            q.i++; if (q.i >= q.steps.length) { if (q.loop) q.i = 0; else auto.seq = null }
-          }
         } catch (e) { console.warn('[herder] automation', e) }     // the show must go on
       }
       setInterval(autoTick, 16)   // a timer, not animation frames: it keeps time when the picture stalls
+      // ---- the macro manager: a window listing the slots. Run, stop, restart, rename, delete; write or edit a code macro.
+      // A window of its own where the browser allows one; where it does not (pop-ups blocked), a box over the picture.
+      let macroWin = null   // { closed, close(), focus() }: the pop-up window, or a stand-in for the box
+      const openMacroWindow = () => {
+        if (macroWin && !macroWin.closed) { macroWin.focus(); return }
+        const win = window.open('', 'herder-macros-' + PAGE_ID, 'width=760,height=640')
+        const d = win ? win.document : document
+        let root
+        if (win) {
+          macroWin = win; d.title = 'Herder macros'; root = d.body
+          root.style.cssText = 'margin: 8px; background: #111; color: #ccc; font: 12px monospace;'
+        } else {
+          root = d.createElement('div')
+          root.style.cssText = 'position: fixed; right: 8px; top: 8px; width: 800px; max-width: calc(100vw - 32px); max-height: 80vh; overflow: auto; z-index: 10; padding: 8px; background: rgba(17,17,17,0.92); border: 1px solid #444; color: #ccc; font: 12px monospace;'
+          d.body.appendChild(root)
+          macroWin = { closed: false, close () { this.closed = true; root.remove() }, focus () {} }
+          say('pop-ups are blocked, so the macros are in a box over the picture (m closes it)')
+        }
+        root.setAttribute('data-box', 'macros')
+        root.innerHTML = `<style>
+          [data-box] table { border-collapse: collapse; width: 100%; } [data-box] td, [data-box] th { padding: 2px 6px; text-align: left; border-bottom: 1px solid #222; white-space: nowrap; }
+          [data-box] button, [data-box] input, [data-box] select, [data-box] textarea { font: inherit; background: #1a1a1a; color: #ddd; border: 1px solid #444; } [data-box] button { cursor: pointer; }
+          [data-box] .on { color: #fd6; } [data-box] .err { color: #f88; white-space: normal; } [data-box] textarea { width: 100%; height: 12em; box-sizing: border-box; } [data-box] .dim { color: #777; }
+        </style>
+        <div class="dim">option-1 .. option-0 run or stop slots 1 to 10 (shift restarts); the EC4's MACR pushes do all 16; G stops everything. Saved with a patch (w).</div>
+        <table><thead><tr><th>slot</th><th>name</th><th>kind</th><th>state</th><th></th></tr></thead><tbody data-id="rows"></tbody></table>
+        <p>code macro: the body of a generator. <span class="dim">yield 2 waits two seconds, a bare yield one frame. herder.apply(patch), herder.glideTo('CAMA.ROT', 3, 5), herder.k['SWCH.XFAD'](), and all of Hydra are in reach.</span></p>
+        <div>slot <select data-id="slot"></select> name <input data-id="name" size="18" /> <label><input type="checkbox" data-id="loop" /> start over when it ends</label>
+          <button data-id="put">put in slot and run</button> <span data-id="msg" class="err"></span></div>
+        <textarea data-id="code" spellcheck="false">while (true) {
+  herder.glideTo('CAMA.ROT', Math.random() * 6.28, 4)
+  yield 4
+}</textarea>`
+        const $ = (id) => root.querySelector(`[data-id="${id}"]`)
+        for (let n = 1; n <= SLOTS; n++) { const o = d.createElement('option'); o.value = n; o.textContent = n; $('slot').appendChild(o) }
+        $('slot').value = freeSlot() || 1
+        $('put').onclick = () => {
+          const m = addMacro({ kind: 'code', slot: +$('slot').value, name: $('name').value || undefined, code: $('code').value, loop: $('loop').checked })
+          $('msg').textContent = !m ? 'nothing to run' : (m.error || ''); draw(true)
+        }
+        let shown = ''
+        const draw = (force) => {
+          if (macroWin.closed) return
+          const now = performance.now()
+          const state = (m) => m.error ? 'error: ' + m.error : !m.running ? 'stopped' : m.kind === 'gesture' ? `looping ${(m.len / 1000).toFixed(1)} s (${[...m.keys].join(' ')})` : `running, next in ${Math.max(0, (m.wakeAt - now) / 1000).toFixed(1)} s${m.loop ? ', loops' : ''}`
+          const key = auto.macros.map(m => [m.slot, m.name, m.kind, m.running, m.error].join()).join('|')
+          if (key !== shown || force) {   // rebuild rows only when the list changes, so a name being typed is not lost
+            shown = key
+            $('rows').innerHTML = ''
+            for (const m of auto.macros) {
+              const tr = d.createElement('tr')
+              const cell = (node) => { const td = d.createElement('td'); td.append(node); tr.appendChild(td); return td }
+              cell(`${m.slot}${m.slot <= 10 ? '  opt-' + (m.slot % 10) : ''}`)
+              const name = d.createElement('input'); name.value = m.name; name.size = 18; name.onchange = () => { m.name = name.value.slice(0, 40) }; cell(name)
+              cell(m.kind)
+              const st = cell(''); st.dataset.slot = m.slot; st.className = m.error ? 'err' : (m.running ? 'on' : 'dim')
+              const btn = (label, fn) => { const b = d.createElement('button'); b.textContent = label; b.onclick = () => { fn(); draw(true) }; return b }
+              const ops = d.createElement('span')
+              ops.append(btn(m.running ? 'stop' : 'run', () => toggleMacro(m.slot)), ' ', btn('restart', () => toggleMacro(m.slot, true)), ' ')
+              if (m.kind === 'code') ops.append(btn('edit', () => { $('slot').value = m.slot; $('name').value = m.name; $('code').value = m.code; $('loop').checked = !!m.loop }), ' ')
+              ops.append(btn('delete', () => removeMacro(m.slot)))
+              cell(ops)
+              $('rows').appendChild(tr)
+            }
+            if (!auto.macros.length) { const tr = d.createElement('tr'); const td = d.createElement('td'); td.colSpan = 5; td.className = 'dim'; td.textContent = 'no macros yet: record a gesture (g), open a patch with a sequence, or put a code macro in a slot below'; tr.appendChild(td); $('rows').appendChild(tr) }
+          }
+          for (const td of root.querySelectorAll('td[data-slot]')) { const m = macroAt(+td.dataset.slot); if (m) td.textContent = state(m) }
+        }
+        draw(true)
+        const timer = setInterval(() => { if (macroWin.closed) clearInterval(timer); else draw(false) }, 250)
+        if (win) forwardKeys(d)
+      }
       const recPush = midi.note([3, 9], { toggle: true }), clrPush = midi.note([3, 10])
-      let lastRecPush = recPush(), lastClr = clrPush()
+      const macroPush = Array.from({ length: SLOTS }, (_, i) => midi.note([8, i + 1]))
+      let lastRecPush = recPush(), lastClr = clrPush(); const lastMacroPush = macroPush.map(f => f())
       setInterval(() => {
         if (recPush() !== lastRecPush) { lastRecPush = recPush(); if (auto.rec) stopRec(); else startRec() }
         if (clrPush() !== lastClr) { lastClr = clrPush(); if (lastClr) stopAuto() }
-      }, 50)
+        macroPush.forEach((f, i) => { const v = f(); if (v !== lastMacroPush[i]) { lastMacroPush[i] = v; if (v) toggleMacro(i + 1) } })
+      }, 30)
       // labels from before loops were letters and seeds numbers everywhere; patches saved then still open
       const LABEL_WAS = { LEVA: 'S1A', LEVB: 'S2B', SFRQ: 'FRQ1', SKAL: 'KAL1', FRQB: 'FRQ2', KALB: 'KAL2', Kind: 'Knd1', KndB: 'Knd2', AtoB: 'ATOB', BtoA: 'BTOA' }
       const SEED_KINDS = ['osc', 'noise', 'voronoi', 'cam', 'screen', 'video', 'image', 'sketch']
@@ -601,13 +728,10 @@
           }
         } else if (state.snapshot && typeof state.snapshot === 'object' && !state.reset) part('snapshot', () => { midi.restore(state.snapshot); for (const k in flat) seen[k] = flat[k]() })
         for (const [k, v] of Object.entries(targets)) part(k, () => glideTo(k, v, glide))
-        if (Array.isArray(state.gestures)) part('gestures', () => {
-          auto.layers = state.gestures.filter(L => L && L.len > 0 && Array.isArray(L.events)).map(L => {
-            const events = L.events.filter(e => Array.isArray(e) && flat[e[1]] && Number.isFinite(e[0]) && Number.isFinite(e[2]))
-            return { t0: performance.now(), len: L.len, ph: 0, events, keys: new Set(events.map(e => e[1])) }
-          }).filter(L => L.events.length)
-        })
-        if ('sequence' in state && state.sequence !== undefined) part('sequence', () => startSequence(state.sequence, state.loop))
+        // macros replace the slots they name; a file's bare gestures / sequence (the earlier form) take free slots
+        if (Array.isArray(state.macros)) part('macros', () => { if (!state.macros.length) auto.macros = []; state.macros.forEach(d => { if (!addMacro(d)) skipped.push(`macro ${d && d.slot}`) }) })
+        if (Array.isArray(state.gestures)) part('gestures', () => state.gestures.forEach(L => addMacro(Object.assign({ kind: 'gesture' }, L))))
+        if (Array.isArray(state.sequence) && state.sequence.length) part('sequence', () => startSequence(state.sequence, state.loop))
         for (const [key, slot] of [['code', 'seed'], ['codeB', 'seed2'], ['code1', 'seed'], ['code2', 'seed2'], ['codeRaw', 'raw']]) {   // code, codeB: the names before seeds were numbered
           if (typeof state[key] !== 'string') continue
           codes[slot] = state[key]; if (shownCode === slot) codeBox.value = state[key]
@@ -658,8 +782,10 @@
         if (e.ctrlKey || e.metaKey || e.altKey) return
         if (e.key === 'd') dump(); if (e.key === 'w') savePatch(); if (e.key === 'o') openPatch()
         if (e.key === 'g') { if (auto.rec) stopRec(); else startRec() } if (e.key === 'G') stopAuto()
+        if (e.key === 'm') { if (macroWin && !macroWin.closed) macroWin.close(); else openMacroWindow() }
       })
-      Object.assign(window.herder, { apply: applyState, glideTo, record: startRec, loop: stopRec, stop: stopAuto, sequence: startSequence, auto, state: stateOf, tick: autoTick })
+      Object.assign(window.herder, { apply: applyState, glideTo, record: startRec, loop: stopRec, stop: stopAuto, sequence: startSequence, auto, state: stateOf, tick: autoTick, macro: addMacro, toggle: toggleMacro, remove: removeMacro, macros: () => auto.macros.map(describeMacro), set: drive, openMacros: () => openMacroWindow(), get macroWindow () { return macroWin } })
+      // herder.set('CAMA.ZOOM', 1.1) moves a knob as the machine; herder.k['CAMA.ZOOM'].set(1.1) moves it as a hand would (it ends gestures on that knob and is recorded)
       window.__herder = { P, midi, get panel () { return panel }, openPanelWindow, closePanelWindow, setSeed, setView, build, dump, stateOf, applyState, savePatch, openPatch, applyCode, codeBox, get seedKind () { return seedKind }, get view () { return view } }
     </script>
   </body>

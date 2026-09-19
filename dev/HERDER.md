@@ -141,8 +141,10 @@ against A and pulls back as A pushes in).
 | r | reset every knob |
 | d | dump the whole state as JSON to the console and clipboard |
 | w | write a patch: the same JSON to a file (a save dialog in Chrome, a download elsewhere) |
-| g | record a gesture; `g` again and it loops (see Automation) |
-| G | stop all automation: gestures, glides, sequence |
+| g | record a gesture; `g` again and it loops, as a macro in the first free slot (see Automation) |
+| G | stop all automation; the macros keep their slots |
+| m | the macro manager |
+| option-1 .. option-0 | run or stop macro slots 1 to 10; with shift, restart from the top |
 | 5 | view: seed 2 |
 | o | open a patch; dropping the file on the page does the same. Knobs, seed and sketch code come back and the EC4's displays follow; the picture regrows from the seed |
 | h | hide the HUD |
@@ -178,37 +180,60 @@ is ignored. Roughshod mode runs whatever you type with the whole synth in reach.
 
 ## Automation
 
-Three things move knobs besides your hands, and your hands always win: turn a knob that the machine is
-moving and it drops out of every gesture and glide, so you play over the machine by touching what you
-want back.
+Besides your hands, macros move knobs, and an opened patch may glide in. Your hands always win: turn a
+knob that a gesture or a glide is moving and it drops out, so you play over the machine by touching
+what you want back.
 
-**Gestures.** Press `g` (or the `rec` push), turn knobs, press it again: the moves loop, at the length
-you played them. Record again and the new pass is another layer with its own length, so layers drift
-against each other. `G` (or `clr`) clears everything. Gestures are saved in a patch (`gestures`) and
-come back when it is opened.
+**Macros.** Sixteen slots, any number running at once, three kinds:
+
+- *gesture*: press `g` (or the `rec` push), turn knobs, press it again. The moves loop at the length you
+  played them, in the first free slot. Record again for another, with its own length, so they drift
+  against each other.
+- *sequence*: partial patches applied one after another, each then waiting its `wait` seconds (default 1);
+  `"loop": true` starts over. Each step may glide.
+- *code*: the body of a generator, plain JavaScript with all of Hydra and `herder` in reach. `yield 2`
+  waits two seconds, a bare `yield` one frame; it ends when it returns, or starts over if told to. A
+  macro can read knobs, so it can answer what you or another macro are doing. A mistake in one stops
+  that macro and shows in the manager; nothing else notices.
+
+```js
+while (true) {                                   // a slow wander of camera A, for ever
+  herder.glideTo('CAMA.ROT', Math.random() * 6.28, 6)
+  if (herder.k['SWCH.XFAD']() > 0.5) herder.apply({ glide: 3, groups: { RIG: { MIRA: Math.random() } } })
+  yield 6
+}
+```
+
+**Running them.** Option-1 to option-0 run or stop slots 1 to 10, shift-option-number restarts one from
+the top; the pushes of the EC4's MACR group (GR08) do the same for all sixteen; `G` (or `clr`) stops
+everything and leaves the slots as they are. `m` opens the manager: every slot with its name, kind and
+state, run/stop, restart, delete, rename, and a box to write or edit a code macro. It is a window of its
+own, or a box over the picture if pop-ups are blocked.
 
 **Glides.** With GLID above 0 an opened patch arrives over that many seconds instead of at once; a
 file's own `"glide": 4` wins over the knob. Rotation takes the short way round, zoom and gain move in
 ratio, switches jump.
 
-**Sequences.** A patch may carry a list of partial patches. Each is applied, then waits its `wait`
-seconds (default 1) before the next; `"loop": true` starts over. Each step may glide.
+**In a patch.** `macros` holds the slots: `{ "slot": 3, "name": "wander", "kind": "code", "code": "...",
+"loop": false, "running": true }`, or `"kind": "sequence", "steps": [...]`, or `"kind": "gesture",
+"len": ..., "events": [...]`. Opening a patch replaces the slots it names and leaves the others;
+`"macros": []` empties them all. A file's bare `sequence` or `gestures` (the earlier form) takes free slots.
 
 ```json
-{ "loop": true, "sequence": [
+{ "macros": [ { "slot": 1, "name": "breathe", "kind": "sequence", "loop": true, "steps": [
   { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 0.97, "ROT": 0.1 } } },
-  { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 1.04, "ROT": 6.18 } } },
-  { "wait": 0.2, "groups": { "SWCH": { "Rvrs": 1 } } },
-  { "wait": 4, "groups": { "SWCH": { "Rvrs": 0 } } }
-] }
+  { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 1.04, "ROT": 6.18 } } }
+] } ] }
 ```
 
-**From code.** The page's own mechanism is `herder`, there for a seed sketch or roughshod code to reach
-into. A seed can read a knob: `osc(() => herder.k['CAMA.ZOOM']() * 20)`. Roughshod code can do what the
-keys do: `herder.apply(patch)` (a partial patch, returns what it skipped), `herder.glideTo('CAMB.ROT', 3, 5)`,
-`herder.record()`, `herder.loop()`, `herder.stop()`, `herder.sequence(steps, loop)`, `herder.state()`;
-`herder.knobs` is every knob by group and label, `herder.out` the outputs by role (a, b, seed, program,
-seedB). A generator that yields its waits can play a set with `herder.apply(step); yield dt`.
+**From code.** `herder` is the page's own mechanism, there for a seed sketch, a macro or roughshod code:
+`herder.k['CAMA.ZOOM']()` reads a knob (a seed can: `osc(() => herder.k['CAMA.ZOOM']() * 20)`);
+`herder.set('CAMA.ZOOM', 1.1)` moves one as the machine does, while `herder.k['CAMA.ZOOM'].set(1.1)`
+moves it as a hand would (it ends gestures on that knob and is recorded); `herder.apply(patch)`,
+`herder.glideTo(knob, value, seconds)`, `herder.macro(description)`, `herder.toggle(slot)`,
+`herder.remove(slot)`, `herder.macros()`, `herder.record()`, `herder.loop()`, `herder.stop()`,
+`herder.state()`; `herder.knobs` is every knob by group and label, `herder.out` the outputs by role
+(a, b, seed1, seed2, program).
 
 ## The EC4
 

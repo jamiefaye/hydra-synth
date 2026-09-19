@@ -1,5 +1,5 @@
 {
- "_about": "Faderfox EC4 setup 1 HERD for hyv/dev/herder.html: groups CAMA CAMB SWCH MONS SEED RIG PLAY, all CCR2 on ch 1, CC (g-1)*16+(e-1), push = Note of the same number (fine). PLAY is aliases of other groups' knobs (midi.alias). Apply: node extensions/midi/tools/ec4-label.js apply <backup.syx> <out.syx> dev/herder-ec4-labels.json Label case: UPPER = knob, Capitalised = switch (turn), lowercase = push-only button.",
+ "_about": "Faderfox EC4 setup 1 HERD for hyv/dev/herder.html: groups CAMA CAMB SWCH MONS SEED RIG PLAY MACR (pushes = macro slots), all CCR2 on ch 1, CC (g-1)*16+(e-1), push = Note of the same number (fine). PLAY is aliases of other groups' knobs (midi.alias). Apply: node extensions/midi/tools/ec4-label.js apply <backup.syx> <out.syx> dev/herder-ec4-labels.json Label case: UPPER = knob, Capitalised = switch (turn), lowercase = push-only button.",
  "setupName": {
   "1": "HERD"
  },
@@ -11,7 +11,8 @@
    "4": "MONS",
    "5": "SEED",
    "6": "RIG",
-   "7": "PLAY"
+   "7": "PLAY",
+   "8": "MACR"
   }
  },
  "encoders": {
@@ -2262,6 +2263,328 @@
       "type": "Note",
       "channel": 1,
       "number": 111,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    }
+   },
+   "8": {
+    "1": {
+     "name": "m01",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 112,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 112,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "2": {
+     "name": "m02",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 113,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 113,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "3": {
+     "name": "m03",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 114,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 114,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "4": {
+     "name": "m04",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 115,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 115,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "5": {
+     "name": "m05",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 116,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 116,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "6": {
+     "name": "m06",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 117,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 117,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "7": {
+     "name": "m07",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 118,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 118,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "8": {
+     "name": "m08",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 119,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 119,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "9": {
+     "name": "m09",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 120,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 120,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "10": {
+     "name": "m10",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 121,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 121,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "11": {
+     "name": "m11",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 122,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 122,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "12": {
+     "name": "m12",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 123,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 123,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "13": {
+     "name": "m13",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 124,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 124,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "14": {
+     "name": "m14",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 125,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 125,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "15": {
+     "name": "m15",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 126,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 126,
+      "mode": 1,
+      "display": 1,
+      "lower": 127,
+      "upper": 127,
+      "link": 0
+     }
+    },
+    "16": {
+     "name": "m16",
+     "type": "CCR2",
+     "channel": 1,
+     "number": 127,
+     "lower": 0,
+     "upper": 127,
+     "mode": "Acc0",
+     "scale": "127",
+     "push": {
+      "type": "Note",
+      "channel": 1,
+      "number": 127,
       "mode": 1,
       "display": 1,
       "lower": 127,
