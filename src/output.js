@@ -1,10 +1,25 @@
 //const transforms = require('./glsl-transforms.js')
 import { normalizeDepth, delayedIndex, makeDelayProxy } from './lib/frame-ring.js'
 
-var Output = function ({ regl, precision, filter = 'nearest', label = "", width, height, depth = 2 }) {
+const HALF_FLOAT_EXTENSIONS = ['OES_texture_half_float', 'OES_texture_half_float_linear', 'EXT_color_buffer_half_float']
+let warnedNoHalfFloat = false
+function halfFloatOk (regl, filter) {
+  const need = filter === 'linear' ? HALF_FLOAT_EXTENSIONS : HALF_FLOAT_EXTENSIONS.filter(e => e !== 'OES_texture_half_float_linear')
+  const missing = need.filter(e => !regl.hasExtension(e))
+  if (missing.length && !warnedNoHalfFloat) {
+    warnedNoHalfFloat = true
+    console.warn('[hydra-synth] float outputs need ' + missing.join(', ') + '; staying 8-bit')
+  }
+  return missing.length === 0
+}
+
+var Output = function ({ regl, precision, filter = 'nearest', float = false, label = "", width, height, depth = 2 }) {
   this.regl = regl
   this.precision = precision
   this.filter = filter
+  // half-float frames: values past 0..1 and fine steps survive from one frame to the next (feedback
+  // with headroom). Needs the half-float extensions; without them the output stays 8-bit.
+  this.float = float && halfFloatOk(regl, filter)
   this.label = label
   this.positionBuffer = this.regl.buffer([
     [-2, 0],
@@ -33,7 +48,8 @@ Output.prototype._makeFbos = function (depth, width, height) {
       min: this.filter,
       width: width,
       height: height,
-      format: 'rgba'
+      format: 'rgba',
+      type: this.float ? 'half float' : 'uint8'
     }),
     depthStencil: false
   }))

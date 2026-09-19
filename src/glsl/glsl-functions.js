@@ -1168,6 +1168,28 @@ wgsl:
    return vec4<f32>(c.rgb, _c0.a);`
 },
 {
+  // The rails of a video amplifier: untouched below half the headroom, bending asymptotically onto it
+  // above (the arms meet in value and slope), floored at black. After lightherder's front panel. With
+  // float outputs an overdriven feedback loop settles into structure instead of a flat white.
+  name: 'knee',
+  type: 'color',
+  inputs: [
+    {
+      type: 'float',
+      name: 'headroom',
+      default: 2,
+    }
+  ],
+  glsl:
+`   vec3 x = max(_c0.rgb, vec3(1e-6));
+   vec3 bent = vec3(headroom) - vec3(headroom * headroom) / (4.0 * x);
+   return vec4(max(mix(bent, _c0.rgb, step(x, vec3(0.5 * headroom))), vec3(0.0)), _c0.a);`,
+  wgsl:
+`   let x = max(_c0.rgb, vec3<f32>(1e-6));
+   let bent = vec3<f32>(headroom) - vec3<f32>(headroom * headroom) / (4.0 * x);
+   return vec4<f32>(max(mix(bent, _c0.rgb, step(x, vec3<f32>(0.5 * headroom))), vec3<f32>(0.0)), _c0.a);`
+},
+{
   name: 'brightness',
   type: 'color',
   inputs: [

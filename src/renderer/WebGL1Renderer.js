@@ -35,6 +35,7 @@ export class WebGL1Renderer extends RendererInterface {
     const {
       precision = 'mediump',
       filter = 'nearest',
+      float = false,
       width = canvas.width || 1280,
       height = canvas.height || 720,
       pb = null,
@@ -48,12 +49,14 @@ export class WebGL1Renderer extends RendererInterface {
     this._height = height
     this._precision = precision
     this._filter = filter
+    this._float = float
     this._pb = pb
 
     // Initialize regl context
     this._regl = regl({
       canvas: this._canvas,
-      pixelRatio: 1
+      pixelRatio: 1,
+      optionalExtensions: ['OES_texture_half_float', 'OES_texture_half_float_linear', 'EXT_color_buffer_half_float']
     })
 
     // Clear to black
@@ -164,6 +167,7 @@ export class WebGL1Renderer extends RendererInterface {
       height: options.height || this._height,
       precision: this._precision,
       filter: this._filter,
+      float: this._float,
       label: options.label || `o${index}`
     })
     output.id = index

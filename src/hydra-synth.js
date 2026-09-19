@@ -30,6 +30,7 @@ class HydraRenderer {
     canvas,
     precision,
     filter = 'nearest', // output texture sampling: 'nearest' (hydra's look) or 'linear' (smooth feedback)
+    float = false, // half-float outputs: feedback keeps values past 0..1 and fine steps between frames (changes how feedback sketches look)
     extendTransforms = {}, // add your own functions on init
     debug = false // enable non-error console logging
   } = {}) {
@@ -107,6 +108,7 @@ class HydraRenderer {
     this.renderer.init(this.canvas, {
       precision: this.precision,
       filter,
+      float,
       width: this.width,
       height: this.height,
       pb: this.pb,

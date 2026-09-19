@@ -6,7 +6,7 @@
  */
 
 // WebGPU imports (from extension's wgsl folder)
-import { wgslHydra, setSamplerFilter } from './wgsl/wgsl-hydra.js'
+import { wgslHydra, setSamplerFilter, setOutputFloat } from './wgsl/wgsl-hydra.js'
 import { OutputWgsl } from './wgsl/outputWgsl.js'
 
 // Extension-specific imports
@@ -82,6 +82,7 @@ export async function createHydra({
   canvas,
   precision,
   filter = 'nearest',   // output texture sampling: 'nearest' (hydra's look) or 'linear' (smooth feedback)
+  float = false,        // half-float outputs: feedback keeps values past 0..1 and fine steps between frames
   extendTransforms = {},
   gpuDevice = null,
   preserveDrawingBuffer = false
@@ -237,6 +238,7 @@ export async function createHydra({
   if (useWGSL) {
     // WebGPU mode
     setSamplerFilter(filter)
+    setOutputFloat(float)
     hydra.wgslHydra = new wgslHydra(hydra, hydra.canvas, numOutputs, gpuDevice)
 
     // Initialize outputs
@@ -289,7 +291,8 @@ export async function createHydra({
       canvas: hydra.canvas,
       pixelRatio: 1,
       attributes: { preserveDrawingBuffer },
-      extensions: ['ANGLE_instanced_arrays']
+      extensions: ['ANGLE_instanced_arrays'],
+      optionalExtensions: ['OES_texture_half_float', 'OES_texture_half_float_linear', 'EXT_color_buffer_half_float']
     })
 
     hydra.regl.clear({ color: [0, 0, 0, 1] })
@@ -302,6 +305,7 @@ export async function createHydra({
         height: hydra.height,
         precision: hydra.precision,
         filter,
+        float,
         label: `o${index}`
       })
       o.id = index
@@ -392,7 +396,8 @@ export async function createHydra({
       canvas: hydra.canvas,
       pixelRatio: 1,
       attributes: { preserveDrawingBuffer: hydra.preserveDrawingBuffer },
-      extensions: ['ANGLE_instanced_arrays']
+      extensions: ['ANGLE_instanced_arrays'],
+      optionalExtensions: ['OES_texture_half_float', 'OES_texture_half_float_linear', 'EXT_color_buffer_half_float']
     })
     hydra.regl.clear({ color: [0, 0, 0, 1] })
 

@@ -39,6 +39,7 @@ export class WebGPURenderer extends RendererInterface {
     const {
       precision = 'highp',
       filter = 'nearest',
+      float = false,
       width = canvas.width || 1280,
       height = canvas.height || 720,
       numOutputs = 4,
@@ -51,6 +52,7 @@ export class WebGPURenderer extends RendererInterface {
     this._height = height
     this._precision = precision
     this._filter = filter
+    this._float = float
     this._hydra = hydra
 
     // Check for WebGPU support
@@ -66,6 +68,7 @@ export class WebGPURenderer extends RendererInterface {
 
       wgslHydra = wgslModule.wgslHydra
       if (wgslModule.setSamplerFilter) wgslModule.setSamplerFilter(this._filter)
+      if (wgslModule.setOutputFloat) wgslModule.setOutputFloat(this._float)
       OutputWgsl = outputModule.OutputWgsl
       Source = sourceModule.default
     } catch (e) {

@@ -11,6 +11,9 @@ let fired = false;
 // Texture sampling for every texture uniform: 'nearest' (hydra's default) or 'linear'.
 let samplerFilter = 'nearest';
 export function setSamplerFilter(filter) { samplerFilter = filter === 'linear' ? 'linear' : 'nearest'; }
+// Output textures as rgba16float instead of the canvas format: feedback keeps headroom and fine steps.
+let outputFloat = false;
+export function setOutputFloat(on) { outputFloat = !!on; }
 
 const trace = false;
 
@@ -244,7 +247,7 @@ class wgslHydra {
             height: this.canvas.height
         },
         mipLevelCount: 1,
-        format: this.format,
+        format: this.outputFormat,
         // COPY_SRC so frames can be read back (tests, screenshots, Syphon-style export)
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
     };
@@ -298,6 +301,7 @@ class wgslHydra {
 
 			// setup the WebGPU context this Hydra will use.
       this.format = navigator.gpu.getPreferredCanvasFormat();
+      this.outputFormat = outputFloat ? 'rgba16float' : this.format;
       this.context.configure({
         device: this.device,
         format: this.format,
@@ -485,7 +489,7 @@ class wgslHydra {
         fragment: {
           module: rpe.fragmentShaderModule,
           entryPoint: "main",
-          targets: [{ format: this.format }],
+          targets: [{ format: this.outputFormat }],
         },
         primitive: {
           topology: "triangle-list",
@@ -722,7 +726,7 @@ class wgslHydra {
 				module: spe.fragmentShaderModule,
 				entryPoint: "main",
 				targets: [{
-					format: this.format,
+					format: this.outputFormat,
 					blend: blendState
 				}],
 			},
