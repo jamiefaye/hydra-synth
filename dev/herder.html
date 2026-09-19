@@ -417,10 +417,13 @@
       const closePanelWindow = () => { if (popup && !popup.closed) popup.close(); popup = null }
       if (q.get('panel') === 'window') setTimeout(openPanelWindow, 0)
       const resetAll = () => { for (const o of [A, B, S, SD, R, PL, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
+      // which copy is this: the dev server runs the source as it stands, a deployed page says what it was built from
+      const BUILD = (typeof __HERDER_BUILD__ !== 'undefined') ? `build ${__HERDER_BUILD__}` : 'DEV (live source)'
+      const WHERE = `${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'local' : location.hostname}  ${BUILD}`
       let note = '', noteUntil = 0   // a message (saved, opened, ...) leads the header for a few seconds
       const refreshHud = () => {
         const autoLine = (auto.rec ? `REC ${((performance.now() - auto.rec.t0) / 1000).toFixed(1)} s   ` : '') + (auto.layers.length ? `gestures ${auto.layers.length}   ` : '') + (auto.glides.size ? `gliding ${auto.glides.size}   ` : '') + (auto.seq ? `sequence ${auto.seq.i + 1}/${auto.seq.steps.length}   ` : '')
-        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program 5 seed B  s seed  e edit  b rebuild  r reset  d dump  w write patch  o open patch  g gesture  G stop automation  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program 5 seed B  s seed  e edit  b rebuild  r reset  d dump  w write patch  o open patch  g gesture  G stop automation  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
         if (popupHead) popupHead.textContent = head.textContent
       }
       setInterval(() => {
