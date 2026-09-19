@@ -9420,6 +9420,7 @@ function formatArguments(transform, startIndex, synthContext) {
         }
         typedArg.value = () => x.getTexture();
         typedArg.isUniform = true;
+        typedArg.isOutput = x.type === "delay" || typeof x.flipPingPong === "function";
       } else {
         if (typedArg.value.getTexture && input.type === "vec4") {
           var x1 = typedArg.value;
@@ -9465,13 +9466,14 @@ function generateGlsl$1(transforms, shaderParams) {
       if (shaderParams.wgsl && inputs[0] && inputs[0].type === "sampler2D") {
         let texName = inputs[0].name;
         let sampName = "samp" + texName;
+        const turn = (uv) => inputs[0].isOutput ? `vec2<f32>((${uv}).x, 1.0 - (${uv}).y)` : uv;
         if (transform.name === "src") {
           fragColor = (uv) => {
-            return `textureSample( ${texName}, ${sampName}, fract(${uv}))`;
+            return `textureSample( ${texName}, ${sampName}, fract(${turn(uv)}))`;
           };
         } else {
           fragColor = (uv) => {
-            return `${shaderString(`${uv}, ${texName}, ${sampName}`, transform.name, inputs.slice(1), shaderParams)}`;
+            return `${shaderString(`${turn(uv)}, ${texName}, ${sampName}`, transform.name, inputs.slice(1), shaderParams)}`;
           };
         }
       } else {
@@ -11124,6 +11126,51 @@ const lightingFunctions = [
       return vec4<f32>(_c0.rgb * diff, _c0.a);`
   }
 ];
+const insideGlsl = "vec2 m = step(vec2(0.), p) * step(p, vec2(1.));";
+const insideWgsl = "let m = step(vec2<f32>(0.), p) * step(p, vec2<f32>(1.));";
+const BLUR_TAPS = [
+  [0, 0, 0.2],
+  [1, 0, 0.12],
+  [-1, 0, 0.12],
+  [0, 1, 0.12],
+  [0, -1, 0.12],
+  [0.7071, 0.7071, 0.06],
+  [-0.7071, -0.7071, 0.06],
+  [0.7071, -0.7071, 0.06],
+  [-0.7071, 0.7071, 0.06],
+  [2, 0, 0.02],
+  [-2, 0, 0.02],
+  [0, 2, 0.02],
+  [0, -2, 0.02]
+];
+const fl = (n) => Number.isInteger(n) ? `${n}.` : `${n}`;
+const blurBody = (lang, black) => {
+  const v2 = lang === "wgsl" ? "vec2<f32>" : "vec2";
+  const sample = (uv) => lang === "wgsl" ? `textureSample(tex, samptex, ${uv})` : `texture2D(tex, ${uv})`;
+  const lines = lang === "wgsl" ? [`let r = vec2<f32>(radius, radius * resolution.x / resolution.y);`, `var c = vec4<f32>(0.);`, `var p: vec2<f32>;`] : [`vec2 r = vec2(radius, radius * resolution.x / resolution.y);`, `vec4 c = vec4(0.);`, `vec2 p;`];
+  if (black) lines.push(lang === "wgsl" ? "var m: vec2<f32>;" : "vec2 m;");
+  for (const [x, y, w] of BLUR_TAPS) {
+    lines.push(`p = _st + ${v2}(${fl(x)}, ${fl(y)}) * r;`);
+    if (black) {
+      lines.push((lang === "wgsl" ? insideWgsl : insideGlsl).replace(/^(let|vec2) m =/, "m ="));
+      lines.push(`c += ${sample("p")} * (m.x * m.y) * ${fl(w)};`);
+    } else {
+      lines.push(`c += ${sample("fract(p)")} * ${fl(w)};`);
+    }
+  }
+  lines.push("return c;");
+  return lines.map((l) => "   " + l).join("\n");
+};
+const blurEntry = (name, black) => ({
+  name,
+  type: "src",
+  inputs: [
+    { type: "sampler2D", name: "tex", default: NaN },
+    { type: "float", name: "radius", default: 5e-3 }
+  ],
+  glsl: blurBody("glsl", black),
+  wgsl: blurBody("wgsl", black)
+});
 const glslFunctions = () => [
   {
     name: "noise",
@@ -11313,6 +11360,25 @@ const glslFunctions = () => [
     // is handled explicitly in generateGlsl.
     wgsl: `
 //		return texture2D(tex, fract(_st));`
+  },
+  {
+    name: "srcb",
+    type: "src",
+    inputs: [
+      {
+        type: "sampler2D",
+        name: "tex",
+        default: NaN
+      }
+    ],
+    // src() that reads black beyond the texture instead of wrapping: what a camera sees past
+    // the monitor. Use it on feedback paths that model a camera (blurb() is the blurred one).
+    glsl: `   vec2 p = _st;
+   ${insideGlsl}
+   return texture2D(tex, p) * (m.x * m.y);`,
+    wgsl: `   let p = _st;
+   ${insideWgsl}
+   return textureSample(tex, samptex, p) * (m.x * m.y);`
   },
   {
     name: "solid",
@@ -11712,6 +11778,53 @@ const glslFunctions = () => [
    return (_c0.r+r)*vec2<f32>(cos(a), sin(a));`
   },
   {
+    name: "offset",
+    type: "coord",
+    inputs: [
+      { type: "float", name: "x", default: 0 },
+      { type: "float", name: "y", default: 0 }
+    ],
+    // scroll() without the fract(): a translate that lets coordinates leave 0..1, so srcb()/blurb()
+    // can read black there. A camera moved off the monitor's axis, not a texture scrolled round.
+    glsl: `   return _st + vec2(x, y);`,
+    wgsl: `   return _st + vec2<f32>(x, y);`
+  },
+  {
+    name: "tilt",
+    type: "coord",
+    inputs: [
+      { type: "float", name: "pitch", default: 0 },
+      { type: "float", name: "yaw", default: 0 },
+      { type: "float", name: "dist", default: 2.5 }
+    ],
+    // A pinhole camera looking at a monitor that is turned away from it: the perspective (keystone)
+    // that scale/rotate/offset cannot make. Camera at the origin looking down +z, monitor of half-size 1
+    // centred at (0, 0, dist), turned by pitch about x (positive: its top leans away) and yaw about y
+    // (positive: its right edge leans away). Framed so zero tilt is the identity; dist sets how strong
+    // the perspective is (2.5 is a normal lens, 1 a very wide one). Coordinates off the monitor come
+    // back far outside 0..1, so srcb()/blurb() read black there and src() wraps as it always did.
+    glsl: `   vec2 u = _st * 2.0 - 1.0;
+   float cp = cos(pitch), sp = sin(pitch), cy = cos(yaw), sy = sin(yaw);
+   vec3 X = vec3(cy, 0.0, -sy);
+   vec3 Y = vec3(sy * sp, cp, cy * sp);
+   vec3 N = vec3(sy * cp, -sp, cy * cp);
+   vec3 d = vec3(u, dist);
+   float denom = dot(d, N);
+   if (denom <= 1e-4) return vec2(-10.0);
+   vec3 P = (dist * N.z / denom) * d - vec3(0.0, 0.0, dist);
+   return vec2(dot(P, X), dot(P, Y)) * 0.5 + 0.5;`,
+    wgsl: `   let u = _st * 2.0 - 1.0;
+   let cp = cos(pitch); let sp = sin(pitch); let cy = cos(yaw); let sy = sin(yaw);
+   let X = vec3<f32>(cy, 0.0, -sy);
+   let Y = vec3<f32>(sy * sp, cp, cy * sp);
+   let N = vec3<f32>(sy * cp, -sp, cy * cp);
+   let d = vec3<f32>(u, dist);
+   let denom = dot(d, N);
+   if (denom <= 1e-4) { return vec2<f32>(-10.0); }
+   let P = (dist * N.z / denom) * d - vec3<f32>(0.0, 0.0, dist);
+   return vec2<f32>(dot(P, X), dot(P, Y)) * 0.5 + 0.5;`
+  },
+  {
     name: "scroll",
     type: "coord",
     inputs: [
@@ -12023,6 +12136,26 @@ const glslFunctions = () => [
    return vec4<f32>(c.rgb, _c0.a);`
   },
   {
+    // The rails of a video amplifier: untouched below half the headroom, bending asymptotically onto it
+    // above (the arms meet in value and slope), floored at black. After lightherder's front panel. With
+    // float outputs an overdriven feedback loop settles into structure instead of a flat white.
+    name: "knee",
+    type: "color",
+    inputs: [
+      {
+        type: "float",
+        name: "headroom",
+        default: 2
+      }
+    ],
+    glsl: `   vec3 x = max(_c0.rgb, vec3(1e-6));
+   vec3 bent = vec3(headroom) - vec3(headroom * headroom) / (4.0 * x);
+   return vec4(max(mix(bent, _c0.rgb, step(x, vec3(0.5 * headroom))), vec3(0.0)), _c0.a);`,
+    wgsl: `   let x = max(_c0.rgb, vec3<f32>(1e-6));
+   let bent = vec3<f32>(headroom) - vec3<f32>(headroom * headroom) / (4.0 * x);
+   return vec4<f32>(max(mix(bent, _c0.rgb, step(x, vec3<f32>(0.5 * headroom))), vec3<f32>(0.0)), _c0.a);`
+  },
+  {
     name: "brightness",
     type: "color",
     inputs: [
@@ -12177,45 +12310,8 @@ const glslFunctions = () => [
    return vec4<f32>(c, _c0.a);`,
     needs: ["_rgbToHsv", "_hsvToRgb"]
   },
-  {
-    name: "blur",
-    type: "src",
-    inputs: [
-      {
-        type: "sampler2D",
-        name: "tex",
-        default: NaN
-      },
-      {
-        type: "float",
-        name: "radius",
-        default: 5e-3
-      }
-    ],
-    // 13-tap blur of a texture (o0, s0, o0.delay(k)): centre, a ring at `radius` (4 axis + 4
-    // diagonal taps) and a ring at 2*radius (4 axis taps). radius is a fraction of the width;
-    // the y offset is scaled by the aspect ratio so the kernel is round. Sampling wraps like src().
-    glsl: `   vec2 r = vec2(radius, radius * resolution.x / resolution.y);
-   vec2 d = r * 0.7071;
-   vec4 c = texture2D(tex, fract(_st)) * 0.2;
-   c += (texture2D(tex, fract(_st + vec2(r.x, 0.))) + texture2D(tex, fract(_st - vec2(r.x, 0.)))
-       + texture2D(tex, fract(_st + vec2(0., r.y))) + texture2D(tex, fract(_st - vec2(0., r.y)))) * 0.12;
-   c += (texture2D(tex, fract(_st + d)) + texture2D(tex, fract(_st - d))
-       + texture2D(tex, fract(_st + vec2(d.x, -d.y))) + texture2D(tex, fract(_st + vec2(-d.x, d.y)))) * 0.06;
-   c += (texture2D(tex, fract(_st + vec2(2. * r.x, 0.))) + texture2D(tex, fract(_st - vec2(2. * r.x, 0.)))
-       + texture2D(tex, fract(_st + vec2(0., 2. * r.y))) + texture2D(tex, fract(_st - vec2(0., 2. * r.y)))) * 0.02;
-   return c;`,
-    wgsl: `   let r = vec2<f32>(radius, radius * resolution.x / resolution.y);
-   let d = r * 0.7071;
-   var c = textureSample(tex, samptex, fract(_st)) * 0.2;
-   c += (textureSample(tex, samptex, fract(_st + vec2<f32>(r.x, 0.))) + textureSample(tex, samptex, fract(_st - vec2<f32>(r.x, 0.)))
-       + textureSample(tex, samptex, fract(_st + vec2<f32>(0., r.y))) + textureSample(tex, samptex, fract(_st - vec2<f32>(0., r.y)))) * 0.12;
-   c += (textureSample(tex, samptex, fract(_st + d)) + textureSample(tex, samptex, fract(_st - d))
-       + textureSample(tex, samptex, fract(_st + vec2<f32>(d.x, -d.y))) + textureSample(tex, samptex, fract(_st + vec2<f32>(-d.x, d.y)))) * 0.06;
-   c += (textureSample(tex, samptex, fract(_st + vec2<f32>(2. * r.x, 0.))) + textureSample(tex, samptex, fract(_st - vec2<f32>(2. * r.x, 0.)))
-       + textureSample(tex, samptex, fract(_st + vec2<f32>(0., 2. * r.y))) + textureSample(tex, samptex, fract(_st - vec2<f32>(0., 2. * r.y)))) * 0.02;
-   return c;`
-  },
+  blurEntry("blur", false),
+  blurEntry("blurb", true),
   {
     name: "prev",
     type: "src",
@@ -12508,7 +12604,7 @@ function registerGeometryFunctions(synth) {
   console.log("[hydra-vertex] Registered geometry functions");
 }
 function registerLightingFunctions(synth) {
-  for (const fn of glslFunctions().filter((f) => f.name === "blur")) {
+  for (const fn of glslFunctions().filter((f) => ["blur", "blurb", "srcb", "offset", "tilt", "knee"].includes(f.name))) {
     if (!synth[fn.name]) synth.setFunction(fn);
   }
   for (const fn of lightingFunctions) {
