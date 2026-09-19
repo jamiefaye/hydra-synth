@@ -71,7 +71,7 @@
       if (hydra._vertexResizeObserver) { hydra._vertexResizeObserver.disconnect(); delete hydra._vertexResizeObserver }   // the window may change; the loops do not
       // frames per second, from the page's own animation frames
       let fps = 0; { let n = 0, t0 = performance.now(); const count = (t) => { n++; if (t - t0 >= 1000) { fps = Math.round(n * 1000 / (t - t0)); n = 0; t0 = t } requestAnimationFrame(count) }; requestAnimationFrame(count) }
-      const midi = await install(hydra, { profile: ec4 })
+      const midi = await install(hydra, { profile: ec4, sysex: true })   // sysex: click a group on screen and the EC4 goes there (knobs work without it)
 
       // ---- controls, as labelled on the device (dev/herder-ec4-labels.json)
       // Groups by what a knob belongs to (camera, switcher, monitor, seed, rig), after Rust's split;
@@ -308,7 +308,17 @@
           { group: 7, title: 'PLAY (aliases)', labels: PLAY, descs: DESC }
       ]
       const panelHost = document.getElementById('panel')
-      let panel = mountPanel(panelHost, midi, { groups: panelGroups })
+      // Click a group's title and the EC4 jumps to it (sysex select); the title of the group the EC4 is on is lit,
+      // whichever side changed it. Without sysex access the click says so and nothing else changes.
+      let ec4Group = null
+      const markGroup = () => { if (panel && panel.setActiveGroup) panel.setActiveGroup(ec4Group) }
+      const gotoGroup = (g) => {
+        if (midi.ec4.select(g)) { ec4Group = g; markGroup() } else say('EC4 not reachable over sysex (allow MIDI sysex for this page, EC4 firmware 2.x)')
+      }
+      const panelOpts = { groups: panelGroups, onGroupClick: gotoGroup }
+      let panel = mountPanel(panelHost, midi, panelOpts)
+      midi.ec4.onSelect((at) => { ec4Group = at.group; markGroup() })   // the EC4's own GROUP key reports here too
+      Promise.resolve(midi.ready).then(() => setTimeout(() => midi.ec4.query(), 300)).catch(() => {})
       // ---- the controls in a window of their own ('p', or ?panel=window): the canvas stays clean for
       // a recording or a projector, the knobs live on the laptop screen. Same controller object, so
       // nothing is synced; the popup's keys are forwarded to this page. Closing it puts the panel back.
@@ -333,13 +343,13 @@
         bar.appendChild(popupHead)
         d.body.appendChild(bar)
         panel.destroy(); panelHost.style.display = 'none'; hud.style.display = 'none'
-        panel = mountPanel(d.body, midi, { groups: panelGroups })
+        panel = mountPanel(d.body, midi, panelOpts); markGroup()
         d.addEventListener('keydown', (e) => document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey })))
         const back = () => {
           if (panelHost.style.display !== 'none') return
           hudHead.insertBefore(document.adoptNode(seedBox), hudHead.firstChild)
           panel.destroy(); panelHost.style.display = ''; hud.style.display = q.get('h') ? 'none' : ''; popupHead = null
-          panel = mountPanel(panelHost, midi, { groups: panelGroups })
+          panel = mountPanel(panelHost, midi, panelOpts); markGroup()
         }
         popup.addEventListener('pagehide', back)
       }

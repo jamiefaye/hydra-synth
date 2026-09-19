@@ -64,9 +64,16 @@ export function mountPanel (element, controller, options = {}) {
     return st.controls.get(`${channel == null ? '*' : channel}:${number}`) || st.controls.get(`*:${number}`) || null
   }
 
+  const titles = new Map()
   for (const g of opts.groups) {
     const box = document.createElement('div'); box.className = 'mp-group'
     const title = document.createElement('div'); title.className = 'mp-title'; title.textContent = `GR${String(g.group).padStart(2, '0')} ${g.title || ''}`
+    if (opts.onGroupClick) {
+      title.style.cursor = 'pointer'
+      title.title = 'click: put the controller on this group'
+      title.addEventListener('click', () => opts.onGroupClick(g.group))
+    }
+    titles.set(g.group, title)
     box.appendChild(title)
     const grid = document.createElement('div'); grid.className = 'mp-grid'
     for (let n = 1; n <= 16; n++) {
@@ -148,6 +155,8 @@ export function mountPanel (element, controller, options = {}) {
   return {
     root,
     refresh,
+    /** Mark the group the controller is on (null = none). */
+    setActiveGroup: (n) => { for (const [g, el] of titles) { el.style.color = g === n ? '#fd6' : ''; el.style.fontWeight = g === n ? 'bold' : '' } },
     destroy: () => { clearInterval(timer); root.remove() }
   }
 }

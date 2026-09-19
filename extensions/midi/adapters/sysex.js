@@ -9,8 +9,38 @@
  */
 import { parseDump, encodeDump, Ec4Image } from '../core/ec4-sysex.js'
 
+// Remote setup/group select (firmware 2.x, "special fixed commands"). Setup s and group g travel 0-based in
+// the low nibble: F0 00 00 00 4E 2C 1B 4E 28 1s 4E 24 1g F7. The EC4 sends the same message when the
+// setup or group is changed on the device, and in reply to the query F0 00 00 00 4E 20 10 F7.
+const EC4_HEAD = [0xF0, 0x00, 0x00, 0x00, 0x4E, 0x2C, 0x1B]
+const EC4_QUERY = [0xF0, 0x00, 0x00, 0x00, 0x4E, 0x20, 0x10, 0xF7]
+const selectBytes = (setup, group) => [...EC4_HEAD, 0x4E, 0x28, 0x10 | (setup - 1), 0x4E, 0x24, 0x10 | (group - 1), 0xF7]
+const parseSelect = (b) => (b.length === 14 && EC4_HEAD.every((v, i) => b[i] === v) && b[7] === 0x4E && b[8] === 0x28 && b[10] === 0x4E && b[11] === 0x24)
+  ? { setup: (b[9] & 15) + 1, group: (b[12] & 15) + 1 } : null
+
 export function ec4Tools (controller) {
+  const selectListeners = new Set()
+  const canSend = () => !!(controller.transport && controller.transport.send && controller.transport.sysex)
+  controller.onSysex((bytes) => {
+    const at = parseSelect(bytes)
+    if (!at) return
+    tools.where = at
+    for (const fn of selectListeners) { try { fn(at) } catch (e) { /* a listener's problem */ } }
+  })
   const tools = {
+    /** { setup, group } (1-based) as last reported by the device, or null. */
+    where: null,
+    /** Ask the device where it is; the answer arrives through onSelect and lands in `where`. */
+    query () { if (!canSend()) return false; controller.transport.send(EC4_QUERY); return true },
+    /** Put the device on a group (and setup; default the one it is on). 1-based. False when it cannot be sent. */
+    select (group, setup = (tools.where && tools.where.setup) || 1) {
+      if (!canSend() || !(group >= 1 && group <= 16) || !(setup >= 1 && setup <= 16)) return false
+      controller.transport.send(selectBytes(setup, group))
+      tools.where = { setup, group }
+      return true
+    },
+    /** Called with { setup, group } whenever the device reports a change (its own keys included). */
+    onSelect (fn) { selectListeners.add(fn); return () => selectListeners.delete(fn) },
     image: null,
     Ec4Image,
     parseDump,

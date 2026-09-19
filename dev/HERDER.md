@@ -146,6 +146,11 @@ is ignored. Roughshod mode runs whatever you type with the whole synth in reach.
 
 ## The EC4
 
+Click a group's title on screen (GR01 CAMA ...) and the EC4 jumps to that group, no GROUP key needed; the
+title of the group the EC4 is on is lit, and it follows the EC4's own GROUP key too. This rides on sysex
+(EC4 firmware 2.x; Chrome asks once for MIDI with sysex). Without it the knobs work as before and the
+click says why nothing moved.
+
 Setup 1 `HERD` carries the seven groups above: `dev/herder-ec4-labels.json` is the layout and
 `node extensions/midi/tools/ec4-label.js apply <backup.syx> <out.syx> dev/herder-ec4-labels.json`
 writes it over a backup of the device. Send the image with the Faderfox web editor (Load file,

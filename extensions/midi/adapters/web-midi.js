@@ -35,8 +35,16 @@ export async function connectWebMidi (controller, options = {}) {
   try {
     access = await navigator.requestMIDIAccess({ sysex: opts.sysex })
   } catch (e) {
-    console.warn('[midi] MIDI access refused:', e.message)
-    return controller
+    // sysex is a permission of its own; without it the knobs still work
+    if (opts.sysex) {
+      console.warn('[midi] no sysex access (' + e.message + '); carrying on without it')
+      opts.sysex = false
+      try { access = await navigator.requestMIDIAccess({ sysex: false }) } catch (e2) { access = null }
+    }
+    if (!access) {
+      console.warn('[midi] MIDI access refused:', e.message)
+      return controller
+    }
   }
 
   const matchIn = matcher(opts.inputFilter)
