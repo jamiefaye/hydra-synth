@@ -491,7 +491,9 @@
           midi: { inputs: midi.inputs, outputs: midi.outputs, profile: midi.profile && midi.profile.name, mode: midi.state.defaults.mode },
           groups: Object.fromEntries(Object.entries(KNOBS).map(([g, ks]) => [g, Object.fromEntries(Object.entries(ks).map(([label, f]) => [label, +f().toFixed(5)]))])),
           code1: (keepCode(), codes.seed), code2: codes.seed2,
+          codeRaw: codes.raw,   // the roughshod text: kept and restored, never run by opening a patch
           gestures: auto.layers.map(L => ({ len: Math.round(L.len), events: L.events })),
+          ...(auto.seq ? { sequence: auto.seq.steps, loop: auto.seq.loop } : {}),
           snapshot: midi.snapshot()   // raw "channel:cc" -> value, what midi.restore() takes
         }
         return state
@@ -606,7 +608,7 @@
           }).filter(L => L.events.length)
         })
         if ('sequence' in state && state.sequence !== undefined) part('sequence', () => startSequence(state.sequence, state.loop))
-        for (const [key, slot] of [['code', 'seed'], ['codeB', 'seed2'], ['code1', 'seed'], ['code2', 'seed2']]) {   // code, codeB: the names before seeds were numbered
+        for (const [key, slot] of [['code', 'seed'], ['codeB', 'seed2'], ['code1', 'seed'], ['code2', 'seed2'], ['codeRaw', 'raw']]) {   // code, codeB: the names before seeds were numbered
           if (typeof state[key] !== 'string') continue
           codes[slot] = state[key]; if (shownCode === slot) codeBox.value = state[key]
           try { localStorage.setItem(CODE_KEYS[slot], state[key]) } catch (e) { /* no storage */ }

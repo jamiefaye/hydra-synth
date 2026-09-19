@@ -148,6 +148,11 @@ against A and pulls back as A pushes in).
 | h | hide the HUD |
 | p | the controls in a window of their own (close it, or `p` again, to bring them back) |
 
+A patch holds every knob by label (`groups`), seed 1's kind and url, the view, the editor's three texts
+(`code1`, `code2`, and `codeRaw`, which is restored but never run by opening a file), recorded gestures
+(`gestures`) and a running sequence (`sequence`, `loop`). Nothing is saved on its own: a reload starts from
+the defaults, so write a patch (`w`) to keep a state.
+
 **Patches may be partial.** Only what a file names changes; everything else stays as it is. Cut a dump
 down to the part you want and open it over whatever is playing:
 
