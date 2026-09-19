@@ -86,7 +86,10 @@ There are two colour paths, and `c` flips between them (the header says which; a
 *matrix*, the default, is described next. *chain* is Hydra's own `hue().saturate().brightness().contrast()`: its HSV hue
 holds the brightest channel and full saturation, so turning a colour sheds luminance, and a loop tuned on it can run at a
 higher GAIN than the matrix allows, which keeps luminance. Patches saved before the matrix existed open on the chain, so
-they look as they were tuned.
+they look as they were tuned. The chain path also leaves alpha as the loop makes it, as it was then: outputs are written
+with alpha blending, so alpha below 1 (the seed keyed over the void, mostly) dims what is written, another loss those patches
+were tuned with. The matrix path ends each loop opaque. Measured on one saved spiral, the chain path on this page and the
+build from before the matrix give the same picture statistics to three decimals.
 
 The four knobs of a monitor are composed into one colour matrix and applied in a single multiply (`colormat()`).
 HUE turns the chroma plane and SAT scales it, in NTSC luma/chroma as on lightherder; BRT lifts; CON is a gain about

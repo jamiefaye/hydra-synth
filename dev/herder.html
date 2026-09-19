@@ -260,8 +260,13 @@
         const off = con * brt + 0.5 * (1 - con)
         return [...m[0], ...m[1], ...m[2]].map(x => x * con).concat([off, off, off])
       }
-      let colourPath = q.get('colour') === 'chain' ? 'chain' : 'matrix'
-      const OPAQUE = q.get('opaque') !== '0'   // ?opaque=0: leave alpha as the path made it, as before opaque() (for comparing)
+      let colourPath = /^\s*chain/i.test(q.get('colour') || '') ? 'chain' : 'matrix'
+      // The vertex extension writes every output with source-alpha blending, so what lands in a frame is rgb x alpha:
+      // alpha below 1 (the seed keyed over the void, mostly) dims the picture. opaque() at the end of a chain stops that.
+      // Patches tuned before it relied on the loss, so it goes with the colour path: chain = as it was, matrix = opaque.
+      // ?opaque=0 or =1 forces it either way.
+      const opaqueForced = q.get('opaque') === null ? null : !/^\s*(0|off|false|no)/i.test(q.get('opaque'))
+      const isOpaque = () => opaqueForced !== null ? opaqueForced : colourPath !== 'chain'   // ?opaque=0: leave alpha as the path made it, as before opaque() (for comparing)
       const monitor = (chain, m) => {
         // colourPath 'chain' is the front panel as it was: Hydra's hue, saturate, brightness, contrast in a row. Its HSV hue
         // holds the brightest channel and full saturation, so turning a colour sheds luminance, and patches tuned on it run
@@ -294,7 +299,7 @@
           // keyed: a seed replaces pixels only where its luminance passes the key (issue 71 in lightherder); else crossfaded
           chain = key() > 0.005 ? chain.layer(src(tex()).luma(key, 0.1).mult(solid(1, 1, 1, amount), 1)) : chain.blend(src(tex()), amount)
         }
-        return OPAQUE ? chain.opaque() : chain   // alpha is not a loop signal: keys are made fresh each pass, and what goes round is opaque
+        return isOpaque() ? chain.opaque() : chain   // alpha is not a loop signal: keys are made fresh each pass, and what goes round is opaque
       }
 
       // ---- build everything (called again when a chain's shape changes: seed kind, kaleid, key, freeze)
@@ -314,7 +319,7 @@
         if (S.frzb() > 0.5) src(o1.delay(1)).out(o1); else loop(ob, oa, B, 3, 4, { mirror: R.mirb, mzm: R.mzmb }, R.atob, R.keyb, seedsB).out(o1)
         // program: A crossfaded with B; PERI > 0 flips the crossfade every PERI seconds
         const xf = () => { const p = S.peri(); let x = S.xfad(); if (CUT.x()) x = x < 0.5 ? 1 : 0; if (p <= 0.05) return x; return (Math.floor(time / p) % 2) ? 1 - x : x }
-        (OPAQUE ? src(o0).blend(src(o1), xf).opaque() : src(o0).blend(src(o1), xf)).out(o3)
+        (isOpaque() ? src(o0).blend(src(o1), xf).opaque() : src(o0).blend(src(o1), xf)).out(o3)
         built = shape()
       }
       let lastKindKnob = Math.round(SD.knd1())
@@ -489,7 +494,7 @@
       const refreshHud = () => {
         const running = auto.macros.filter(m => m.running)
         const autoLine = (auto.rec ? `REC ${((performance.now() - auto.rec.t0) / 1000).toFixed(1)} s   ` : '') + (auto.macros.length ? `macros ${running.map(m => m.slot).join(' ') || '-'} of ${auto.macros.length}   ` : '') + (auto.glides.size ? `gliding ${auto.glides.size}   ` : '')
-        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  colour: ${colourPath}${OPAQUE ? '' : '  opaque: off'}  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 1 4 program 5 seed 2  s next seed 1  e edit  b rebuild  r reset  d dump  w write patch  o open patch  c colour path  g gesture  G stop all  m macros (opt-1..0 run them)  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + autoLine + `[${WHERE}]  colour: ${colourPath}${colourPath === 'chain' ? ' (as before)' : ''}${opaqueForced === null ? '' : '  opaque forced ' + (opaqueForced ? 'on' : 'off')}  ${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 1 4 program 5 seed 2  s next seed 1  e edit  b rebuild  r reset  d dump  w write patch  o open patch  c colour path  g gesture  G stop all  m macros (opt-1..0 run them)  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
         if (popupHead) popupHead.textContent = head.textContent
       }
       setInterval(() => {
