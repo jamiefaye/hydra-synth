@@ -29,7 +29,10 @@ const CSS = `
 .mp-value { color: #eee; }
 .mp-bar { position: absolute; left: 2px; right: 2px; bottom: 0; height: 2px; background: #666; }
 .mp-bar > i { display: block; height: 100%; background: #ff9; width: 0; }
-.mp-cell:hover .mp-tip { display: block; }
+/* the roll-over belongs to the name, not the whole cell: the value is for dragging, and a tip over it is in the way */
+.mp-label:hover ~ .mp-tip { display: block; }
+.mp-label { cursor: help; }
+.mp-cell.mp-active .mp-label:hover ~ .mp-tip { display: none; }   /* not while the knob is being dragged */
 .mp-tip { display: none; position: absolute; left: 0; bottom: 1.8em; z-index: 5; width: 26em; white-space: normal;
   background: #1b1b1b; color: #eee; border: 1px solid #665; padding: 6px 9px; line-height: 1.35; cursor: default; box-shadow: 0 2px 10px rgba(0,0,0,0.6); }
 .mp-tip-name { display: block; color: #fd6; font-weight: bold; font-size: 1.35em; letter-spacing: 0.04em; margin-bottom: 2px; }
