@@ -671,6 +671,17 @@
         const macroText = (m) => m.kind === 'gesture'
           ? `{ "kind": "gesture", "len": ${Math.round(m.len)}, "events": [\n${m.events.map(e => '  ' + JSON.stringify(e)).join(',\n')}\n] }`
           : `{ "kind": "sequence", "steps": [\n${m.steps.map(st => '  ' + JSON.stringify(st)).join(',\n')}\n] }`
+        // The box follows the slot chosen, unless it holds typing that has not been put anywhere: then it is left
+        // alone and the message says what the slot holds. An empty slot leaves the text too, which is how a macro is copied.
+        let dirty = false
+        const load = (m) => { $('slot').value = m.slot; $('name').value = m.name; $('loop').checked = !!m.loop; $('code').value = m.kind === 'code' ? m.code : macroText(m); $('msg').textContent = ''; dirty = false }
+        $('code').addEventListener('input', () => { dirty = true })
+        $('slot').onchange = () => {
+          const m = macroAt(+$('slot').value)
+          if (!m) { $('msg').textContent = ''; return }
+          if (dirty) $('msg').textContent = `slot ${m.slot} holds "${m.name}": put replaces it, edit loads it (your text is kept)`
+          else load(m)
+        }
         $('put').onclick = () => {
           const text = $('code').value, base = { slot: +$('slot').value, name: $('name').value || undefined, loop: $('loop').checked }
           let desc
@@ -678,7 +689,7 @@
             try { const j = JSON.parse(text); desc = Object.assign(Array.isArray(j) ? { steps: j } : j, base) } catch (e) { $('msg').textContent = 'not JSON: ' + e.message; return }
           } else desc = Object.assign({ kind: 'code', code: text }, base)
           const m = addMacro(desc)
-          $('msg').textContent = !m ? 'nothing to run' : (m.error || ''); draw(true)
+          $('msg').textContent = !m ? 'nothing to run' : (m.error || ''); if (m) dirty = false; draw(true)
         }
         let shown = ''
         const draw = (force) => {
@@ -699,7 +710,7 @@
               const btn = (label, fn) => { const b = d.createElement('button'); b.textContent = label; b.onclick = () => { fn(); draw(true) }; return b }
               const ops = d.createElement('span')
               ops.append(btn(m.running ? 'stop' : 'run', () => toggleMacro(m.slot)), ' ', btn('restart', () => toggleMacro(m.slot, true)), ' ')
-              ops.append(btn('edit', () => { $('slot').value = m.slot; $('name').value = m.name; $('loop').checked = !!m.loop; $('code').value = m.kind === 'code' ? m.code : macroText(m); $('msg').textContent = '' }), ' ')
+              ops.append(btn('edit', () => load(m)), ' ')
               ops.append(btn('delete', () => removeMacro(m.slot)))
               cell(ops)
               $('rows').appendChild(tr)

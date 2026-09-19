@@ -210,7 +210,9 @@ the top; the pushes of the EC4's MACR group (GR08) do the same for all sixteen; 
 everything and leaves the slots as they are. `m` opens the manager: every slot with its name, kind and
 state, run/stop, restart, delete, rename, and a text box. `edit` puts any macro in the box as text: code as
 code, a gesture or a sequence as JSON (a gesture's events are `[milliseconds, knob, value]`, one to a line,
-so a take can be read, trimmed and retimed by hand); `put in slot and run` takes either back. It is a window of its
+so a take can be read, trimmed and retimed by hand); `put in slot and run` takes either back. Choosing a slot loads what it holds, unless the box has typing
+that has not been put anywhere (then it is kept, and `put` replaces the slot); an empty slot leaves the text,
+which is how a macro is copied. It is a window of its
 own, or a box over the picture if pop-ups are blocked.
 
 **Glides.** With GLID above 0 an opened patch arrives over that many seconds instead of at once; a
