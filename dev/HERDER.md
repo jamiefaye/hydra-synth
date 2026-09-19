@@ -116,6 +116,8 @@ Row 3: XFAD PERI SDLY Void. Row 4: SKAL.
 | b | rebuild the loops |
 | r | reset every knob |
 | d | dump the whole state as JSON to the console and clipboard |
+| w | write a patch: the same JSON to a file (a save dialog in Chrome, a download elsewhere) |
+| o | open a patch; dropping the file on the page does the same. Knobs, seed and sketch code come back and the EC4's displays follow; the picture regrows from the seed |
 | h | hide the HUD |
 | p | the controls in a window of their own (close it, or `p` again, to bring them back) |
 
