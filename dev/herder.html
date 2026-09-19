@@ -345,6 +345,7 @@
       }
       const closePanelWindow = () => { if (popup && !popup.closed) popup.close(); popup = null }
       if (q.get('panel') === 'window') setTimeout(openPanelWindow, 0)
+      const resetAll = () => { for (const o of [A, B, S, SD, R, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
       let note = '', noteUntil = 0   // a message (saved, opened, ...) leads the header for a few seconds
       const refreshHud = () => {
         head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + `${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  e edit  b rebuild  r reset  d dump  w write patch  o open patch  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
@@ -366,7 +367,7 @@
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
         if (e.key === 'p') { if (popup && !popup.closed) closePanelWindow(); else openPanelWindow() }
         if (e.key === '0') setView('grid'); if (e.key === '1') setView('a'); if (e.key === '2') setView('b'); if (e.key === '3') setView('seed'); if (e.key === '4') setView('program')
-        if (e.key === 'r') { for (const o of [A, B, S, SD, R, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
+        if (e.key === 'r') resetAll()
         if (e.key === 's') setSeed(seedOrder[(seedOrder.indexOf(seedKind) + 1) % seedOrder.length])
       })
       // ---- state: 'd' logs it as JSON (and copies it to the clipboard), 'w' writes it to a file, 'o' opens one
@@ -397,14 +398,33 @@
       // A patch is that JSON in a file. What comes back is the knobs (snapshot), the seed and the sketch
       // code; the picture regrows from the seed. The rest of the file is there to be read.
       const say = (msg) => { note = msg; noteUntil = performance.now() + 4000; console.log('[herder] ' + msg) }
+      // A patch may be partial: only what it names changes, the rest stays as it is. So a dump can be cut
+      // down to a camera move, a colour, a seed, and opened over whatever is playing ('r' first, or
+      // "reset": true in the file, opens it over the defaults). Knobs go by label in "groups"; the raw
+      // "snapshot" is used only when there are no groups.
+      const KNOBS = {
+        CAMA: Object.fromEntries(Object.values(A).map((f, i) => [CAM[i], f])), CAMB: Object.fromEntries(Object.values(B).map((f, i) => [CAM[i], f])),
+        SWCH: Object.fromEntries(Object.values(S).map((f, i) => [SW[i], f])), SEED: Object.fromEntries(Object.values(SD).map((f, i) => [SEED[i], f])),
+        RIG: Object.fromEntries(Object.values(R).map((f, i) => [RIG[i], f])),
+        MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => ['hue', 'sat', 'brt', 'con'].map(k => [`${m}${k.toUpperCase()}`, M[m][k]])))
+      }
       const applyState = (state) => {
-        if (!state || state.page !== 'herder' || !state.snapshot) throw new Error('not a herder patch')
-        midi.restore(state.snapshot)
+        const known = ['groups', 'snapshot', 'seed', 'code', 'view', 'reset']
+        if (!state || typeof state !== 'object' || (state.page && state.page !== 'herder') || !known.some(k => k in state)) throw new Error('not a herder patch')
+        const unknown = []
+        if (state.reset) resetAll()
+        if (state.groups) {
+          for (const [g, knobs] of Object.entries(state.groups)) for (const [label, v] of Object.entries(knobs || {})) {
+            const f = KNOBS[g] && KNOBS[g][label]
+            if (f && Number.isFinite(v)) f.set(v); else unknown.push(`${g}.${label}`)
+          }
+        } else if (state.snapshot) midi.restore(state.snapshot)
         if (typeof state.code === 'string') { codeBox.value = state.code; try { localStorage.setItem('herder.code', state.code) } catch (e) { /* no storage */ } }
-        lastKindKnob = Math.round(SD.kind())
-        setSeed((state.seed && state.seed.kind) || seedKind, (state.seed && state.seed.url) || '')   // rebuilds the loops
+        if (state.seed && state.seed.kind) { lastKindKnob = Math.round(SD.kind()); setSeed(state.seed.kind, state.seed.url || '') }   // rebuilds the loops
+        else if (typeof state.code === 'string' && seedKind === 'sketch') build()
         if (state.view && views[state.view]) setView(state.view)
         midi.refresh()
+        return unknown
       }
       const PATCH_TYPES = [{ description: 'Herder patch', accept: { 'application/json': ['.json'] } }]
       const savePatch = async () => {
@@ -424,7 +444,7 @@
         }
       }
       const loadPatchFile = async (file) => {
-        try { applyState(JSON.parse(await file.text())); say('opened ' + file.name) } catch (e) { say(`could not open ${file.name}: ${e.message}`) }
+        try { const unknown = applyState(JSON.parse(await file.text())); say('opened ' + file.name + (unknown.length ? '  (unknown: ' + unknown.join(' ') + ')' : '')) } catch (e) { say(`could not open ${file.name}: ${e.message}`) }
       }
       const openPatch = async () => {
         try {

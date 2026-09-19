@@ -121,6 +121,18 @@ Row 3: XFAD PERI SDLY Void. Row 4: SKAL.
 | h | hide the HUD |
 | p | the controls in a window of their own (close it, or `p` again, to bring them back) |
 
+**Patches may be partial.** Only what a file names changes; everything else stays as it is. Cut a dump
+down to the part you want and open it over whatever is playing:
+
+```json
+{ "groups": { "CAMA": { "ZOOM": 0.97, "ROT": 0.1 }, "MONS": { "3HUE": -0.1 } } }
+```
+
+Knobs go by their labels, as in the dump's `groups`. `seed`, `code` and `view` are each optional too.
+`"reset": true` puts every knob at its default first, so the file opens over the defaults rather than
+over what is playing (`r` then `o` does the same by hand). A label the page does not know is skipped
+and named in the header. The raw `snapshot` is used only by a file with no `groups`.
+
 URL parameters: `mode=gpu|gl` (WebGPU is the default), `seed=osc|noise|voronoi|cam|screen|video|image|sketch`,
 `url=` for a video or image seed, `panel=window`, `h=1` to start with the HUD hidden, `res=WxH` for the
 loops' resolution. The resolution is fixed for the run, by default the display's device pixels (3840x2160
