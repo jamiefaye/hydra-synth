@@ -49,6 +49,7 @@
       //   GR04 monitors: hue/sat/brightness/contrast of the four monitors (A direct, A mirror, B direct, B mirror)
       // Query: mode = gl | gpu, seed = osc|noise|voronoi|cam|screen|video|image, url = for video/image, h = hide hud,
       //   res = WxH (the loops' resolution for the run; default the display's device pixels), panel = window
+      //   float = 0 for 8-bit outputs (default half-float: the loops keep headroom and fine steps between frames)
       const q = new URLSearchParams(location.search)
       const mode = q.get('mode') || 'gpu'
       const canvas = document.getElementById('c')
@@ -65,7 +66,7 @@
       const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
       const { install, ec4 } = await import('../extensions/midi/index.js')
       const { mountPanel } = await import('../extensions/midi/ui/panel.js')
-      const hydra = await createHydra({ canvas, width: W, height: H, detectAudio: false, makeGlobal: true, numOutputs: 4, filter: 'linear', useWGSL: mode === 'gpu' })
+      const hydra = await createHydra({ canvas, width: W, height: H, detectAudio: false, makeGlobal: true, numOutputs: 4, filter: 'linear', float: q.get('float') !== '0', useWGSL: mode === 'gpu' })
       window.__hydra = hydra
       if (hydra._vertexResizeObserver) { hydra._vertexResizeObserver.disconnect(); delete hydra._vertexResizeObserver }   // the window may change; the loops do not
       // frames per second, from the page's own animation frames
@@ -87,12 +88,12 @@
       const GROUPS = { 1: CAM, 2: CAM, 3: SW, 4: MON, 5: SEED, 6: RIG, 7: PLAY }
 
       const camControls = (g) => ({   // key order = CAM label order (the dump relies on it)
-        gain:   midi.cc([g, 1], { min: 0.5, max: 2.5, init: 1.02, curve: 'log', steps: 200, fine: 10 }),
+        gain:   midi.cc([g, 1], { min: 0.8, max: 1.25, init: 1, curve: 'log', steps: 200, fine: 10 }),
         zoom:   midi.cc([g, 2], { min: 0.5, max: 2, init: 1.02, curve: 'log', steps: 300, fine: 10 }),   // unity mid-travel, ~0.5% a detent (Rust's step)
         rot:    midi.cc([g, 3], { min: 0, max: 6.283, init: 0.02, wrap: true, steps: 360, fine: 10 }),
         x:      midi.cc([g, 4], { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
         y:      midi.cc([g, 5], { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
-        blur:   midi.cc([g, 6], { min: 0, max: 0.02, init: 0.003, curve: 'exp', steps: 100, fine: 10 }),   // 0 = sharp lens (bilinear sampling still softens a fraction of a texel)
+        blur:   midi.cc([g, 6], { min: 0, max: 0.02, init: 0, curve: 'exp', steps: 100, fine: 10 }),   // 0 = sharp lens (bilinear sampling still softens a fraction of a texel)
         delay:  midi.cc([g, 7], { min: 1, max: 29, init: 1, steps: 28 }),
         persist: midi.cc([g, 8], { min: 0, max: 1, init: 0, steps: 100 }),
         pitch:  midi.cc([g, 9], { min: -0.7, max: 0.7, init: 0, steps: 200, fine: 10 }),
@@ -132,8 +133,8 @@
         mzmb: midi.cc([6, 4], { min: 0.5, max: 2, init: 0.9, curve: 'log', steps: 100, fine: 10 }),
         atob: midi.cc([6, 5], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
         btoa: midi.cc([6, 6], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        keya: midi.cc([6, 7], { min: 0, max: 1, init: 0, steps: 100, fine: 10 }),
-        keyb: midi.cc([6, 8], { min: 0, max: 1, init: 0, steps: 100, fine: 10 })
+        keya: midi.cc([6, 7], { min: 0, max: 1, init: 0.35, steps: 100, fine: 10 }),
+        keyb: midi.cc([6, 8], { min: 0, max: 1, init: 0.35, steps: 100, fine: 10 })
       }
       // PLAY: the knobs a set rides, aliased from their homes (turn either, both displays follow)
       const playOf = [[1, 1], [1, 2], [1, 3], [5, 1], [2, 1], [2, 2], [2, 3], [5, 2], [3, 1], [3, 2], [5, 5], [3, 7], [5, 4]]
@@ -193,13 +194,17 @@
       const monitor = (chain, m) => chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
       const loop = (self, other, L, monDirect, monMirror, glass, link, key, amount) => {
         const dark = S.void() > 0.5                              // a camera sees an unlit room past the monitor
-        const camera = (dark ? blurb : blur)(self.delay(() => Math.round(L.delay())), L.blur)
-        const direct = monitor(camera, monDirect).scale(L.zoom).offset(L.x, L.y).tilt(L.pitch, L.yaw, L.lens).rotate(L.rot)
-        const reflected = monitor((dark ? srcb : src)(self).scale(glass.mzm, -1, 1), monMirror)
+        const seen = () => self.delay(() => Math.round(L.delay()))
+        const lens = () => L.blur() > 0 ? (dark ? blurb : blur)(seen(), L.blur) : (dark ? srcb : src)(seen())   // focus at 0 = the sampler alone
+        // one camera, one pose: it turns and slides as a whole, so the monitor in the glass moves with the one seen direct
+        const pose = (chain) => chain.scale(L.zoom).offset(L.x, L.y).tilt(L.pitch, L.yaw, L.lens).rotate(L.rot)
+        const direct = pose(monitor(lens(), monDirect))
+        const reflected = pose(monitor(lens().scale(glass.mzm, -1, 1), monMirror))
         let chain = direct
-          .blend(reflected, glass.mirror)                      // beam splitter
+          .blend(reflected, glass.mirror)                      // beam splitter: the two halves sum to one
           .blend(src(other), link)                             // cross-link from the other loop
-          .contrast(L.gain)                                    // loop gain: the camera's exposure
+          .color(L.gain, L.gain, L.gain)                       // loop gain: exposure, a gain about black (contrast pivots on mid-grey and crushes the echoes)
+          .knee(2)                                             // the rails: past white the signal bends onto 2 instead of running (float outputs keep the reserve)
           .blend(src(self.delay(() => Math.round(L.pdly()))), L.persist)   // PRST at PDLY frames back
         if (key() > 0.005) {
           // keyed: the seed replaces pixels only where its luminance passes the key (issue 71 in lightherder)
@@ -212,7 +217,7 @@
 
       // ---- build everything (called again when a chain's shape changes: seed kind, kaleid, key, freeze)
       let built = {}
-      const shape = () => JSON.stringify({ seedKind, kal: kalOn(), keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
+      const shape = () => JSON.stringify({ seedKind, kal: kalOn(), bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
       const build = () => {
         seedChain().out(o2)
         const swap = S.rvrs() > 0.5
@@ -262,11 +267,11 @@
 
       // ---- HUD: header + one group's 4x4 block; [ and ] change the group shown
       const DESC = {
-        GAIN: 'Loop gain: the camera\'s exposure, contrast on the camera path. Fractals live just above 1. Push for fine.',
+        GAIN: 'Loop gain: the camera\'s exposure, a gain about black. At 1 an echo comes back as bright as it left. Push for fine.',
         ZOOM: 'Magnification per pass (lens zoom, not a dolly): above 1 zooms in (tunnel), below 1 recedes into the void. 0.5 to 2, unity mid-travel.',
         ROT: 'Camera rotation per pass in radians, wraps. With zoom this makes spirals.',
         X: 'Camera off the monitor\'s axis, sideways.', Y: 'Camera off the monitor\'s axis, up and down.',
-        BLUR: 'Lens focus: softening radius as a fraction of width. 0 = sharp (sampling still softens a fraction of a texel).',
+        BLUR: 'Lens focus: softening radius as a fraction of width. 0 = sharp, the blur is out of the path (sampling still softens a fraction of a texel).',
         DLAY: 'Camera delay in frames (1 to 29), a frame delay box after the camera. Higher lags and breathes.',
         PRST: 'Persistence: how much of the frame PDLY frames back is blended in (a comb filter; ours, not Blair\'s).',
         PDLY: 'Persistence delay in frames: 1 smears along the motion like a slow shutter, 15 echoes.',

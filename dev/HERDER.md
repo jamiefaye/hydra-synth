@@ -50,7 +50,7 @@ your finger does:
 
 | encoder | knob | what it does |
 |---|---|---|
-| 1 | GAIN | loop gain, the camera's exposure. Fractals live just above 1. Fine push. |
+| 1 | GAIN | loop gain, the camera's exposure: a gain about black, 0.8 to 1.25. At 1 an echo comes back as bright as it left; above 1 the loop climbs to white. Fine push. |
 | 2 | ZOOM | magnification per pass, 0.5 to 2, unity mid-travel. A lens zoom, not a dolly. |
 | 3 | ROT | roll per pass, in radians, wraps. |
 | 4, 5 | X, Y | camera off the monitor's axis. |
@@ -146,6 +146,11 @@ Full screen is Ctrl+Cmd+F on the Mac; `h` hides the HUD; `p` puts the controls o
 A hidden tab stops rendering (browsers pause animation frames), so keep the page visible.
 
 ## Where it differs from Blair's rig
+
+The loops run in half-float frames (`?float=0` for 8-bit): light past white and faint trails survive
+from one pass to the next, and after the gain a knee bends anything over white onto twice white
+instead of clipping it. That is lightherder's amplifier rail; on Blair's rig the camera's highlight
+roll-off and the panel's ceiling do the job. At 4K the thirty-frame rings take about 6 GB this way.
 
 The rig itself: https://www.thelightherder.com/ . A faithful software copy in Rust, which this
 borrows its grammar from: https://github.com/bddap-bot/lightherder .
