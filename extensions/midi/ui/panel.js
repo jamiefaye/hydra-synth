@@ -104,12 +104,14 @@ export function mountPanel (element, controller, options = {}) {
         controller.handleMessage([(on ? 0x90 : 0x80) | (((push.channel || 1) - 1) & 0x0f), push.note, on ? 100 : 0])
       }
 
+      const holdButton = /^[a-z]/.test(label)
       let drag = null
       cell.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return
         cell.setPointerCapture(e.pointerId)
         drag = { y: e.clientY, moved: 0, fine: e.shiftKey, pushedByShift: false }
         if (e.shiftKey) { setPushed(true); drag.pushedByShift = true }
+        else if (holdButton) setPushed(true)   // a push-only button is held for as long as the pointer is
         cell.classList.add('mp-active')
         e.preventDefault()
       })
@@ -122,6 +124,7 @@ export function mountPanel (element, controller, options = {}) {
       const endDrag = (e) => {
         if (!drag) return
         cell.classList.remove('mp-active')
+        if (holdButton && !drag.pushedByShift) { setPushed(false); drag = null; return }
         const tap = drag.moved === 0 && !drag.pushedByShift
         if (drag.pushedByShift) setPushed(false)
         drag = null

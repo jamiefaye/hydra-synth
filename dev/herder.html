@@ -35,6 +35,7 @@
       </div>
       <div id="editor">
         <div>Hydra code. <label><input type="radio" name="emode" value="seed" checked /> seed: a chain (no out() needed) that becomes the seed on o2, loops untouched</label>
+        <label><input type="radio" name="emode" value="seedb" /> seed B: the same for loop B's own seed (o4)</label>
         <label><input type="radio" name="emode" value="raw" /> roughshod: run as-is, anything goes (b rebuilds the loops)</label>
         <span style="float:right">ctrl+enter apply, esc close</span></div>
         <textarea id="code" spellcheck="false">osc(12, 0.05, 1).kaleid(5).rotate(() => time * 0.1)</textarea>
@@ -44,7 +45,7 @@
     </div>
     <script type="module">
       // Two Light Herder loops on the EC4.
-      //   o0 loop A (GR01)   o1 loop B (GR02)   o2 the seed   o3 program = A crossfaded with B (GR03 XFAD)
+      //   o0 loop A (GR01)   o1 loop B (GR02)   o2 the seed   o3 program = A crossfaded with B (GR03 XFAD)   o4 loop B's own seed (SEED KndB)
       //   GR03 switcher panel: cross-links, luma keys, crossfade, period, seed delay, freezes, grid
       //   GR04 monitors: hue/sat/brightness/contrast of the four monitors (A direct, A mirror, B direct, B mirror)
       // Query: mode = gl | gpu, seed = osc|noise|voronoi|cam|screen|video|image, url = for video/image, h = hide hud,
@@ -66,7 +67,7 @@
       const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
       const { install, ec4 } = await import('../extensions/midi/index.js')
       const { mountPanel } = await import('../extensions/midi/ui/panel.js')
-      const hydra = await createHydra({ canvas, width: W, height: H, detectAudio: false, makeGlobal: true, numOutputs: 4, filter: 'linear', float: q.get('float') !== '0', useWGSL: mode === 'gpu' })
+      const hydra = await createHydra({ canvas, width: W, height: H, detectAudio: false, makeGlobal: true, numOutputs: 5, filter: 'linear', float: q.get('float') !== '0', useWGSL: mode === 'gpu' })
       window.__hydra = hydra
       if (hydra._vertexResizeObserver) { hydra._vertexResizeObserver.disconnect(); delete hydra._vertexResizeObserver }   // the window may change; the loops do not
       // frames per second, from the page's own animation frames
@@ -82,9 +83,9 @@
       const CAM  = pad(['GAIN','ZOOM','ROT','X','Y','BLUR','DLAY','PRST','PTCH','YAW','LENS','PDLY']); CAM[15] = 'home'
       const SW   = pad(['XFAD','PERI','Rvrs','Frza','Frzb','Grid','Void']); SW[15] = 'view'
       const MON  = []; for (let m = 1; m <= 4; m++) MON.push(`${m}HUE`, `${m}SAT`, `${m}BRT`, `${m}CON`)
-      const SEED = pad(['LEVA','LEVB','SFRQ','SKAL','SDLY','Kind'])
+      const SEED = pad(['LEVA','LEVB','SFRQ','SKAL','SDLY','Kind','KndB','FRQB','KALB','cuta','cutb','cutx'])
       const RIG  = pad(['MIRA','MZMA','MIRB','MZMB','AtoB','BtoA','KEYA','KEYB'])
-      const PLAY = pad(['GNA','ZMA','RTA','LVA','GNB','ZMB','RTB','LVB','XFAD','PERI','SDLY','Void','SKAL'])
+      const PLAY = pad(['GNA','ZMA','RTA','LVA','GNB','ZMB','RTB','LVB','XFAD','PERI','SDLY','Void','SKAL','RBTH','ZBTH','Cntr'])
       const GROUPS = { 1: CAM, 2: CAM, 3: SW, 4: MON, 5: SEED, 6: RIG, 7: PLAY }
 
       const camControls = (g) => ({   // key order = CAM label order (the dump relies on it)
@@ -124,8 +125,14 @@
         sfrq: midi.cc([5, 3], { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
         skal: midi.cc([5, 4], { min: 0, max: 12, init: 0, steps: 12 }),   // 0 = the seed as itself
         sdly: midi.cc([5, 5], { min: 1, max: 29, init: 1, steps: 28 }),
-        kind: midi.cc([5, 6], { min: 0, max: 5, init: 0, steps: 5 })    // osc noise voronoi cam screen sketch
+        kind: midi.cc([5, 6], { min: 0, max: 5, init: 0, steps: 5 }),   // osc noise voronoi cam screen sketch
+        kndb: midi.cc([5, 7], { min: 0, max: 6, init: 0, steps: 6 }),   // loop B's seed: 0 = the same seed as A, then osc noise voronoi cam screen sketch
+        frqb: midi.cc([5, 8], { min: 1, max: 60, init: 8, curve: 'log', steps: 100 }),
+        kalb: midi.cc([5, 9], { min: 0, max: 12, init: 0, steps: 12 })
       }
+      // cut: the switcher's foot pedal. While held the seed goes in whole (cuta, cutb) or the program flips to
+      // its other end (cutx); on release the knob's value stands again and what was dropped in echoes round.
+      const CUT = { a: midi.note([5, 10]), b: midi.note([5, 11]), x: midi.note([5, 12]) }
       const R = {   // the rig: glass and cabling, set per piece
         mira: midi.cc([6, 1], { min: 0, max: 1, init: 0.35, steps: 100, fine: 10 }),
         mzma: midi.cc([6, 2], { min: 0.5, max: 2, init: 0.9, curve: 'log', steps: 100, fine: 10 }),
@@ -139,6 +146,11 @@
       // PLAY: the knobs a set rides, aliased from their homes (turn either, both displays follow)
       const playOf = [[1, 1], [1, 2], [1, 3], [5, 1], [2, 1], [2, 2], [2, 3], [5, 2], [3, 1], [3, 2], [5, 5], [3, 7], [5, 4]]
       playOf.forEach((home, i) => midi.alias([7, i + 1], home))
+      const PL = {   // PLAY's own knobs: both cameras at once, on top of each one's ROT and ZOOM
+        rbth: midi.cc([7, 14], { min: 0, max: 6.283, init: 0, wrap: true, steps: 360, fine: 10 }),
+        zbth: midi.cc([7, 15], { min: 0.5, max: 2, init: 1, curve: 'log', steps: 300, fine: 10 }),
+        cntr: midi.cc([7, 16], { min: 0, max: 1, init: 0, steps: 1 })   // contra: camera B takes them the other way
+      }
       const mon = (m) => ({
         hue: midi.cc([4, (m - 1) * 4 + 1], { min: -0.5, max: 0.5, init: 0, steps: 100, fine: 10 }),
         sat: midi.cc([4, (m - 1) * 4 + 2], { min: 0, max: 2, init: 1, steps: 100, fine: 10 }),
@@ -146,7 +158,7 @@
         con: midi.cc([4, (m - 1) * 4 + 4], { min: 0.5, max: 2, init: 1, curve: 'log', steps: 100, fine: 10 })
       })
       const M = [null, mon(1), mon(2), mon(3), mon(4)]   // 1 = A direct, 2 = A mirror, 3 = B direct, 4 = B mirror
-      const P = { A, B, S, M, SD, R }
+      const P = { A, B, S, M, SD, R, PL, CUT }
 
       o0.setDepth(30); o1.setDepth(30); o2.setDepth(30)
 
@@ -156,48 +168,61 @@
       let seedKind = q.get('seed') || 'osc'
       let seedUrl = q.get('url') || ''
       seedSel.value = seedKind; urlBox.value = seedUrl
-      let s0kind = null
-      const ensureSource = (kind) => {
-        if (kind === 'cam' && s0kind !== 'cam') { s0.initCam(); s0kind = 'cam' }
-        if (kind === 'screen' && s0kind !== 'screen') { s0.initScreen(); s0kind = 'screen' }
-        if (kind === 'video' && s0kind !== 'video:' + seedUrl) { if (seedUrl) { s0.initVideo(seedUrl); s0kind = 'video:' + seedUrl } }
-        if (kind === 'image' && s0kind !== 'image:' + seedUrl) { if (seedUrl) { s0.initImage(seedUrl); s0kind = 'image:' + seedUrl } }
+      const srcKind = { s0: null, s1: null }
+      const ensureSource = (kind, sN = s0, slot = 's0') => {
+        const want = (kind === 'video' || kind === 'image') ? kind + ':' + seedUrl : kind
+        if (srcKind[slot] === want) return
+        if (kind === 'cam') sN.initCam(); else if (kind === 'screen') sN.initScreen()
+        else if (kind === 'video') { if (!seedUrl) return; sN.initVideo(seedUrl) } else if (kind === 'image') { if (!seedUrl) return; sN.initImage(seedUrl) } else return
+        srcKind[slot] = want
       }
-      const kalOn = () => Math.round(SD.skal()) >= 2
-      const kal = (chain) => kalOn() ? chain.kaleid(() => Math.max(2, Math.round(SD.skal()))) : chain
-      // ---- user code: a seed expression, or roughshod
+      // ---- user code: a seed expression for A, one for B, or roughshod. One text box, three texts.
       const editor = document.getElementById('editor'), codeBox = document.getElementById('code'), everr = document.getElementById('everr')
-      try { const saved = localStorage.getItem('herder.code'); if (saved) codeBox.value = saved } catch (e) { /* no storage */ }
+      const codes = { seed: codeBox.value, seedb: 'shape(4, 0.3, 0.01).rotate(() => time * 0.2)', raw: '' }
+      const CODE_KEYS = { seed: 'herder.code', seedb: 'herder.codeB', raw: 'herder.codeRaw' }
+      for (const k of Object.keys(codes)) { try { const saved = localStorage.getItem(CODE_KEYS[k]); if (saved) codes[k] = saved } catch (e) { /* no storage */ } }
       const editMode = () => document.querySelector('input[name=emode]:checked').value
-      const evalSeed = () => {
-        // seed mode: a chain; a trailing .out(...) is a habit, so strip it (the page outputs to o2)
-        const text = codeBox.value.trim().replace(/\.out\s*\([^)]*\)\s*;?\s*$/, '')
-        const chain = (0, eval)(text)
+      let shownCode = editMode(); codeBox.value = codes[shownCode]
+      const keepCode = () => { codes[shownCode] = codeBox.value; try { localStorage.setItem(CODE_KEYS[shownCode], codeBox.value) } catch (e) { /* no storage */ } }
+      document.querySelectorAll('input[name=emode]').forEach(r => r.addEventListener('change', () => { keepCode(); shownCode = editMode(); codeBox.value = codes[shownCode] }))
+      const evalSeed = (text) => {
+        // seed mode: a chain; a trailing .out(...) is a habit, so strip it (the page chooses the output)
+        const chain = (0, eval)(text.trim().replace(/\.out\s*\([^)]*\)\s*;?\s*$/, ''))
         if (!chain || typeof chain.out !== 'function') throw new Error('seed code must be a chain, e.g. osc(10).kaleid(4)')
         return chain
       }
-      const seedChain = () => {
-        switch (seedKind) {
+      // a seed: its kind, its frequency and kaleid knobs, its sketch text, its external source
+      const kalOf = (knob) => Math.round(knob()) >= 2
+      const seedChainOf = (kind, frq, kalKnob, code, sN, slot) => {
+        const kal = (chain) => kalOf(kalKnob) ? chain.kaleid(() => Math.max(2, Math.round(kalKnob()))) : chain
+        switch (kind) {
           case 'sketch': {
-            try { everr.textContent = ''; return kal(evalSeed()) } catch (e) { everr.textContent = e.message; return kal(osc(SD.sfrq, 0.05, 1)) }
+            try { everr.textContent = ''; return kal(evalSeed(code)) } catch (e) { everr.textContent = e.message; return kal(osc(frq, 0.05, 1)) }
           }
-          case 'noise': return kal(noise(SD.sfrq, 0.1).brightness(0.4).contrast(1.6))
-          case 'voronoi': return kal(voronoi(SD.sfrq, 0.3, 0.3))
-          case 'cam': case 'screen': case 'video': case 'image': ensureSource(seedKind); return kal(src(s0))
-          default: return kal(osc(SD.sfrq, 0.05, 1))
+          case 'noise': return kal(noise(frq, 0.1).brightness(0.4).contrast(1.6))
+          case 'voronoi': return kal(voronoi(frq, 0.3, 0.3))
+          case 'cam': case 'screen': case 'video': case 'image': ensureSource(kind, sN, slot); return kal(src(sN))
+          default: return kal(osc(frq, 0.05, 1))
         }
       }
-      // the seed as seen by the loops: o2, delayed by SDLY frames
-      const seedTex = () => o2.delay(() => Math.round(SD.sdly()))
+      const seedOrderB = ['same', 'osc', 'noise', 'voronoi', 'cam', 'screen', 'sketch']
+      const seedKindB = () => seedOrderB[Math.round(SD.kndb())] || 'same'
+      // the seed as seen by a loop, delayed by SDLY frames: o2, or for loop B its own seed on o4
+      const seedTexA = () => o2.delay(() => Math.round(SD.sdly()))
+      const seedTexB = () => seedKindB() === 'same' ? seedTexA() : o4.delay(() => Math.round(SD.sdly()))
 
       // ---- one loop: own output, own controls, the other loop's output for the cross-link
       const monitor = (chain, m) => chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
-      const loop = (self, other, L, monDirect, monMirror, glass, link, key, amount) => {
+      const loop = (self, other, L, monDirect, monMirror, glass, link, key, amount, seedTex) => {
         const dark = S.void() > 0.5                              // a camera sees an unlit room past the monitor
         const seen = () => self.delay(() => Math.round(L.delay()))
         const lens = () => L.blur() > 0 ? (dark ? blurb : blur)(seen(), L.blur) : (dark ? srcb : src)(seen())   // focus at 0 = the sampler alone
         // one camera, one pose: it turns and slides as a whole, so the monitor in the glass moves with the one seen direct
-        const pose = (chain) => chain.scale(L.zoom).offset(L.x, L.y).tilt(L.pitch, L.yaw, L.lens).rotate(L.rot)
+        // RBTH and ZBTH ride on top for both cameras; with Cntr camera B takes them the other way
+        const contra = () => L === B && PL.cntr() > 0.5
+        const zoom = () => L.zoom() * (contra() ? 1 / PL.zbth() : PL.zbth())
+        const rot = () => L.rot() + (contra() ? -1 : 1) * PL.rbth()
+        const pose = (chain) => chain.scale(zoom).offset(L.x, L.y).tilt(L.pitch, L.yaw, L.lens).rotate(rot)
         const direct = pose(monitor(lens(), monDirect))
         const reflected = pose(monitor(lens().scale(glass.mzm, -1, 1), monMirror))
         let chain = direct
@@ -217,15 +242,18 @@
 
       // ---- build everything (called again when a chain's shape changes: seed kind, kaleid, key, freeze)
       let built = {}
-      const shape = () => JSON.stringify({ seedKind, kal: kalOn(), bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
+      const shape = () => JSON.stringify({ seedKind, kal: kalOf(SD.skal), sb: seedKindB(), kalb: kalOf(SD.kalb), bla: A.blur() > 0, blb: B.blur() > 0, keya: R.keya() > 0.005, keyb: R.keyb() > 0.005, fa: S.frza() > 0.5, fb: S.frzb() > 0.5, rv: S.rvrs() > 0.5, vd: S.void() > 0.5 })
       const build = () => {
-        seedChain().out(o2)
+        seedChainOf(seedKind, SD.sfrq, SD.skal, codes.seed, s0, 's0').out(o2)
+        const ownB = seedKindB() !== 'same'   // o4 keeps a thirty-frame ring only while loop B has a seed of its own
+        if (ownB) { if (o4.depth !== 30) o4.setDepth(30); seedChainOf(seedKindB(), SD.frqb, SD.kalb, codes.seedb, s1, 's1').out(o4) } else { if (o4.depth !== 2) o4.setDepth(2); solid(0, 0, 0, 1).out(o4) }
+        const lev = (knob, cut) => () => cut() ? 1 : knob()
         const swap = S.rvrs() > 0.5
         const [oa, ob] = swap ? [o1, o0] : [o0, o1]
-        if (S.frza() > 0.5) src(o0.delay(1)).out(o0); else loop(oa, ob, A, 1, 2, { mirror: R.mira, mzm: R.mzma }, R.btoa, R.keya, SD.leva).out(o0)
-        if (S.frzb() > 0.5) src(o1.delay(1)).out(o1); else loop(ob, oa, B, 3, 4, { mirror: R.mirb, mzm: R.mzmb }, R.atob, R.keyb, SD.levb).out(o1)
+        if (S.frza() > 0.5) src(o0.delay(1)).out(o0); else loop(oa, ob, A, 1, 2, { mirror: R.mira, mzm: R.mzma }, R.btoa, R.keya, lev(SD.leva, CUT.a), seedTexA).out(o0)
+        if (S.frzb() > 0.5) src(o1.delay(1)).out(o1); else loop(ob, oa, B, 3, 4, { mirror: R.mirb, mzm: R.mzmb }, R.atob, R.keyb, lev(SD.levb, CUT.b), seedTexB).out(o1)
         // program: A crossfaded with B; PERI > 0 flips the crossfade every PERI seconds
-        const xf = () => { const p = S.peri(); const x = S.xfad(); if (p <= 0.05) return x; return (Math.floor(time / p) % 2) ? 1 - x : x }
+        const xf = () => { const p = S.peri(); let x = S.xfad(); if (CUT.x()) x = x < 0.5 ? 1 : 0; if (p <= 0.05) return x; return (Math.floor(time / p) % 2) ? 1 - x : x }
         src(o0).blend(src(o1), xf).out(o3)
         built = shape()
       }
@@ -243,7 +271,7 @@
 
       // ---- views
       let view = 'program'
-      const views = { program: () => render(o3), a: () => render(o0), b: () => render(o1), seed: () => render(o2), grid: () => render() }
+      const views = { program: () => render(o3), a: () => render(o0), b: () => render(o1), seed: () => render(o2), seedb: () => render(o4), grid: () => render() }
       const setView = (v) => { view = v; views[v]() }
       const viewPush = midi.note([3, 16], { toggle: true })
       let lastViewPush = viewPush(), lastGrid = S.grid() > 0.5
@@ -251,9 +279,10 @@
       setView('program')
 
       const applyCode = () => {
-        try { localStorage.setItem('herder.code', codeBox.value) } catch (e) { /* no storage */ }
+        keepCode()
         everr.textContent = ''
-        if (editMode() === 'seed') { setSeed('sketch') }
+        if (shownCode === 'seed') setSeed('sketch')
+        else if (shownCode === 'seedb') { SD.kndb.set(seedOrderB.indexOf('sketch')); midi.refresh(); build() }
         else {
           try { (0, eval)(codeBox.value) } catch (e) { everr.textContent = e.message }   // roughshod: whatever it does, it does
         }
@@ -293,6 +322,12 @@
         KEYB: 'Luma key threshold for the seed entering B.',
         GNA: 'Gain A (same knob as CAMA GAIN).', ZMA: 'Zoom A (CAMA ZOOM).', RTA: 'Rotation A (CAMA ROT).', LVA: 'Seed level A (SEED LEVA).',
         GNB: 'Gain B (CAMB GAIN).', ZMB: 'Zoom B (CAMB ZOOM).', RTB: 'Rotation B (CAMB ROT).', LVB: 'Seed level B (SEED LEVB).',
+        KndB: 'Loop B\'s seed: 0 = the same seed as A, then 1 osc, 2 noise, 3 voronoi, 4 cam (second source), 5 screen, 6 sketch (the editor\'s seed B text). View 5 shows it.',
+        FRQB: 'Seed B frequency or scale.', KALB: 'Seed B kaleidoscope sides; below 2 = off.',
+        cuta: 'hold: cut the seed into loop A whole (the switcher\'s foot pedal). Release and LEVA stands again; what was dropped in echoes round.',
+        cutb: 'hold: cut the seed into loop B whole.', cutx: 'hold: throw the program crossfade to its other end.',
+        RBTH: 'Rotation of both cameras at once, on top of each one\'s ROT.', ZBTH: 'Zoom of both cameras at once, a factor on each one\'s ZOOM.',
+        Cntr: 'Contra: camera B takes RBTH and ZBTH the other way (turns against A, zooms out as A zooms in).',
         '----': 'unassigned'
       }
       for (let m = 1; m <= 4; m++) { const who = ['A direct', 'A mirror', 'B direct', 'B mirror'][m - 1]; DESC[`${m}HUE`] = `Monitor ${m} (${who}) hue.`; DESC[`${m}SAT`] = `Monitor ${m} (${who}) saturation.`; DESC[`${m}BRT`] = `Monitor ${m} (${who}) brightness.`; DESC[`${m}CON`] = `Monitor ${m} (${who}) contrast.` }
@@ -355,10 +390,10 @@
       }
       const closePanelWindow = () => { if (popup && !popup.closed) popup.close(); popup = null }
       if (q.get('panel') === 'window') setTimeout(openPanelWindow, 0)
-      const resetAll = () => { for (const o of [A, B, S, SD, R, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
+      const resetAll = () => { for (const o of [A, B, S, SD, R, PL, M[1], M[2], M[3], M[4]]) Object.values(o).forEach(f => f.reset()); midi.refresh() }
       let note = '', noteUntil = 0   // a message (saved, opened, ...) leads the header for a few seconds
       const refreshHud = () => {
-        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + `${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program  s seed  e edit  b rebuild  r reset  d dump  w write patch  o open patch  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
+        head.textContent = (performance.now() < noteUntil ? note + '   |   ' : '') + `${mode} ${W}x${H} ${fps} fps (display ${Math.round(screen.width * dpr)}x${Math.round(screen.height * dpr)} @${dpr}, window ${window.innerWidth}x${window.innerHeight})  view ${view}   keys: 0 grid 1 A 2 B 3 seed 4 program 5 seed B  s seed  e edit  b rebuild  r reset  d dump  w write patch  o open patch  h hide  p panel window   in: ${midi.inputs.filter(n => /faderfox|ec4/i.test(n)).join(', ') || '(no EC4)'}`
         if (popupHead) popupHead.textContent = head.textContent
       }
       setInterval(() => {
@@ -376,7 +411,7 @@
         if (e.key === 'b') build()
         if (e.key === 'h') hud.style.display = hud.style.display === 'none' ? '' : 'none'
         if (e.key === 'p') { if (popup && !popup.closed) closePanelWindow(); else openPanelWindow() }
-        if (e.key === '0') setView('grid'); if (e.key === '1') setView('a'); if (e.key === '2') setView('b'); if (e.key === '3') setView('seed'); if (e.key === '4') setView('program')
+        if (e.key === '0') setView('grid'); if (e.key === '1') setView('a'); if (e.key === '2') setView('b'); if (e.key === '3') setView('seed'); if (e.key === '4') setView('program'); if (e.key === '5') setView('seedb')
         if (e.key === 'r') resetAll()
         if (e.key === 's') setSeed(seedOrder[(seedOrder.indexOf(seedKind) + 1) % seedOrder.length])
       })
@@ -390,10 +425,10 @@
           ring: { o0: o0.depth, o1: o1.depth, o2: o2.depth },
           midi: { inputs: midi.inputs, outputs: midi.outputs, profile: midi.profile && midi.profile.name, mode: midi.state.defaults.mode },
           groups: {
-            CAMA: groupOf(A, CAM), CAMB: groupOf(B, CAM), SWCH: groupOf(S, SW), SEED: groupOf(SD, SEED), RIG: groupOf(R, RIG),
+            CAMA: groupOf(A, CAM), CAMB: groupOf(B, CAM), SWCH: groupOf(S, SW), SEED: groupOf(SD, SEED), RIG: groupOf(R, RIG), PLAY: { RBTH: +PL.rbth().toFixed(5), ZBTH: +PL.zbth().toFixed(5), Cntr: PL.cntr() },
             MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => [['hue', M[m].hue], ['sat', M[m].sat], ['brt', M[m].brt], ['con', M[m].con]].map(([k, f]) => [`${m}${k.toUpperCase()}`, +f().toFixed(5)])))
           },
-          code: codeBox.value,
+          code: (keepCode(), codes.seed), codeB: codes.seedb,
           snapshot: midi.snapshot()   // raw "channel:cc" -> value, what midi.restore() takes
         }
         return state
@@ -415,7 +450,7 @@
       const KNOBS = {
         CAMA: Object.fromEntries(Object.values(A).map((f, i) => [CAM[i], f])), CAMB: Object.fromEntries(Object.values(B).map((f, i) => [CAM[i], f])),
         SWCH: Object.fromEntries(Object.values(S).map((f, i) => [SW[i], f])), SEED: Object.fromEntries(Object.values(SD).map((f, i) => [SEED[i], f])),
-        RIG: Object.fromEntries(Object.values(R).map((f, i) => [RIG[i], f])),
+        RIG: Object.fromEntries(Object.values(R).map((f, i) => [RIG[i], f])), PLAY: { RBTH: PL.rbth, ZBTH: PL.zbth, Cntr: PL.cntr },
         MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => ['hue', 'sat', 'brt', 'con'].map(k => [`${m}${k.toUpperCase()}`, M[m][k]])))
       }
       // The show must go on: opening a patch never throws and never stops the picture. Each part is taken
@@ -434,10 +469,14 @@
             part(`${g}.${label}`, () => f.set(Math.min(Math.max(v, f.config.min), f.config.max)))
           }
         } else if (state.snapshot && typeof state.snapshot === 'object') part('snapshot', () => midi.restore(state.snapshot))
-        if (typeof state.code === 'string') { codeBox.value = state.code; try { localStorage.setItem('herder.code', state.code) } catch (e) { /* no storage */ } }
+        for (const [key, slot] of [['code', 'seed'], ['codeB', 'seedb']]) {
+          if (typeof state[key] !== 'string') continue
+          codes[slot] = state[key]; if (shownCode === slot) codeBox.value = state[key]
+          try { localStorage.setItem(CODE_KEYS[slot], state[key]) } catch (e) { /* no storage */ }
+        }
         const kind = state.seed && state.seed.kind
         if (kind && SEED_KINDS.includes(kind)) part('seed', () => { lastKindKnob = Math.round(SD.kind()); setSeed(kind, typeof state.seed.url === 'string' ? state.seed.url : '') })   // rebuilds the loops
-        else { if (kind) skipped.push(`seed.kind ${kind}`); if (typeof state.code === 'string' && seedKind === 'sketch') part('code', build) }
+        else { if (kind) skipped.push(`seed.kind ${kind}`); if ((typeof state.code === 'string' && seedKind === 'sketch') || typeof state.codeB === 'string') part('code', build) }
         if (state.view) { if (views[state.view]) part('view', () => setView(state.view)); else skipped.push(`view ${state.view}`) }
         part('refresh', () => midi.refresh())
         return skipped
