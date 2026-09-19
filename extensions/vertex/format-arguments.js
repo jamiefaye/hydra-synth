@@ -146,6 +146,8 @@ export default function formatArguments(transform, startIndex, synthContext) {
         }
         typedArg.value = () => (x.getTexture())
         typedArg.isUniform = true
+        // an output (or a delay tap of one), as opposed to an external source: WGSL reads these with y turned over
+        typedArg.isOutput = x.type === 'delay' || typeof x.flipPingPong === 'function'
       } else {
         // if passing in a texture reference, when function asks for vec4, convert to vec4
         if (typedArg.value.getTexture && input.type === 'vec4') {

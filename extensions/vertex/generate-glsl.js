@@ -49,14 +49,18 @@ function generateGlsl (transforms, shaderParams) {
       if (shaderParams.wgsl && inputs[0] && inputs[0].type === "sampler2D") {
         let texName = inputs[0].name;
         let sampName = 'samp' + texName;
+        // A WebGPU render target holds st.y = 1 in its first row, so an output read back at st comes out
+        // upside down (and a feedback loop turns over every pass). External sources are uploaded the
+        // other way up and read straight. The kernels of blur/srcb/blurb are symmetric, so turning st works.
+        const turn = (uv) => inputs[0].isOutput ? `vec2<f32>((${uv}).x, 1.0 - (${uv}).y)` : uv;
         if (transform.name === 'src') {
           fragColor = (uv) => {
-            return `textureSample( ${texName}, ${sampName}, fract(${uv}))`
+            return `textureSample( ${texName}, ${sampName}, fract(${turn(uv)}))`
           };
         } else {
           // other texture sources (blur, ...) are real functions taking (st, texture, sampler, args...)
           fragColor = (uv) => {
-            return `${shaderString(`${uv}, ${texName}, ${sampName}`, transform.name, inputs.slice(1), shaderParams)}`
+            return `${shaderString(`${turn(uv)}, ${texName}, ${sampName}`, transform.name, inputs.slice(1), shaderParams)}`
           };
         }
       } else { // all other types of 'src' are conventional.
