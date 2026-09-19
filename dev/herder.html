@@ -657,7 +657,7 @@
         </style>
         <div class="dim">option-1 .. option-0 run or stop slots 1 to 10 (shift restarts; while recording a gesture, they end it into that slot); the EC4's MACR pushes do all 16; G stops everything. Saved with a patch (w).</div>
         <table><thead><tr><th>slot</th><th>name</th><th>kind</th><th>state</th><th></th></tr></thead><tbody data-id="rows"></tbody></table>
-        <p>code macro: the body of a generator. <span class="dim">yield 2 waits two seconds, a bare yield one frame. herder.apply(patch), herder.glideTo('CAMA.ROT', 3, 5), herder.k['SWCH.XFAD'](), and all of Hydra are in reach.</span></p>
+        <p>edit shows any macro as text. Code: the body of a generator. <span class="dim">yield 2 waits two seconds, a bare yield one frame. herder.apply(patch), herder.glideTo('CAMA.ROT', 3, 5), herder.k['SWCH.XFAD'](), and all of Hydra are in reach. A gesture or a sequence is JSON: events are [milliseconds, knob, value], steps are partial patches with a wait.</span></p>
         <div>slot <select data-id="slot"></select> name <input data-id="name" size="18" /> <label><input type="checkbox" data-id="loop" /> start over when it ends</label>
           <button data-id="put">put in slot and run</button> <span data-id="msg" class="err"></span></div>
         <textarea data-id="code" spellcheck="false">while (true) {
@@ -667,8 +667,17 @@
         const $ = (id) => root.querySelector(`[data-id="${id}"]`)
         for (let n = 1; n <= SLOTS; n++) { const o = d.createElement('option'); o.value = n; o.textContent = n; $('slot').appendChild(o) }
         $('slot').value = freeSlot() || 1
+        // a gesture or a sequence as text: JSON, one event or step to a line, so it can be read, trimmed and retimed by hand
+        const macroText = (m) => m.kind === 'gesture'
+          ? `{ "kind": "gesture", "len": ${Math.round(m.len)}, "events": [\n${m.events.map(e => '  ' + JSON.stringify(e)).join(',\n')}\n] }`
+          : `{ "kind": "sequence", "steps": [\n${m.steps.map(st => '  ' + JSON.stringify(st)).join(',\n')}\n] }`
         $('put').onclick = () => {
-          const m = addMacro({ kind: 'code', slot: +$('slot').value, name: $('name').value || undefined, code: $('code').value, loop: $('loop').checked })
+          const text = $('code').value, base = { slot: +$('slot').value, name: $('name').value || undefined, loop: $('loop').checked }
+          let desc
+          if (/^\s*[{[]/.test(text)) {   // data: a gesture (events: [ms, knob, value]) or a sequence (steps: partial patches with waits)
+            try { const j = JSON.parse(text); desc = Object.assign(Array.isArray(j) ? { steps: j } : j, base) } catch (e) { $('msg').textContent = 'not JSON: ' + e.message; return }
+          } else desc = Object.assign({ kind: 'code', code: text }, base)
+          const m = addMacro(desc)
           $('msg').textContent = !m ? 'nothing to run' : (m.error || ''); draw(true)
         }
         let shown = ''
@@ -690,7 +699,7 @@
               const btn = (label, fn) => { const b = d.createElement('button'); b.textContent = label; b.onclick = () => { fn(); draw(true) }; return b }
               const ops = d.createElement('span')
               ops.append(btn(m.running ? 'stop' : 'run', () => toggleMacro(m.slot)), ' ', btn('restart', () => toggleMacro(m.slot, true)), ' ')
-              if (m.kind === 'code') ops.append(btn('edit', () => { $('slot').value = m.slot; $('name').value = m.name; $('code').value = m.code; $('loop').checked = !!m.loop }), ' ')
+              ops.append(btn('edit', () => { $('slot').value = m.slot; $('name').value = m.name; $('loop').checked = !!m.loop; $('code').value = m.kind === 'code' ? m.code : macroText(m); $('msg').textContent = '' }), ' ')
               ops.append(btn('delete', () => removeMacro(m.slot)))
               cell(ops)
               $('rows').appendChild(tr)
@@ -703,6 +712,7 @@
         const timer = setInterval(() => { if (macroWin.closed) clearInterval(timer); else draw(false) }, 250)
         if (win) forwardKeys(d)
       }
+      window.addEventListener('pagehide', () => { try { if (macroWin && !macroWin.closed) macroWin.close() } catch (e) {} try { if (popup && !popup.closed) popup.close() } catch (e) {} })
       const recPush = midi.note([3, 9], { toggle: true }), clrPush = midi.note([3, 10])
       const macroPush = Array.from({ length: SLOTS }, (_, i) => midi.note([8, i + 1]))
       let lastRecPush = recPush(), lastClr = clrPush(); const lastMacroPush = macroPush.map(f => f())

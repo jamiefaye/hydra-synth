@@ -208,7 +208,9 @@ while (true) {                                   // a slow wander of camera A, f
 **Running them.** Option-1 to option-0 run or stop slots 1 to 10, shift-option-number restarts one from
 the top; the pushes of the EC4's MACR group (GR08) do the same for all sixteen; `G` (or `clr`) stops
 everything and leaves the slots as they are. `m` opens the manager: every slot with its name, kind and
-state, run/stop, restart, delete, rename, and a box to write or edit a code macro. It is a window of its
+state, run/stop, restart, delete, rename, and a text box. `edit` puts any macro in the box as text: code as
+code, a gesture or a sequence as JSON (a gesture's events are `[milliseconds, knob, value]`, one to a line,
+so a take can be read, trimmed and retimed by hand); `put in slot and run` takes either back. It is a window of its
 own, or a box over the picture if pop-ups are blocked.
 
 **Glides.** With GLID above 0 an opened patch arrives over that many seconds instead of at once; a
