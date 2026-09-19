@@ -82,6 +82,12 @@ your finger does:
 Four monitors, A direct, A mirror, B direct, B mirror: HUE, SAT, BRT, CON each, ahead of the
 cameras. The front panel of Blair's monitors. Inside the loop, so these compound too.
 
+The four knobs of a monitor are composed into one colour matrix and applied in a single multiply (`colormat()`).
+HUE turns the chroma plane and SAT scales it, in NTSC luma/chroma as on lightherder; BRT lifts; CON is a gain about
+mid-grey. It behaves on light past white, which the loops now carry, and with the knobs at rest it is exactly the
+identity, so a monitor at rest costs the loop nothing. Code can go past the knobs: `herder.colourOf(hue, sat, brt, con)`
+gives the twelve numbers, and any twelve will do.
+
 ### SEED
 
 Loops are letters and seeds are numbers, everywhere: S2A is seed 2 into loop A. Two seeds into two loops

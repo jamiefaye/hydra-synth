@@ -246,7 +246,24 @@
       const seedTex2 = () => seedKind2() === 'same' ? seedTex1() : o4.delay(() => Math.round(SD.sdly()))
 
       // ---- one loop: own output, own controls, the other loop's output for the cross-link
-      const monitor = (chain, m) => chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
+      // A monitor's front panel as one colour matrix. HUE turns the chroma plane and SAT scales it, in NTSC luma/chroma
+      // (YIQ) as lightherder does; BRT lifts and CON is a gain about mid-grey, as before. Composed here, applied by
+      // colormat() in one multiply. Neutral knobs give exactly the identity.
+      const YIQ = [[0.299, 0.587, 0.114], [0.5959, -0.2746, -0.3213], [0.2115, -0.5227, 0.3112]]
+      const mul3 = (a, b) => a.map((r, i) => b[0].map((_, j) => r[0] * b[0][j] + r[1] * b[1][j] + r[2] * b[2][j]))
+      const inv3 = (m) => { const [a, b, c] = m[0], [d, e, f] = m[1], [g, h, i] = m[2], det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g); return [[e * i - f * h, c * h - b * i, b * f - c * e], [f * g - d * i, a * i - c * g, c * d - a * f], [d * h - e * g, b * g - a * h, a * e - b * d]].map(r => r.map(x => x / det)) }
+      const RGB = inv3(YIQ)
+      const colourOf = (hue, sat, brt, con) => {   // -> the twelve numbers colormat() takes: three rows, then the offset
+        let m = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        if (hue !== 0 || sat !== 1) { const th = -2 * Math.PI * hue, co = sat * Math.cos(th), si = sat * Math.sin(th); m = mul3(RGB, mul3([[1, 0, 0], [0, co, -si], [0, si, co]], YIQ)) }   // the sign turns red towards yellow for a positive HUE, like hue()
+        const off = con * brt + 0.5 * (1 - con)
+        return [...m[0], ...m[1], ...m[2]].map(x => x * con).concat([off, off, off])
+      }
+      const monitor = (chain, m) => {
+        const k = M[m]; let key = '', twelve = null
+        const at = (i) => () => { const now = `${k.hue()},${k.sat()},${k.brt()},${k.con()}`; if (now !== key) { key = now; twelve = colourOf(k.hue(), k.sat(), k.brt(), k.con()) } return twelve[i] }
+        return chain.colormat(...Array.from({ length: 12 }, (_, i) => at(i)))
+      }
       const loop = (self, other, L, monDirect, monMirror, glass, link, key, seeds) => {
         const dark = S.void() > 0.5                              // a camera sees an unlit room past the monitor
         const seen = () => self.delay(() => Math.round(L.delay()))
@@ -807,7 +824,7 @@
         if (e.key === 'g') { if (auto.rec) stopRec(); else startRec() } if (e.key === 'G') stopAuto()
         if (e.key === 'm') { if (macroWin && !macroWin.closed) macroWin.close(); else openMacroWindow() }
       })
-      Object.assign(window.herder, { apply: applyState, glideTo, record: startRec, loop: stopRec, stop: stopAuto, sequence: startSequence, auto, state: stateOf, tick: autoTick, macro: addMacro, toggle: toggleMacro, remove: removeMacro, macros: () => auto.macros.map(describeMacro), set: drive, openMacros: () => openMacroWindow(), get macroWindow () { return macroWin } })
+      Object.assign(window.herder, { apply: applyState, glideTo, record: startRec, loop: stopRec, stop: stopAuto, sequence: startSequence, auto, state: stateOf, tick: autoTick, macro: addMacro, toggle: toggleMacro, remove: removeMacro, macros: () => auto.macros.map(describeMacro), set: drive, colourOf, openMacros: () => openMacroWindow(), get macroWindow () { return macroWin } })
       // herder.set('CAMA.ZOOM', 1.1) moves a knob as the machine; herder.k['CAMA.ZOOM'].set(1.1) moves it as a hand would (it ends gestures on that knob and is recorded)
       window.__herder = { P, midi, get panel () { return panel }, openPanelWindow, closePanelWindow, setSeed, setView, build, dump, stateOf, applyState, savePatch, openPatch, applyCode, codeBox, get seedKind () { return seedKind }, get view () { return view } }
     </script>

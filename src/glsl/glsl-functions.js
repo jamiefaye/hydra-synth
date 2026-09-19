@@ -1168,6 +1168,82 @@ wgsl:
    return vec4<f32>(c.rgb, _c0.a);`
 },
 {
+  // Any affine colour transform in one step: rgb' = M * rgb + offset. Rows first (rr rg rb = what red is made
+  // of), then the offset (ro go bo). Hue, saturation, brightness, contrast, white point and per-channel gain are
+  // all special cases; composed into one matrix they cost one multiply, behave on values past 0..1 (hue() goes
+  // through HSV, which does not), and at neutral are exactly the identity, so nothing ratchets round a loop.
+  name: 'colormat',
+  type: 'color',
+  inputs: [
+    {
+      type: 'float',
+      name: 'rr',
+      default: 1,
+    },
+    {
+      type: 'float',
+      name: 'rg',
+      default: 0,
+    },
+    {
+      type: 'float',
+      name: 'rb',
+      default: 0,
+    },
+    {
+      type: 'float',
+      name: 'gr',
+      default: 0,
+    },
+    {
+      type: 'float',
+      name: 'gg',
+      default: 1,
+    },
+    {
+      type: 'float',
+      name: 'gb',
+      default: 0,
+    },
+    {
+      type: 'float',
+      name: 'br',
+      default: 0,
+    },
+    {
+      type: 'float',
+      name: 'bg',
+      default: 0,
+    },
+    {
+      type: 'float',
+      name: 'bb',
+      default: 1,
+    },
+    {
+      type: 'float',
+      name: 'ro',
+      default: 0,
+    },
+    {
+      type: 'float',
+      name: 'go',
+      default: 0,
+    },
+    {
+      type: 'float',
+      name: 'bo',
+      default: 0,
+    }
+  ],
+  glsl:
+`   vec3 c = _c0.rgb;
+   return vec4(dot(vec3(rr, rg, rb), c) + ro, dot(vec3(gr, gg, gb), c) + go, dot(vec3(br, bg, bb), c) + bo, _c0.a);`,
+  wgsl:
+`   let c = _c0.rgb;
+   return vec4<f32>(dot(vec3<f32>(rr, rg, rb), c) + ro, dot(vec3<f32>(gr, gg, gb), c) + go, dot(vec3<f32>(br, bg, bb), c) + bo, _c0.a);`
+},
+{
   // The rails of a video amplifier: untouched below half the headroom, bending asymptotically onto it
   // above (the arms meet in value and slope), floored at black. After lightherder's front panel. With
   // float outputs an overdriven feedback loop settles into structure instead of a flat white.

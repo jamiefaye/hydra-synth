@@ -248,7 +248,7 @@ function registerGeometryFunctions(synth) {
  */
 function registerLightingFunctions(synth) {
   // Texture-space functions from the fork's core that a vanilla host lacks (blur)
-  for (const fn of glslFunctions().filter(f => ['blur', 'blurb', 'srcb', 'offset', 'tilt', 'knee'].includes(f.name))) {
+  for (const fn of glslFunctions().filter(f => ['blur', 'blurb', 'srcb', 'offset', 'tilt', 'knee', 'colormat'].includes(f.name))) {
     if (!synth[fn.name]) synth.setFunction(fn)
   }
   for (const fn of lightingFunctions) {
