@@ -266,7 +266,9 @@
         if (q.get('colour') === 'chain') return chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
         const k = M[m]; let key = '', twelve = null
         const at = (i) => () => { const now = `${k.hue()},${k.sat()},${k.brt()},${k.con()}`; if (now !== key) { key = now; twelve = colourOf(k.hue(), k.sat(), k.brt(), k.con()) } return twelve[i] }
-        return chain.colormat(...Array.from({ length: 12 }, (_, i) => at(i)))
+        // ingamut: turning or boosting chroma can ask for negative light; bring it back along its own luminance, so that
+        // HUE and SAT never add light to the loop (a plain floor does, and the centre of a spiral climbs to white)
+        return chain.colormat(...Array.from({ length: 12 }, (_, i) => at(i))).ingamut()
       }
       const loop = (self, other, L, monDirect, monMirror, glass, link, key, seeds) => {
         const dark = S.void() > 0.5                              // a camera sees an unlit room past the monitor

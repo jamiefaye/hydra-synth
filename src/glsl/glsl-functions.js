@@ -1168,6 +1168,29 @@ wgsl:
    return vec4<f32>(c.rgb, _c0.a);`
 },
 {
+  // Negative light back into gamut without adding any. A chroma rotation or a saturation above 1 keeps luminance
+  // but can push a channel below zero; a plain floor (max 0) then raises the luminance, and in a feedback loop
+  // that is a gain the knobs never asked for. Here the colour is pulled toward its own luminance just far enough
+  // for the lowest channel to reach zero: hue and luminance stay. In-gamut colours pass through untouched, exactly.
+  name: 'ingamut',
+  type: 'color',
+  inputs: [],
+  glsl:
+`   vec3 c = _c0.rgb;
+   float mn = min(c.r, min(c.g, c.b));
+   if (mn >= 0.0) return _c0;
+   float y = dot(c, vec3(0.299, 0.587, 0.114));
+   if (y <= 0.0) return vec4(0.0, 0.0, 0.0, _c0.a);
+   return vec4(vec3(y) + (c - vec3(y)) * (y / (y - mn)), _c0.a);`,
+  wgsl:
+`   let c = _c0.rgb;
+   let mn = min(c.r, min(c.g, c.b));
+   if (mn >= 0.0) { return _c0; }
+   let y = dot(c, vec3<f32>(0.299, 0.587, 0.114));
+   if (y <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, _c0.a); }
+   return vec4<f32>(vec3<f32>(y) + (c - vec3<f32>(y)) * (y / (y - mn)), _c0.a);`
+},
+{
   // Alpha back to a known value (1 by default). Hydra's blend/add/mult treat alpha as a fourth number and
   // srcb/blurb/luma/mask write it, so at the end of a feedback chain it is whatever the path left; with float
   // outputs nothing clamps it on the way round. End a loop with opaque() unless alpha is meant to carry something.
