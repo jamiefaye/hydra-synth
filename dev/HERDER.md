@@ -84,17 +84,27 @@ cameras. The front panel of Blair's monitors. Inside the loop, so these compound
 
 ### SEED
 
+Two seeds into two loops, a 2 x 2 matrix: rows are the loops, columns the seeds. It sits as a block at
+the top left of the group, with each seed's own knobs to its right:
+
+```
+LEVA  S2A  | SFRQ SKAL     loop A takes seed 1 (LEVA) and seed 2 (S2A)     seed 1: frequency, kaleid
+S1B   LEVB | FRQB KALB     loop B takes seed 1 (S1B) and seed 2 (LEVB)     seed 2: frequency, kaleid
+Kind  KndB   SDLY ----     what each seed is, and the delay both share
+cuta  cutb   cutx ----
+```
+
 | encoder | control | what it does |
 |---|---|---|
-| 1, 2 | LEVA, LEVB | how much of the seed enters loop A, loop B. |
-| 3 | SFRQ | seed frequency or scale. |
-| 4 | SKAL | kaleidoscope sides on the seed; below 2 off. Starts off. |
-| 5 | SDLY | seed delay in frames before it enters the loops. |
-| 6 | Kind | the seed: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch. |
-| 7 | KndB | loop B's seed: 0 the same seed as A, then 1 osc, 2 noise, 3 voronoi, 4 cam, 5 screen, 6 sketch (the editor's "seed B" text). View `5` shows it. |
-| 8, 9 | FRQB, KALB | seed B's frequency and kaleidoscope. |
-| 10, 11 | cuta, cutb | hold: cut the seed into the loop whole, the switcher's foot pedal. Release and the level knob stands again; what was dropped in echoes round. |
-| 12 | cutx | hold: throw the program crossfade to its other end. |
+| 1, 2 | LEVA, S2A | loop A: how much of seed 1, of seed 2. |
+| 5, 6 | S1B, LEVB | loop B: how much of seed 1, of seed 2. |
+| 3, 4 | SFRQ, SKAL | seed 1: frequency or scale; kaleidoscope sides, below 2 off. |
+| 7, 8 | FRQB, KALB | seed 2: the same. |
+| 9 | Kind | seed 1: 0 osc, 1 noise, 2 voronoi, 3 cam, 4 screen, 5 sketch. |
+| 10 | KndB | seed 2: 0 seed 1 again (it costs nothing, and LEVB then feeds loop B from seed 1 as before), then 1 osc, 2 noise, 3 voronoi, 4 cam, 5 screen, 6 sketch (the editor's "seed B" text). View `5` shows it. |
+| 11 | SDLY | seed delay in frames before it enters the loops. |
+| 13, 14 | cuta, cutb | hold: cut a loop's own seed in whole, the switcher's foot pedal. Release and the level knob stands again; what was dropped in echoes round. |
+| 15 | cutx | hold: throw the program crossfade to its other end. |
 
 ### RIG: the glass and the cabling
 
