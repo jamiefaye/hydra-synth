@@ -408,23 +408,29 @@
         RIG: Object.fromEntries(Object.values(R).map((f, i) => [RIG[i], f])),
         MONS: Object.fromEntries([1, 2, 3, 4].flatMap(m => ['hue', 'sat', 'brt', 'con'].map(k => [`${m}${k.toUpperCase()}`, M[m][k]])))
       }
+      // The show must go on: opening a patch never throws and never stops the picture. Each part is taken
+      // if it can be used and skipped if not (a number as a string is a number, a value past a knob's range
+      // goes to the end of the range), and what was skipped is named in the header and the console.
+      const SEED_KINDS = ['osc', 'noise', 'voronoi', 'cam', 'screen', 'video', 'image', 'sketch']
       const applyState = (state) => {
-        const known = ['groups', 'snapshot', 'seed', 'code', 'view', 'reset']
-        if (!state || typeof state !== 'object' || (state.page && state.page !== 'herder') || !known.some(k => k in state)) throw new Error('not a herder patch')
-        const unknown = []
-        if (state.reset) resetAll()
-        if (state.groups) {
-          for (const [g, knobs] of Object.entries(state.groups)) for (const [label, v] of Object.entries(knobs || {})) {
-            const f = KNOBS[g] && KNOBS[g][label]
-            if (f && Number.isFinite(v)) f.set(v); else unknown.push(`${g}.${label}`)
+        const skipped = []
+        const part = (name, fn) => { try { fn() } catch (e) { skipped.push(`${name} (${e.message})`) } }
+        if (!state || typeof state !== 'object') return ['the whole file (not an object)']
+        if (state.reset) part('reset', resetAll)
+        if (state.groups && typeof state.groups === 'object') {
+          for (const [g, knobs] of Object.entries(state.groups)) for (const [label, raw] of Object.entries((knobs && typeof knobs === 'object') ? knobs : {})) {
+            const f = KNOBS[g] && KNOBS[g][label], v = typeof raw === 'string' ? parseFloat(raw) : raw
+            if (!f || !Number.isFinite(v)) { skipped.push(`${g}.${label}`); continue }
+            part(`${g}.${label}`, () => f.set(Math.min(Math.max(v, f.config.min), f.config.max)))
           }
-        } else if (state.snapshot) midi.restore(state.snapshot)
+        } else if (state.snapshot && typeof state.snapshot === 'object') part('snapshot', () => midi.restore(state.snapshot))
         if (typeof state.code === 'string') { codeBox.value = state.code; try { localStorage.setItem('herder.code', state.code) } catch (e) { /* no storage */ } }
-        if (state.seed && state.seed.kind) { lastKindKnob = Math.round(SD.kind()); setSeed(state.seed.kind, state.seed.url || '') }   // rebuilds the loops
-        else if (typeof state.code === 'string' && seedKind === 'sketch') build()
-        if (state.view && views[state.view]) setView(state.view)
-        midi.refresh()
-        return unknown
+        const kind = state.seed && state.seed.kind
+        if (kind && SEED_KINDS.includes(kind)) part('seed', () => { lastKindKnob = Math.round(SD.kind()); setSeed(kind, typeof state.seed.url === 'string' ? state.seed.url : '') })   // rebuilds the loops
+        else { if (kind) skipped.push(`seed.kind ${kind}`); if (typeof state.code === 'string' && seedKind === 'sketch') part('code', build) }
+        if (state.view) { if (views[state.view]) part('view', () => setView(state.view)); else skipped.push(`view ${state.view}`) }
+        part('refresh', () => midi.refresh())
+        return skipped
       }
       const PATCH_TYPES = [{ description: 'Herder patch', accept: { 'application/json': ['.json'] } }]
       const savePatch = async () => {
@@ -444,7 +450,7 @@
         }
       }
       const loadPatchFile = async (file) => {
-        try { const unknown = applyState(JSON.parse(await file.text())); say('opened ' + file.name + (unknown.length ? '  (unknown: ' + unknown.join(' ') + ')' : '')) } catch (e) { say(`could not open ${file.name}: ${e.message}`) }
+        try { const skipped = applyState(JSON.parse(await file.text())); say('opened ' + file.name + (skipped.length ? '  (skipped: ' + skipped.join(', ') + ')' : '')) } catch (e) { say(`${file.name} is not JSON, nothing changed (${e.message})`) }
       }
       const openPatch = async () => {
         try {
