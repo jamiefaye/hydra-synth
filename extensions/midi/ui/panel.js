@@ -30,8 +30,12 @@ const CSS = `
 .mp-bar { position: absolute; left: 2px; right: 2px; bottom: 0; height: 2px; background: #666; }
 .mp-bar > i { display: block; height: 100%; background: #ff9; width: 0; }
 .mp-cell:hover .mp-tip { display: block; }
-.mp-tip { display: none; position: absolute; left: 0; bottom: 1.8em; z-index: 5; width: 22em; white-space: normal;
-  background: #222; color: #eee; border: 1px solid #665; padding: 4px 7px; line-height: 1.3; cursor: default; }
+.mp-tip { display: none; position: absolute; left: 0; bottom: 1.8em; z-index: 5; width: 26em; white-space: normal;
+  background: #1b1b1b; color: #eee; border: 1px solid #665; padding: 6px 9px; line-height: 1.35; cursor: default; box-shadow: 0 2px 10px rgba(0,0,0,0.6); }
+.mp-tip-name { display: block; color: #fd6; font-weight: bold; font-size: 1.35em; letter-spacing: 0.04em; margin-bottom: 2px; }
+.mp-tip-desc { display: block; color: #fff; font-size: 1.1em; margin-bottom: 5px; }
+.mp-tip-how { display: block; color: #9cf; font-size: 0.92em; }
+.mp-tip-tech { display: block; color: #777; font-size: 0.85em; }
 `
 
 const styled = new WeakSet()   // documents that carry the panel's style
@@ -87,7 +91,12 @@ export function mountPanel (element, controller, options = {}) {
       const tip = document.createElement('div'); tip.className = 'mp-tip'
       // label case is the convention: UPPER a knob, Capitalised a switch you turn, lowercase a push-only button
       const kind = /^[a-z]/.test(label) ? 'push-only button: click' : (/^[A-Z][a-z]/.test(label) ? 'switch: turn to flip' : 'knob: drag up/down or wheel, shift = fine')
-      tip.textContent = `${label} (group ${g.group}, encoder ${n}, cc ${number} ch ${channel ?? 'any'}) [${kind}]: ${(g.descs && g.descs[label]) || ''}`
+      // the name and what it does lead; how to work it and where it lives on the wire follow, smaller and dimmer
+      const line = (cls, text) => { if (!text) return; const el = document.createElement('span'); el.className = cls; el.textContent = text; tip.appendChild(el) }
+      line('mp-tip-name', label)
+      line('mp-tip-desc', (g.descs && g.descs[label]) || '')
+      line('mp-tip-how', kind)
+      line('mp-tip-tech', `group ${g.group}, encoder ${n}, cc ${number} ch ${channel ?? 'any'}`)
       cell.appendChild(lab); cell.appendChild(val); cell.appendChild(bar); cell.appendChild(tip)
       grid.appendChild(cell)
       const rec = { cell, val, fill, number, channel, push, pushed: false }
