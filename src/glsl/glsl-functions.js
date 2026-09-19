@@ -1168,6 +1168,24 @@ wgsl:
    return vec4<f32>(c.rgb, _c0.a);`
 },
 {
+  // Alpha back to a known value (1 by default). Hydra's blend/add/mult treat alpha as a fourth number and
+  // srcb/blurb/luma/mask write it, so at the end of a feedback chain it is whatever the path left; with float
+  // outputs nothing clamps it on the way round. End a loop with opaque() unless alpha is meant to carry something.
+  name: 'opaque',
+  type: 'color',
+  inputs: [
+    {
+      type: 'float',
+      name: 'alpha',
+      default: 1,
+    }
+  ],
+  glsl:
+`   return vec4(_c0.rgb, alpha);`,
+  wgsl:
+`   return vec4<f32>(_c0.rgb, alpha);`
+},
+{
   // Any affine colour transform in one step: rgb' = M * rgb + offset. Rows first (rr rg rb = what red is made
   // of), then the offset (ro go bo). Hue, saturation, brightness, contrast, white point and per-channel gain are
   // all special cases; composed into one matrix they cost one multiply, behave on values past 0..1 (hue() goes

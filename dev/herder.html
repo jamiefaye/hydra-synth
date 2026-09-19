@@ -286,7 +286,7 @@
           // keyed: a seed replaces pixels only where its luminance passes the key (issue 71 in lightherder); else crossfaded
           chain = key() > 0.005 ? chain.layer(src(tex()).luma(key, 0.1).mult(solid(1, 1, 1, amount), 1)) : chain.blend(src(tex()), amount)
         }
-        return chain
+        return chain.opaque()   // alpha is not a loop signal: keys are made fresh each pass, and what goes round is opaque
       }
 
       // ---- build everything (called again when a chain's shape changes: seed kind, kaleid, key, freeze)
@@ -306,7 +306,7 @@
         if (S.frzb() > 0.5) src(o1.delay(1)).out(o1); else loop(ob, oa, B, 3, 4, { mirror: R.mirb, mzm: R.mzmb }, R.atob, R.keyb, seedsB).out(o1)
         // program: A crossfaded with B; PERI > 0 flips the crossfade every PERI seconds
         const xf = () => { const p = S.peri(); let x = S.xfad(); if (CUT.x()) x = x < 0.5 ? 1 : 0; if (p <= 0.05) return x; return (Math.floor(time / p) % 2) ? 1 - x : x }
-        src(o0).blend(src(o1), xf).out(o3)
+        src(o0).blend(src(o1), xf).opaque().out(o3)
         built = shape()
       }
       let lastKindKnob = Math.round(SD.knd1())
