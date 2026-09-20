@@ -125,7 +125,7 @@ test('snapshot and restore', () => {
 
 test('log curve: each detent multiplies by a constant ratio', () => {
   const m = new MidiState({ mode: 'r2', steps: 10 })
-  const f = m.cc(5, { min: 0.1, max: 100, init: 1, curve: 'log' })
+  const f = m.cc(5, { min: 0.1, max: 100, init: 1, curve: 'log', snap: false })   // init sits between grid lines
   assert.ok(Math.abs(f() - 1) < 1e-9)
   m.handleMessage(cc(1, 5, 65))
   const r1 = f() / 1
@@ -155,10 +155,31 @@ test('fine: step divides while the encoder push note is held', () => {
   m.handleMessage(cc(1, 8, 65)); assert.equal(f().toFixed(2), '0.11')
   assert.equal(m.lastEvent.fine, true)
   m.handleMessage(noteOff(1, 8))
-  m.handleMessage(cc(1, 8, 65)); assert.equal(f().toFixed(2), '0.21')
+  m.handleMessage(cc(1, 8, 65)); assert.equal(f().toFixed(2), '0.20')   // a coarse detent goes to the next coarse line
   // custom fine note (e.g. a dedicated shift button)
   const g = m.cc(9, { min: 0, max: 1, init: 0, fine: 4, fineNote: 100 })
   m.handleMessage(noteOn(1, 100)); m.handleMessage(cc(1, 9, 65)); assert.equal(g().toFixed(3), '0.025')
+})
+
+test('snap: detents land on the grid, so round values are hit exactly', () => {
+  const m = new MidiState({ mode: 'r2' })
+  // herder's ZOOM: unity is a grid line, the starting value is not
+  const zoom = m.cc(2, { min: 0.5, max: 2, init: 1.02, curve: 'log', steps: 300, fine: 10 })
+  m.handleMessage(cc(1, 2, 63)); assert.ok(zoom() < 1.02 && zoom() > 1.015)   // first detent: to the next line down, less than a detent
+  for (let i = 0; i < 4; i++) m.handleMessage(cc(1, 2, 63))
+  assert.equal(zoom(), 1)
+  // rotation in degrees: whole degrees coarse, tenths fine, zero by turning either way
+  const rot = m.cc(3, { min: 0, max: 360, init: 1.5, wrap: true, steps: 360, fine: 10 })
+  m.handleMessage(cc(1, 3, 65)); assert.equal(rot(), 2)
+  m.handleMessage(cc(1, 3, 62)); assert.equal(rot(), 0)
+  m.handleMessage(cc(1, 3, 63)); assert.equal(rot(), 359)
+  m.handleMessage(noteOn(1, 3)); m.handleMessage(cc(1, 3, 65)); assert.equal(rot().toFixed(3), '359.100')
+  m.handleMessage(noteOff(1, 3)); m.handleMessage(cc(1, 3, 65)); assert.equal(rot(), 0)
+  // a value set from outside stays as set until the knob is turned
+  rot.set(12.34); assert.ok(Math.abs(rot() - 12.34) < 1e-9)
+  // snap: false keeps the offset
+  const free = m.cc(4, { min: 0, max: 1, init: 0.005, steps: 10, snap: false })
+  m.handleMessage(cc(1, 4, 65)); assert.equal(free().toFixed(3), '0.105')
 })
 
 test('set/restore emit set events and positions() reports 0..1', () => {

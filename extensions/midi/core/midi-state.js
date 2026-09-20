@@ -62,7 +62,8 @@ export class MidiState {
       max: 1,
       curve: 'linear', // 'linear' | 'log' (min and max must be > 0) | 'exp'
       wrap: false,     // relative: wrap around instead of clamping (rotation)
-      fine: 0          // relative: divide the step by this while the encoder's push note is held (0 = off)
+      fine: 0,         // relative: divide the step by this while the encoder's push note is held (0 = off)
+      snap: true       // relative: detents land on the grid of steps (of steps * fine while fine), so ends and round values are reachable
     }, defaults)
     this.controls = new Map()   // key -> control record
     this.notes = new Map()      // key -> registered note record
@@ -75,7 +76,7 @@ export class MidiState {
   /**
    * Register a continuous control and get a function returning its value.
    * cc(number, min, max, init) or
-   * cc(number, {min, max, init, mode, channel, steps, curve, wrap, fine, fineNote})
+   * cc(number, {min, max, init, mode, channel, steps, curve, wrap, fine, fineNote, snap})
    * The returned function also has .value, .set(v), .reset(), .config, .v
    */
   cc (number, a, b, c) {
@@ -245,12 +246,23 @@ export class MidiState {
 
     let delta = decodeRelative(cfg.mode, value)
     const fine = cfg.fine && (this._isHeld(channel, cfg.fineNote) || rec.aliases.some(a => this._isHeld(channel, a.number)))
-    let step = 1 / cfg.steps
-    if (fine) step /= cfg.fine
+    const n = fine ? cfg.steps * cfg.fine : cfg.steps   // grid lines from min to max at this step size
     const before = posToValue(cfg, rec.pos)
-    let p = rec.pos + delta * step
-    if (cfg.wrap) p = p - Math.floor(p)
-    else p = clamp01(p)
+    let p
+    if (cfg.snap && delta !== 0) {
+      // A value set from outside (init, a patch, a glide) sits between grid lines. The first detent
+      // goes to the next line in the direction turned, never further than a detent, and the knob
+      // stays on the grid from there: min, max and the round values between can be hit exactly.
+      let x = rec.pos * n
+      if (Math.abs(x - Math.round(x)) < 1e-6) x = Math.round(x)
+      let k = (delta > 0 ? Math.floor(x) : Math.ceil(x)) + delta
+      if (cfg.wrap) k = ((k % n) + n) % n
+      p = clamp01(k / n)
+    } else {
+      p = rec.pos + delta / n
+      if (cfg.wrap) p = p - Math.floor(p)
+      else p = clamp01(p)
+    }
     rec.pos = p
     const ev = { type: 'cc', channel, number, value, registered: true, mode: cfg.mode, delta, fine: !!fine, before, after: posToValue(cfg, rec.pos), pos: rec.pos, aliases: rec.aliases }
     this._emit(ev)

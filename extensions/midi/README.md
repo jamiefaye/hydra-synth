@@ -122,12 +122,17 @@ The EC4's acceleration (Mode 0 to 3) sends larger steps when turned fast and is 
 ## Fine control, curves and rotation
 
 ```javascript
-const rot   = midi.cc(2, { min: 0, max: 6.283, wrap: true, fine: 10 })       // turns forever; push+turn = 1/10 step
+const rot   = midi.cc(2, { min: 0, max: 360, steps: 360, wrap: true, fine: 10 }) // degrees, turns forever; push+turn = 1/10 step
 const scale = midi.cc(3, { min: 0.05, max: 20, init: 1, curve: 'log' })      // constant ratio per detent
 const x     = midi.cc(4, { min: -1, max: 1, init: 0, steps: 200, fine: 20 }) // slow and finer
 ```
 
-- `steps` detents from min to max (default 64). Resolution is not quantised: any float step works.
+- `steps` detents from min to max (default 64). Any float step works.
+- `snap` (default true): detents land on the grid of `steps` (of `steps * fine` while fine), so min, max and the
+  round values between can be hit exactly. A value set from outside (`init`, `.set()`, `restore()`) stays as set;
+  the first detent after it goes to the next grid line in the direction turned. Choose `steps` so the values
+  you want are lines: 0..360 in 360 steps is whole degrees, 0.5..2 log in an even count puts 1 in the middle.
+  A coarse detent after a fine trim goes back to a coarse line. `snap: false` keeps whatever offset the value has.
 - `fine` divides the step while the encoder's push note is held. Set the EC4 push
   behaviour to `Note` so the push sends a note on the encoder's own number. `fineNote`
   picks a different note, e.g. one button as a shift for every knob.
