@@ -102,7 +102,7 @@
       const camControls = (g) => ({   // key order = CAM label order (the dump relies on it)
         gain:   midi.cc([g, 1], { min: 0.8, max: 1.25, init: 1, curve: 'log', steps: 200, fine: 10 }),
         zoom:   midi.cc([g, 2], { min: 0.5, max: 2, init: 1.02, curve: 'log', steps: 300, fine: 10 }),   // unity mid-travel, ~0.5% a detent (Rust's step)
-        rot:    midi.cc([g, 3], { min: 0, max: 6.283, init: 0.02, wrap: true, steps: 360, fine: 10 }),
+        rot:    midi.cc([g, 3], { min: 0, max: 360, init: 1, wrap: true, steps: 360, fine: 10 }),   // degrees: a detent is 1, fine 0.1; radians only where the shader takes them
         x:      midi.cc([g, 4], { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
         y:      midi.cc([g, 5], { min: -0.2, max: 0.2, init: 0, steps: 200, fine: 10 }),
         blur:   midi.cc([g, 6], { min: 0, max: 0.02, init: 0, curve: 'exp', steps: 100, fine: 10 }),   // 0 = sharp lens (bilinear sampling still softens a fraction of a texel)
@@ -116,9 +116,11 @@
       const A = camControls(1)
       const B = camControls(2)
       // HOME (push on encoder 16): the camera square on the monitor again. Pose only; gain, blur,
-      // delay and lens are the loop's character, not where the camera points.
+      // delay and lens are the loop's character, not where the camera points. Square is zoom 1 and no
+      // roll, which is not where the page opens (a slow spiral, so there is a loop to see): 'r' goes there.
       const POSE = ['zoom', 'rot', 'x', 'y', 'pitch', 'yaw']
-      const home = (L) => { for (const k of POSE) L[k].reset(); midi.refresh() }
+      const SQUARE = { zoom: 1, rot: 0 }
+      const home = (L) => { for (const k of POSE) { if (k in SQUARE) L[k].set(SQUARE[k]); else L[k].reset() } midi.refresh() }
       const homePush = [midi.note([1, 16], { toggle: true }), midi.note([2, 16], { toggle: true })]
       const lastHome = homePush.map(f => f())
       const S = {   // switchers: what is played
@@ -169,7 +171,7 @@
       const playOf = [[1, 1], [1, 2], [1, 3], [5, 1], [2, 1], [2, 2], [2, 3], [5, 6], [3, 1], [3, 2], [5, 16], [3, 7], [5, 4]]
       playOf.forEach((home, i) => midi.alias([7, i + 1], home))
       const PL = {   // PLAY's own knobs: both cameras at once, on top of each one's ROT and ZOOM
-        rbth: midi.cc([7, 14], { min: 0, max: 6.283, init: 0, wrap: true, steps: 360, fine: 10 }),
+        rbth: midi.cc([7, 14], { min: 0, max: 360, init: 0, wrap: true, steps: 360, fine: 10 }),   // degrees, as ROT
         zbth: midi.cc([7, 15], { min: 0.5, max: 2, init: 1, curve: 'log', steps: 300, fine: 10 }),
         cntr: midi.cc([7, 16], { min: 0, max: 1, init: 0, steps: 1 })   // contra: camera B takes them the other way
       }
@@ -285,7 +287,7 @@
         // RBTH and ZBTH ride on top for both cameras; with Cntr camera B takes them the other way
         const contra = () => L === B && PL.cntr() > 0.5
         const zoom = () => L.zoom() * (contra() ? 1 / PL.zbth() : PL.zbth())
-        const rot = () => L.rot() + (contra() ? -1 : 1) * PL.rbth()
+        const rot = () => (L.rot() + (contra() ? -1 : 1) * PL.rbth()) * Math.PI / 180
         const pose = (chain) => chain.scale(zoom).offset(L.x, L.y).tilt(L.pitch, L.yaw, L.lens).rotate(rot)
         const direct = pose(monitor(lens(), monDirect))
         const reflected = pose(monitor(lens().scale(glass.mzm, -1, 1), monMirror))
@@ -384,7 +386,7 @@
       const DESC = {
         GAIN: 'Loop gain: the camera\'s exposure, a gain about black. At 1 an echo comes back as bright as it left. Push for fine.',
         ZOOM: 'Magnification per pass (lens zoom, not a dolly): above 1 zooms in (tunnel), below 1 recedes into the void. 0.5 to 2, unity mid-travel.',
-        ROT: 'Camera rotation per pass in radians, wraps. With zoom this makes spirals.',
+        ROT: 'Camera rotation per pass in degrees, wraps at 360. A detent is 1 degree, push and turn 0.1. With zoom this makes spirals.',
         X: 'Camera off the monitor\'s axis, sideways.', Y: 'Camera off the monitor\'s axis, up and down.',
         BLUR: 'Lens focus: softening radius as a fraction of width. 0 = sharp, the blur is out of the path (sampling still softens a fraction of a texel).',
         DLAY: 'Camera delay in frames (1 to 29), a frame delay box after the camera. Higher lags and breathes.',
@@ -392,7 +394,7 @@
         PDLY: 'Persistence delay in frames: 1 smears along the motion like a slow shutter, 15 echoes.',
         PTCH: 'Camera pitch: the monitor\'s top leans away (keystone). None of the rigs has this.', YAW: 'Camera yaw: the monitor\'s right edge leans away.',
         LENS: 'Lens: camera distance for the perspective, 1 very wide to 6 long. Sets how strong pitch and yaw keystone.',
-        home: 'push: camera square on the monitor again (zoom, roll, x, y, pitch, yaw to their starting values). Gain, blur, delay and lens stay.',
+        home: 'push: camera square on the monitor again (zoom 1, no roll, x, y, pitch, yaw 0). Gain, blur, delay and lens stay. The opening spiral (zoom 1.02, 1 degree) is r, not home.',
         XFAD: 'Program crossfade: 0 shows loop A, 1 shows loop B.', PERI: 'Period in seconds for rhythmic reversal of the crossfade; 0 = off.',
         Rvrs: 'Reverse: swap which output each loop reads as itself.',
         Frza: 'Freeze loop A (holds the last frame).', Frzb: 'Freeze loop B.', Grid: 'Show all four outputs.',
@@ -415,7 +417,7 @@
         GNB: 'Gain B (CAMB GAIN).', ZMB: 'Zoom B (CAMB ZOOM).', RTB: 'Rotation B (CAMB ROT).',
         cuta: 'hold: cut seed 1 into loop A whole (the switcher\'s foot pedal). Release and S1A stands again; what was dropped in echoes round.',
         cutb: 'hold: cut seed 2 into loop B whole.', cutx: 'hold: throw the program crossfade to its other end.',
-        RBTH: 'Rotation of both cameras at once, on top of each one\'s ROT.', ZBTH: 'Zoom of both cameras at once, a factor on each one\'s ZOOM.',
+        RBTH: 'Rotation of both cameras at once in degrees, on top of each one\'s ROT.', ZBTH: 'Zoom of both cameras at once, a factor on each one\'s ZOOM.',
         Cntr: 'Contra: camera B takes RBTH and ZBTH the other way (turns against A, zooms out as A zooms in).',
         GLID: 'Glide: seconds an opened patch takes to arrive (0 = at once). A file\'s own "glide" wins. Switches never glide.',
         rec: 'push: record a gesture (knob moves); push again and it loops. Each pass adds a layer. Turning a looped knob by hand takes it back.',
@@ -528,6 +530,7 @@
           page: 'herder', mode, time: +time.toFixed(3),
           seed: { kind: seedKind, url: seedUrl || null }, view,
           colour: colourPath,   // 'matrix' or 'chain': how the monitors' colour knobs are applied
+          angles: 'deg',        // ROT and RBTH in degrees; a dump without this is from when they were radians
           ring: { o0: o0.depth, o1: o1.depth, o2: o2.depth },
           midi: { inputs: midi.inputs, outputs: midi.outputs, profile: midi.profile && midi.profile.name, mode: midi.state.defaults.mode },
           groups: Object.fromEntries(Object.entries(KNOBS).map(([g, ks]) => [g, Object.fromEntries(Object.entries(ks).map(([label, f]) => [label, +f().toFixed(5)]))])),
@@ -688,11 +691,11 @@
         </style>
         <div class="dim">option-1 .. option-0 run or stop slots 1 to 10 (shift restarts; while recording a gesture, they end it into that slot); the EC4's MACR pushes do all 16; G stops everything. Saved with a patch (w).</div>
         <table><thead><tr><th>slot</th><th>name</th><th>kind</th><th>state</th><th></th></tr></thead><tbody data-id="rows"></tbody></table>
-        <p>edit shows any macro as text. Code: the body of a generator. <span class="dim">yield 2 waits two seconds, a bare yield one frame. herder.apply(patch), herder.glideTo('CAMA.ROT', 3, 5), herder.k['SWCH.XFAD'](), and all of Hydra are in reach. A gesture or a sequence is JSON: events are [milliseconds, knob, value], steps are partial patches with a wait.</span></p>
+        <p>edit shows any macro as text. Code: the body of a generator. <span class="dim">yield 2 waits two seconds, a bare yield one frame. herder.apply(patch), herder.glideTo('CAMA.ROT', 90, 5), herder.k['SWCH.XFAD'](), and all of Hydra are in reach. A gesture or a sequence is JSON: events are [milliseconds, knob, value], steps are partial patches with a wait.</span></p>
         <div>slot <select data-id="slot"></select> name <input data-id="name" size="18" /> <label><input type="checkbox" data-id="loop" /> start over when it ends</label>
           <button data-id="put">put in slot and run</button> <span data-id="msg" class="err"></span></div>
         <textarea data-id="code" spellcheck="false">while (true) {
-  herder.glideTo('CAMA.ROT', Math.random() * 6.28, 4)
+  herder.glideTo('CAMA.ROT', Math.random() * 360, 4)
   yield 4
 }</textarea>`
         const $ = (id) => root.querySelector(`[data-id="${id}"]`)
@@ -766,10 +769,33 @@
       // labels from before loops were letters and seeds numbers everywhere; patches saved then still open
       const LABEL_WAS = { LEVA: 'S1A', LEVB: 'S2B', SFRQ: 'FRQ1', SKAL: 'KAL1', FRQB: 'FRQ2', KALB: 'KAL2', Kind: 'Knd1', KndB: 'Knd2', AtoB: 'ATOB', BtoA: 'BTOA' }
       const SEED_KINDS = ['osc', 'noise', 'voronoi', 'cam', 'screen', 'video', 'image', 'sketch']
+      // ROT and RBTH were radians once. A dump from then (it has "when" and no "angles": "deg") is turned to degrees
+      // on the way in: its groups, its sequence steps, its gesture events. Code macros are text and stay as written.
+      const ANGLES = ['CAMA.ROT', 'CAMB.ROT', 'PLAY.RBTH'], DEG = 180 / Math.PI
+      const anglesToDegrees = (state) => {
+        const groupsOf = (groups) => {
+          if (!groups || typeof groups !== 'object') return groups
+          const out = {}
+          for (const [g, knobs] of Object.entries(groups)) {
+            out[g] = (knobs && typeof knobs === 'object') ? Object.assign({}, knobs) : knobs
+            for (const k of ANGLES) { const [kg, label] = k.split('.'); if (kg === g && out[g] && Number.isFinite(parseFloat(out[g][label]))) out[g][label] = parseFloat(out[g][label]) * DEG }
+          }
+          return out
+        }
+        const stepOf = (st) => (st && typeof st === 'object') ? Object.assign({}, st, { groups: groupsOf(st.groups) }) : st
+        const eventsOf = (L) => (L && Array.isArray(L.events)) ? Object.assign({}, L, { events: L.events.map(e => (Array.isArray(e) && ANGLES.includes(e[1]) && Number.isFinite(e[2])) ? [e[0], e[1], e[2] * DEG] : e) }) : L
+        const macroOf = (d) => (d && Array.isArray(d.steps)) ? Object.assign({}, d, { steps: d.steps.map(stepOf) }) : eventsOf(d)
+        return Object.assign({}, state, { angles: 'deg', groups: groupsOf(state.groups) },
+          Array.isArray(state.macros) ? { macros: state.macros.map(macroOf) } : {},
+          Array.isArray(state.gestures) ? { gestures: state.gestures.map(eventsOf) } : {},
+          Array.isArray(state.sequence) ? { sequence: state.sequence.map(stepOf) } : {})
+      }
       const applyState = (state) => {
         const skipped = []
         const part = (name, fn) => { try { fn() } catch (e) { skipped.push(`${name} (${e.message})`) } }
         if (!state || typeof state !== 'object') return ['the whole file (not an object)']
+        const radians = !!state.when && state.angles !== 'deg'
+        if (radians) { try { state = anglesToDegrees(state) } catch (e) { skipped.push(`angles (${e.message})`) } }
         // knobs arrive over "glide" seconds if the file says so, else over GLID (as it stood before this patch)
         const glide = Number.isFinite(Number(state.glide)) ? Math.max(0, Number(state.glide)) : S.glid()
         const targets = {}
@@ -780,7 +806,7 @@
             if (!flat[k] || !Number.isFinite(v)) { skipped.push(k); continue }
             targets[k] = v
           }
-        } else if (state.snapshot && typeof state.snapshot === 'object' && !state.reset) part('snapshot', () => { midi.restore(state.snapshot); for (const k in flat) seen[k] = flat[k]() })
+        } else if (state.snapshot && typeof state.snapshot === 'object' && !state.reset) part('snapshot', () => { midi.restore(state.snapshot); if (radians) for (const k of ANGLES) flat[k].set(flat[k]() * DEG); for (const k in flat) seen[k] = flat[k]() })
         for (const [k, v] of Object.entries(targets)) part(k, () => glideTo(k, v, glide))
         // macros replace the slots they name; a file's bare gestures / sequence (the earlier form) take free slots
         if (Array.isArray(state.macros)) part('macros', () => { if (!state.macros.length) auto.macros = []; state.macros.forEach(d => { if (!addMacro(d)) skipped.push(`macro ${d && d.slot}`) }) })

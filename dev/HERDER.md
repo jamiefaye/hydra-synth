@@ -52,7 +52,7 @@ your finger does:
 |---|---|---|
 | 1 | GAIN | loop gain, the camera's exposure: a gain about black, 0.8 to 1.25. At 1 an echo comes back as bright as it left; above 1 the loop climbs to white. Fine push. |
 | 2 | ZOOM | magnification per pass, 0.5 to 2, unity mid-travel. A lens zoom, not a dolly. |
-| 3 | ROT | roll per pass, in radians, wraps. |
+| 3 | ROT | roll per pass, in degrees, wraps at 360. A detent is 1 degree, push and turn 0.1. |
 | 4, 5 | X, Y | camera off the monitor's axis. |
 | 6 | BLUR | lens focus. 0 is sharp; sampling still softens a fraction of a texel. |
 | 7 | DLAY | frame delay after the camera, 1 to 29. Higher lags and breathes. |
@@ -60,7 +60,7 @@ your finger does:
 | 9, 10 | PTCH, YAW | camera pitch and yaw. The monitor keystones and, with Void on, its far edge goes black. |
 | 11 | LENS | camera distance for the perspective, 1 wide to 6 long. How strong pitch and yaw keystone. |
 | 12 | PDLY | PRST's delay. 1 smears along the motion like a slow shutter, 15 echoes. |
-| 16 | home | push: the camera square on again (zoom, roll, x, y, pitch, yaw back). Gain, blur, delay and lens stay. |
+| 16 | home | push: the camera square on again (zoom 1, no roll, x, y, pitch, yaw 0). Gain, blur, delay and lens stay. The opening spiral (zoom 1.02, 1 degree) is `r`, not home. |
 
 ### SWCH: the switchers
 
@@ -129,7 +129,10 @@ cuta  cutb   cutx SDLY     the cuts; the delay both seeds share
 | 16 | SDLY | seed delay in frames before the seeds enter the loops. |
 
 Patches saved under the earlier names (LEVA, LEVB, SFRQ, SKAL, FRQB, KALB, Kind, KndB, ATOB, BTOA, `code`,
-`codeB`) still open.
+`codeB`) still open. ROT and RBTH were radians once: a dump from then (it has `when` and no `"angles": "deg"`)
+is turned to degrees as it opens, sequence steps and gesture events included. Code macros are text and stay
+as written, so a `glideTo('CAMA.ROT', 3, 5)` in one now means 3 degrees. If you cut a new dump down, keep
+`"angles": "deg"` with `"when"`, or drop both.
 
 ### RIG: the glass and the cabling
 
@@ -137,7 +140,7 @@ Patches saved under the earlier names (LEVA, LEVB, SFRQ, SKAL, FRQB, KALB, Kind,
 |---|---|---|
 | 1, 3 | MIRA, MIRB | beam splitter: how much of the mirrored monitor each camera sees. |
 | 2, 4 | MZMA, MZMB | mirror zoom: the reflected monitor's optical distance. |
-| 5, 6 | ATOB, BTOA | cross-links: how much of the other loop each camera sees. |
+| 5, 6 | ATOB, BTOA | cross-links: how much of the other loop each camera sees. Each is one frame behind, the same both ways (BTOA was two until the frame rings were stepped together; a patch tuned with BTOA up runs a frame tighter now). |
 | 7, 8 | KEYA, KEYB | luma key for the seed entering A, B. Above 0 the seed is keyed per pixel, not crossfaded. |
 
 ### PLAY: what a set rides
@@ -180,7 +183,7 @@ the defaults, so write a patch (`w`) to keep a state.
 down to the part you want and open it over whatever is playing:
 
 ```json
-{ "groups": { "CAMA": { "ZOOM": 0.97, "ROT": 0.1 }, "MONS": { "3HUE": -0.1 } } }
+{ "groups": { "CAMA": { "ZOOM": 0.97, "ROT": 6 }, "MONS": { "3HUE": -0.1 } } }
 ```
 
 Knobs go by their labels, as in the dump's `groups`. `seed`, `code` and `view` are each optional too.
@@ -220,7 +223,7 @@ what you want back.
 
 ```js
 while (true) {                                   // a slow wander of camera A, for ever
-  herder.glideTo('CAMA.ROT', Math.random() * 6.28, 6)
+  herder.glideTo('CAMA.ROT', Math.random() * 360, 6)
   if (herder.k['SWCH.XFAD']() > 0.5) herder.apply({ glide: 3, groups: { RIG: { MIRA: Math.random() } } })
   yield 6
 }
@@ -247,8 +250,8 @@ ratio, switches jump.
 
 ```json
 { "macros": [ { "slot": 1, "name": "breathe", "kind": "sequence", "loop": true, "steps": [
-  { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 0.97, "ROT": 0.1 } } },
-  { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 1.04, "ROT": 6.18 } } }
+  { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 0.97, "ROT": 6 } } },
+  { "wait": 8, "glide": 6, "groups": { "CAMA": { "ZOOM": 1.04, "ROT": 354 } } }
 ] } ] }
 ```
 
