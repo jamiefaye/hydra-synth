@@ -270,7 +270,7 @@
       const monitor = (chain, m) => {
         // colourPath 'chain' is the front panel as it was: Hydra's hue, saturate, brightness, contrast in a row. Its HSV hue
         // holds the brightest channel and full saturation, so turning a colour sheds luminance, and patches tuned on it run
-        // hotter on the matrix, which keeps luminance. Patches from before the matrix open on the chain ('c' flips it).
+        // hotter on the matrix, which keeps luminance. The matrix is the default, for the page and for patches that do not say; 'c' flips it.
         if (colourPath === 'chain') return chain.hue(M[m].hue).saturate(M[m].sat).brightness(M[m].brt).contrast(M[m].con)
         const k = M[m]; let key = '', twelve = null
         const at = (i) => () => { const now = `${k.hue()},${k.sat()},${k.brt()},${k.con()}`; if (now !== key) { key = now; twelve = colourOf(k.hue(), k.sat(), k.brt(), k.con()) } return twelve[i] }
@@ -794,8 +794,8 @@
         const kind = state.seed && state.seed.kind
         if (kind && SEED_KINDS.includes(kind)) part('seed', () => { lastKindKnob = Math.round(SD.knd1()); setSeed(kind, typeof state.seed.url === 'string' ? state.seed.url : '') })   // rebuilds the loops
         else { if (kind) skipped.push(`seed.kind ${kind}`); if (['code', 'code1', 'code2', 'codeB'].some(c => typeof state[c] === 'string')) part('code', build) }
-        // a whole patch with no `colour` was saved before the matrix and was tuned on the chain; a partial one leaves it be
-        const wantColour = (state.colour === 'chain' || state.colour === 'matrix') ? state.colour : ((state.when && state.groups && !('colour' in state)) ? 'chain' : null)
+        // the matrix is the default everywhere; a patch goes to the chain only if it says so (`"colour": "chain"`), or by the c key
+        const wantColour = (state.colour === 'chain' || state.colour === 'matrix') ? state.colour : ((state.when && state.groups) ? 'matrix' : null)
         if (wantColour && wantColour !== colourPath) part('colour', () => { colourPath = wantColour; build() })
         if (state.view) { const v = VIEW_WAS[state.view] || state.view; if (views[v]) part('view', () => setView(v)); else skipped.push(`view ${state.view}`) }
         part('refresh', () => midi.refresh())
