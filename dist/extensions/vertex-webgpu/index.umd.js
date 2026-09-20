@@ -2,6 +2,114 @@
   typeof exports === "object" && typeof module !== "undefined" ? factory(exports) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = typeof globalThis !== "undefined" ? globalThis : global || self, factory(global.HydraVertexExtensionWebGPU = {}));
 })(this, (function(exports2) {
   "use strict";
+  const STATS_DEFAULTS = { bins: 64, max: 1, floor: 2 / 255, railAt: 0.98, step: 1, every: 1, grid: [64, 36], ease: 0.2 };
+  const LUMA = [0.299, 0.587, 0.114];
+  const SUM_SCALE = 512;
+  const LUM_CEILING = 4;
+  const EXTRA = 5;
+  function makeStats(opts = {}, isFloat = false) {
+    const o = Object.assign({}, STATS_DEFAULTS, Object.fromEntries(Object.entries(opts || {}).filter(([, v2]) => v2 !== void 0)));
+    if (opts.max === void 0 && isFloat) o.max = 2;
+    if (opts.railAt === void 0) o.railAt = 0.98 * o.max;
+    o.bins = Math.max(2, Math.min(1024, Math.round(o.bins)));
+    return {
+      enabled: true,
+      options: o,
+      bins: new Float32Array(o.bins),
+      max: o.max,
+      mean: 0,
+      chroma: 0,
+      black: 0,
+      rail: 0,
+      gain: 1,
+      gainSmooth: 1,
+      chromaGain: 1,
+      count: 0,
+      frame: 0
+    };
+  }
+  function finishStats(stats, counts) {
+    const n = stats.options.bins, count = counts[n + 4];
+    if (!count) return stats;
+    const prevMean = stats.mean, prevChroma = stats.chroma;
+    for (let i2 = 0; i2 < n; i2++) stats.bins[i2] = counts[i2] / count;
+    stats.mean = counts[n] / SUM_SCALE / count;
+    stats.chroma = counts[n + 1] / SUM_SCALE / count;
+    stats.black = counts[n + 2] / count;
+    stats.rail = counts[n + 3] / count;
+    stats.count = count;
+    stats.gain = stats.frame > 0 && prevMean > 1e-4 ? stats.mean / prevMean : 1;
+    stats.chromaGain = stats.frame > 0 && prevChroma > 1e-4 ? stats.chroma / prevChroma : 1;
+    stats.gainSmooth += (stats.gain - stats.gainSmooth) * stats.options.ease;
+    stats.frame++;
+    return stats;
+  }
+  function countSamples(stats, data2, scale = 1) {
+    const o = stats.options, n = o.bins, counts = new Float64Array(n + EXTRA);
+    for (let i2 = 0; i2 + 3 < data2.length; i2 += 4) {
+      const a2 = Math.min(Math.max(data2[i2 + 3] * scale, 0), 1);
+      const r = data2[i2] * scale * a2, g = data2[i2 + 1] * scale * a2, b = data2[i2 + 2] * scale * a2;
+      const lum = Math.min(Math.max(LUMA[0] * r + LUMA[1] * g + LUMA[2] * b, 0), LUM_CEILING);
+      counts[Math.min(n - 1, Math.floor(lum / o.max * n))]++;
+      counts[n] += lum * SUM_SCALE;
+      counts[n + 1] += Math.min(Math.max(Math.max(r, g, b) - Math.min(r, g, b), 0), LUM_CEILING) * SUM_SCALE;
+      if (lum < o.floor) counts[n + 2]++;
+      if (lum >= o.railAt) counts[n + 3]++;
+      counts[n + 4]++;
+    }
+    return counts;
+  }
+  function measureGl(output) {
+    const stats = output.stats;
+    if (!stats || !stats.enabled || !output.regl) return;
+    stats._tick = (stats._tick || 0) + 1;
+    if (stats._tick % Math.max(1, stats.options.every)) return;
+    const regl2 = output.regl, [w, h] = stats.options.grid, isFloat = !!output.float;
+    let m = output._measure;
+    if (!m || m.regl !== regl2 || m.w !== w || m.h !== h || m.isFloat !== isFloat) {
+      if (m && m.fbo) {
+        try {
+          m.fbo.destroy();
+        } catch (e) {
+        }
+      }
+      m = output._measure = { regl: regl2, w, h, isFloat };
+      m.fbo = regl2.framebuffer({ color: regl2.texture({ width: w, height: h, format: "rgba", type: isFloat ? "half float" : "uint8", mag: "nearest", min: "nearest" }), depthStencil: false });
+      m.draw = regl2({
+        frag: "precision highp float; uniform sampler2D tex; varying vec2 uv; void main () { gl_FragColor = texture2D(tex, uv); }",
+        vert: "precision highp float; attribute vec2 position; varying vec2 uv; void main () { uv = position * 0.5 + 0.5; gl_Position = vec4(position, 0.0, 1.0); }",
+        attributes: { position: [[-1, -1], [3, -1], [-1, 3]] },
+        uniforms: { tex: regl2.prop("tex") },
+        count: 3,
+        depth: { enable: false },
+        blend: { enable: false },
+        framebuffer: m.fbo
+      });
+      m.bytes = new Uint8Array(w * h * 4);
+      m.floats = new Float32Array(w * h * 4);
+    }
+    m.draw({ tex: output.getCurrent() });
+    if (!isFloat) {
+      regl2.read({ framebuffer: m.fbo, data: m.bytes });
+      finishStats(stats, countSamples(stats, m.bytes, 1 / 255));
+      return;
+    }
+    const gl = regl2._gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, m.fbo._framebuffer.framebuffer);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, m.floats);
+    const ok = gl.getError() === gl.NO_ERROR;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    regl2._refresh();
+    if (ok) finishStats(stats, countSamples(stats, m.floats, 1));
+  }
+  function measureMethod(opts) {
+    if (opts === false) {
+      if (this.stats) this.stats.enabled = false;
+      return this;
+    }
+    this.stats = makeStats(opts === true ? {} : opts, !!this.float || /16float/.test(this._textureDescriptor ? this._textureDescriptor.format : ""));
+    return this;
+  }
   class FBOToCanvas {
     constructor(canvas, device) {
       this.canvas = canvas;
@@ -10451,6 +10559,110 @@ fn main(input: VertexInput) -> VertexOutput {
       return this.getTexture(1);
     }
   }
+  OutputWgsl.prototype.measure = measureMethod;
+  const WGSL = `
+struct P { width: u32, height: u32, step: u32, bins: u32, maxv: f32, floorv: f32, railAt: f32, pad: f32 };
+@group(0) @binding(0) var tex: texture_2d<f32>;
+@group(0) @binding(1) var<storage, read_write> H: array<atomic<u32>>;
+@group(0) @binding(2) var<uniform> p: P;
+@compute @workgroup_size(8, 8)
+fn main (@builtin(global_invocation_id) id: vec3<u32>) {
+  let xy = id.xy * p.step;
+  if (xy.x >= p.width || xy.y >= p.height) { return; }
+  let c = textureLoad(tex, vec2<i32>(xy), 0);
+  let rgb = c.rgb * clamp(c.a, 0.0, 1.0);   // the light shown, as the blit to the canvas shows it
+  let lum = clamp(dot(rgb, vec3<f32>(${LUMA.join(", ")})), 0.0, ${LUM_CEILING.toFixed(1)});
+  let chroma = clamp(max(rgb.r, max(rgb.g, rgb.b)) - min(rgb.r, min(rgb.g, rgb.b)), 0.0, ${LUM_CEILING.toFixed(1)});
+  let bin = min(p.bins - 1u, u32(lum / p.maxv * f32(p.bins)));
+  atomicAdd(&H[bin], 1u);
+  atomicAdd(&H[p.bins], u32(lum * ${SUM_SCALE.toFixed(1)}));
+  atomicAdd(&H[p.bins + 1u], u32(chroma * ${SUM_SCALE.toFixed(1)}));
+  if (lum < p.floorv) { atomicAdd(&H[p.bins + 2u], 1u); }
+  if (lum >= p.railAt) { atomicAdd(&H[p.bins + 3u], 1u); }
+  atomicAdd(&H[p.bins + 4u], 1u);
+}`;
+  const STAGING = 3;
+  class GpuStats {
+    constructor(device) {
+      this.device = device;
+      this.pipeline = device.createComputePipeline({ layout: "auto", compute: { module: device.createShaderModule({ code: WGSL }), entryPoint: "main" } });
+      this.per = /* @__PURE__ */ new Map();
+    }
+    _for(out) {
+      const n = out.stats.options.bins;
+      let r = this.per.get(out);
+      if (r && r.bins === n) return r;
+      if (r) this._free(r);
+      const size = (n + EXTRA) * 4;
+      r = {
+        bins: n,
+        size,
+        counts: this.device.createBuffer({ size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }),
+        params: this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+        staging: Array.from({ length: STAGING }, () => ({ buf: this.device.createBuffer({ size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }), busy: false }))
+      };
+      this.per.set(out, r);
+      return r;
+    }
+    _free(r) {
+      for (const b of [r.counts, r.params, ...r.staging.map((s) => s.buf)]) {
+        try {
+          b.destroy();
+        } catch (e) {
+        }
+      }
+    }
+    /** Record the measuring of every output that asked for it. Returns what read() needs after the submit. */
+    encode(commandEncoder, outputs) {
+      const pending = [];
+      for (const out of outputs) {
+        const stats = out && out.stats;
+        if (!stats || !stats.enabled || !out.textures) continue;
+        stats._tick = (stats._tick || 0) + 1;
+        if (stats._tick % Math.max(1, stats.options.every)) continue;
+        const r = this._for(out), slot = r.staging.find((s) => !s.busy);
+        if (!slot) continue;
+        const tex = out.getCurrentTexture(), o = stats.options;
+        let step = Math.max(1, Math.round(o.step));
+        while (tex.width / step * (tex.height / step) > 1 << 20) step++;
+        const ab = new ArrayBuffer(32), u = new Uint32Array(ab), f = new Float32Array(ab);
+        u[0] = tex.width;
+        u[1] = tex.height;
+        u[2] = step;
+        u[3] = r.bins;
+        f[4] = o.max;
+        f[5] = o.floor;
+        f[6] = o.railAt;
+        this.device.queue.writeBuffer(r.params, 0, ab);
+        commandEncoder.clearBuffer(r.counts);
+        const pass = commandEncoder.beginComputePass({ label: "output stats" });
+        pass.setPipeline(this.pipeline);
+        pass.setBindGroup(0, this.device.createBindGroup({
+          layout: this.pipeline.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: tex.createView() }, { binding: 1, resource: { buffer: r.counts } }, { binding: 2, resource: { buffer: r.params } }]
+        }));
+        pass.dispatchWorkgroups(Math.ceil(tex.width / step / 8), Math.ceil(tex.height / step / 8));
+        pass.end();
+        commandEncoder.copyBufferToBuffer(r.counts, 0, slot.buf, 0, r.size);
+        slot.busy = true;
+        pending.push({ stats, slot, n: r.bins });
+      }
+      return pending;
+    }
+    /** After queue.submit: map each staging buffer, not awaited by the frame. */
+    read(pending) {
+      for (const { stats, slot, n } of pending) {
+        slot.buf.mapAsync(GPUMapMode.READ).then(() => {
+          const counts = Array.from(new Uint32Array(slot.buf.getMappedRange(), 0, n + EXTRA));
+          slot.buf.unmap();
+          slot.busy = false;
+          finishStats(stats, counts);
+        }).catch(() => {
+          slot.busy = false;
+        });
+      }
+    }
+  }
   let samplerFilter = "nearest";
   function setSamplerFilter(filter) {
     samplerFilter = filter === "linear" ? "linear" : "nearest";
@@ -11695,7 +11907,13 @@ fn main(input: VertexInput) -> VertexOutput {
           passEncoder.end();
         }
       }
+      let statsPending = [];
+      if (this.outputChannelObjects.some((o) => o && o.stats && o.stats.enabled)) {
+        if (!this._gpuStats) this._gpuStats = new GpuStats(this.device);
+        statsPending = this._gpuStats.encode(commandEncoder, this.outputChannelObjects);
+      }
       this.device.queue.submit([commandEncoder.finish()]);
+      if (statsPending.length) this._gpuStats.read(statsPending);
       await this.device.queue.onSubmittedWorkDone();
       if (this.showQuad) {
         await this.fboGridRenderer.refreshCanvases(
@@ -13124,6 +13342,7 @@ fn main(input: VertexInput) -> VertexOutput {
   Output$1.prototype.tick = function(props) {
     this.draw(props);
   };
+  Output$1.prototype.measure = measureMethod;
   function Webcam(deviceId) {
     return navigator.mediaDevices.enumerateDevices().then((devices) => devices.filter((devices2) => devices2.kind === "videoinput")).then((cameras) => {
       let constraints = { audio: false, video: true };
@@ -26301,6 +26520,9 @@ fn main(input: VertexInput) -> VertexOutput {
           bpm: hydra.synth.bpm,
           resolution: [hydra.canvas.width, hydra.canvas.height]
         }));
+        hydra.o.forEach((o) => {
+          if (o.stats) measureGl(o);
+        });
         if (hydra.isRenderingAll) {
           hydra.renderAll(gridRenderProps(hydra.o, hydra.gridLayout, [hydra.canvas.width, hydra.canvas.height]));
         } else {
