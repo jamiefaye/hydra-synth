@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hydra output sync test</title>
+    <style>
+      body { margin: 0; background: #222; }
+      canvas { width: 640px; height: 360px; display: block; }
+      #status { position: fixed; top: 4px; left: 4px; color: white; font-family: monospace; font-size: 12px; background: rgba(0,0,0,0.5); padding: 2px 4px; white-space: pre; }
+    </style>
+  </head>
+  <body>
+    <div id="status">Loading...</div>
+    <canvas id="c" width="640" height="360"></canvas>
+    <script type="module">
+      // mode = core | gl | gpu. o1 is a clock: its red steps one level every frame. o0 = src(o1) reads an
+      // output later in the order, o2 = src(o1) reads one earlier. Every ring steps before any output draws,
+      // so both must show the clock one frame back (lag 1). Stepped inside each draw, o0 lagged 2.
+      // Results go to the console as SYNC-TEST ... and to the title so a headless run can read them.
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'core'
+      const status = document.getElementById('status')
+      const canvas = document.getElementById('c')
+      const say = (t) => { status.textContent = t; console.log('SYNC-TEST', t); document.title = t }
+      const LEVELS = 8, W = 640, H = 360
+      try {
+        let hydra
+        const opts = { canvas, width: W, height: H, detectAudio: false, makeGlobal: true, numOutputs: 4, autoLoop: false, preserveDrawingBuffer: true }
+        if (mode === 'core') {
+          const HydraRenderer = (await import('../src/hydra-synth.js')).default
+          hydra = new HydraRenderer(opts)
+          await hydra.ready()
+        } else {
+          const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+          hydra = await createHydra({ ...opts, useWGSL: mode === 'gpu' })
+        }
+        window.__hydra = hydra
+        // ?old=1 (core, gl): take advance() away so each draw steps its own ring, as it was; o0 then lags 2 and this FAILs
+        if (q.get('old')) hydra.o.forEach(o => { o.advance = undefined })
+        let n = 0
+        solid(() => (++n % LEVELS) / LEVELS, 0, 0, 1).out(o1)   // evaluated once a frame
+        src(o1).out(o0)
+        src(o1).out(o2)
+        const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+        for (let i = 0; i < 12; i++) { hydra.tick(16); await wait(30) }
+        const reds = {}
+        if (mode === 'gpu') {
+          const device = hydra.wgslHydra.device, bpr = W * 4
+          const enc = device.createCommandEncoder(), bufs = {}
+          for (const [name, out] of [['o0', o0], ['o1', o1], ['o2', o2]]) {
+            bufs[name] = device.createBuffer({ size: bpr * H, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+            enc.copyTextureToBuffer({ texture: out.getCurrentTexture() }, { buffer: bufs[name], bytesPerRow: bpr }, { width: W, height: H })
+          }
+          device.queue.submit([enc.finish()])
+          const bgra = /^bgra/.test(navigator.gpu.getPreferredCanvasFormat())
+          for (const name in bufs) {
+            await bufs[name].mapAsync(GPUMapMode.READ)
+            const d = new Uint8Array(bufs[name].getMappedRange()), i = (180 * W + 320) * 4
+            reds[name] = Math.max(d[i], d[i + 2]); void bgra   // red sits first or third by canvas format; green and blue are 0
+            bufs[name].unmap()
+          }
+        } else {
+          for (const [name, out] of [['o0', o0], ['o1', o1], ['o2', o2]]) {
+            const d = hydra.regl.read({ framebuffer: out.getCurrent() })
+            reds[name] = d[(180 * W + 320) * 4]
+          }
+        }
+        const level = (r) => Math.round(r / 255 * LEVELS) % LEVELS
+        const lag = (name) => (level(reds.o1) - level(reds[name]) + LEVELS) % LEVELS
+        const lags = { 'o0 reads o1 (later)': lag('o0'), 'o2 reads o1 (earlier)': lag('o2') }
+        const ok = lags['o0 reads o1 (later)'] === 1 && lags['o2 reads o1 (earlier)'] === 1
+        say(`${mode} ${ok ? 'PASS' : 'FAIL'} lags ${JSON.stringify(lags)} reds ${JSON.stringify(reds)}`)
+      } catch (e) {
+        console.error(e); say(`${mode} ERROR ${e.message}`)
+      }
+    </script>
+  </body>
+</html>

@@ -3,6 +3,7 @@ import {FBOGridToCanvas} from "./FBOGridToCanvas.js";
 import {computeGridLayout} from "../../../src/lib/grid-layout.js";
 import {BLEND_MODES} from "./outputWgsl.js";
 import { computeSkinningMatrices, applySkinning } from '../geometry.js';
+import { delayedIndex } from '../../../src/lib/frame-ring.js';
 
 // Used to enable a single pass through the "animate" routine.
 // Used for testing to avoid a flood of console error messages.
@@ -65,8 +66,7 @@ const fragPrefix = `
 
      var output : VertexOutput;
      output.position = vec4<f32>( positions[vertexIndex], 0.0, 1.0);
-     // Pre-flip X so fragment shader's X-flip (for geometry) cancels out for fullscreen
-     output.texcoord = vec2<f32>(1.0 - (positions[vertexIndex].x / 2.0 + 0.5), positions[vertexIndex].y / 2.0 + 0.5);
+     output.texcoord = positions[vertexIndex] / 2.0 + 0.5; // positions are -1 to 1, texcoords are 0 to 1
      output.faceId = 0.0;
 
      // Default vertex data for fullscreen quad
@@ -249,7 +249,7 @@ class wgslHydra {
         mipLevelCount: 1,
         format: this.outputFormat,
         // COPY_SRC so frames can be read back (tests, screenshots, Syphon-style export)
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST   // COPY_DST: trails start from a copy of the last frame
     };
 
 		for (let chan = 0; chan < this.numChannels; ++chan) {
@@ -1274,6 +1274,14 @@ class wgslHydra {
 		// Write sprite UV uniforms (spriteGrid is now per-sprite)
 		this.device.queue.writeBuffer(this.spriteUVUniformBuffer, 0, this.spriteUVUniformValues);
 
+		// Every ring steps before any channel draws, so outputs read each other at the same frame: src(o1) from
+		// o0 and src(o0) from o1 are both T-1. Stepped inside the loop, a channel later in the order read as T-2.
+		// (The same rule as Output.advance on WebGL.)
+		for (let chan = 0; chan < this.numChannels; ++chan) {
+			const out = this.renderPassInfo[chan].outputObject;
+			if (out && out.views) out.flipPingPong();
+		}
+
 		// For each active channel...
     for (let chan = 0; chan < this.numChannels; ++chan) {
  			const rpe = this.renderPassInfo[chan];
@@ -1286,7 +1294,6 @@ class wgslHydra {
 				// No sprites and no legacy pipeline - clear the framebuffer (for hush())
 				// Only clear if the output has been used before (has textures)
 				if (rpe.outputObject && rpe.outputObject.views) {
-					rpe.outputObject.flipPingPong();
 					const clearPassDescriptor = {
 						label: `clearPass_c${chan}`,
 						colorAttachments: [{
@@ -1302,12 +1309,25 @@ class wgslHydra {
 				continue;
 			}
 
-		  rpe.outputObject.flipPingPong();
-
 			if (hasSprites) {
 				// Render sprites in level order
 				const levels = Array.from(rpe.sprites.keys()).sort((a, b) => a - b);
 				let depthCleared = false;  // Track if depth buffer has been cleared this frame
+
+				// No level 0: nothing clears, the frame starts from the last one (trails), as on WebGL. The slot being drawn
+				// into holds the frame from a whole ring ago, so the last frame is copied into it first; and a ring that has
+				// never been drawn to starts as opaque black, not as transparent nothing.
+				if (!levels.includes(0)) {
+					const out = rpe.outputObject;
+					if (!out._primed) {
+						out._primed = true;
+						for (const view of out.views) {
+							commandEncoder.beginRenderPass({ label: `primePass_c${chan}`, colorAttachments: [{ view, clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, loadOp: "clear", storeOp: "store" }] }).end();
+						}
+					}
+					const prev = out.textures[delayedIndex(out.pingPongs, out.depth, 1)], cur = out.getCurrentTexture();
+					if (prev !== cur) commandEncoder.copyTextureToTexture({ texture: prev }, { texture: cur }, [cur.width, cur.height]);
+				}
 
 				for (let i = 0; i < levels.length; i++) {
 					const level = levels[i];

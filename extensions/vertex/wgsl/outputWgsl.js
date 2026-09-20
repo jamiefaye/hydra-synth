@@ -305,6 +305,7 @@ class OutputWgsl {
       this.views[i] = this.textures[i].createView()
     }
     this.pingPongs = 0
+    this._primed = false   // new textures are transparent nothing until wgslHydra clears them (trails path)
   }
 
   getCurrentTextureView() {

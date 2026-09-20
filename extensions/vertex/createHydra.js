@@ -404,15 +404,10 @@ export async function createHydra({
     // Recreate FBOs for each output
     hydra.o.forEach(output => {
       output.regl = hydra.regl
-      output.fbos = Array(2).fill().map(() => hydra.regl.framebuffer({
-        color: hydra.regl.texture({
-          mag: 'nearest',
-          width: hydra.width,
-          height: hydra.height,
-          format: 'rgba'
-        }),
-        depthStencil: false
-      }))
+      // the output's own maker, so the ring depth, filter and float survive; the z buffer comes back with the next 3D sprite
+      output.hasDepthBuffer = false
+      output.pingPongIndex = 0
+      output.fbos = output._makeFbos(output.depth || 2, hydra.width, hydra.height, false)
       // Reset draw to empty
       output.draw = () => {}
       // Clear sprites map
@@ -427,6 +422,7 @@ export async function createHydra({
         attributes: { position: output.defaultPositionBuffer },
         uniforms: { source: hydra.regl.prop('source') },
         count: 3,
+        blend: { enable: true, func: { srcRGB: 'one', srcAlpha: 'one', dstRGB: 'one minus src alpha', dstAlpha: 'one minus src alpha' } },   // as Output's copyCommand
         depth: { enable: false }
       })
     })
@@ -672,7 +668,8 @@ function createTick(hydra) {
       hydra.wgslHydra.outChannel = hydra.output ? hydra.output.chanNum : 0
       hydra.wgslHydra.animate(hydra.synth.time, hydra.synth.mouse, hydra.synth.resolution, hydra.isRenderingAll)
     } else {
-      // WebGL render
+      // WebGL render: every ring steps first, so outputs read each other at the same frame (see Output.advance)
+      hydra.o.forEach(o => o.advance && o.advance())
       hydra.o.forEach(o => o.tick && o.tick({
         time: hydra.synth.time,
         mouse: hydra.synth.mouse,

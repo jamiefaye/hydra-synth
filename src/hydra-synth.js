@@ -354,6 +354,8 @@ class HydraRenderer {
       }
     //  console.log(this.canvas.width, this.canvas.height)
       const currentTime = this.synth.time;
+      // every ring steps first, so outputs read each other at the same frame (see Output.advance)
+      for (let i = 0; i < this.o.length; i++) if (this.o[i].advance) this.o[i].advance()
       for (let i = 0; i < this.o.length; i++) {
         this.o[i].tick({
           time: currentTime,

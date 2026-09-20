@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hydra cube face orientation test</title>
+    <style>
+      body { margin: 0; background: #222; color: white; font-family: monospace; font-size: 12px; }
+      canvas { width: 360px; height: 360px; display: block; }
+      #status { white-space: pre; padding: 4px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="360" height="360"></canvas>
+    <div id="status">Loading...</div>
+    <script type="module">
+      // mode = gl | gpu. A cube with a 4 x 4 sprite grid (cell n on face n) is turned so each face in turn looks
+      // at the camera, and what lands on the canvas is matched against every cell of the grid image as drawn,
+      // mirrored left-right, turned upside down, and both. Every face must match its own cell "as drawn".
+      // Results go to the console as CUBE-TEST ... and to the title so a headless run can read them.
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'gl'
+      const status = document.getElementById('status')
+      const canvas = document.getElementById('c')
+      const say = (t) => { status.textContent = t; console.log('CUBE-TEST', t); document.title = t.split('\n')[0] }
+      const N = 24   // cells and faces are compared as N x N grey thumbnails
+      try {
+        const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+        const hydra = await createHydra({ canvas, width: 360, height: 360, detectAudio: false, makeGlobal: true, numOutputs: 4, autoLoop: false, preserveDrawingBuffer: true, useWGSL: mode === 'gpu' })
+        window.__hydra = hydra
+        const img = new Image(); img.crossOrigin = 'anonymous'
+        const loaded = new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(new Error('no image at ' + img.src)) })   // not img.decode(): it never settles in a hidden tab
+        img.src = q.get('img') || 'media/test-grid-4x4.png'
+        await loaded
+        const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+        const pad = document.createElement('canvas'); pad.width = N; pad.height = N
+        const ctx = pad.getContext('2d', { willReadFrequently: true })
+        const grey = (draw) => { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, N, N); draw(ctx); const d = ctx.getImageData(0, 0, N, N).data; const g = new Float32Array(N * N); for (let i = 0; i < N * N; i++) g[i] = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3; return g }
+        const ORIENT = { 'as drawn': [1, 1], 'mirrored left-right': [-1, 1], 'upside down': [1, -1], 'turned 180': [-1, -1] }
+        const cw = img.width / 4, ch = img.height / 4, refs = []
+        for (let cell = 0; cell < 16; cell++) for (const [name, [sx, sy]] of Object.entries(ORIENT)) {
+          refs.push({ cell, name, g: grey(c => { c.translate(sx < 0 ? N : 0, sy < 0 ? N : 0); c.scale(sx, sy); c.drawImage(img, (cell % 4) * cw, Math.floor(cell / 4) * ch, cw, ch, 0, 0, N, N) }) })
+        }
+        const dist = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length }
+        s0.init({ src: img })
+        let ax = 0, ay = 0
+        window.__view = (x, y) => { ax = x; ay = y }   // for looking by hand afterwards: __view(0, 1.57); __hydra.tick(16)
+        src(s0).out(o0, cube(0.4).rotateY(() => ay).rotateX(() => ax).perspective(45), { level: 1, sprite: { cols: 4, rows: 4 } })
+        const H = Math.PI / 2
+        const views = [['front', 0, 0], ['back', 0, 2 * H], ['side a', 0, H], ['side b', 0, -H], ['top or bottom a', H, 0], ['top or bottom b', -H, 0]]
+        const shot = document.createElement('canvas'); shot.width = 360; shot.height = 360
+        const sctx = shot.getContext('2d', { willReadFrequently: true })
+        // what is on o0 now, into `shot`. WebGL: the canvas. WebGPU: the output's own texture (a WebGPU canvas copies
+        // black outside the frame that presented it); bgra or rgba by the canvas format.
+        const grab = async () => {
+          sctx.clearRect(0, 0, 360, 360)
+          if (mode !== 'gpu') { sctx.drawImage(canvas, 0, 0); return }
+          const device = hydra.wgslHydra.device, bpr = Math.ceil(360 * 4 / 256) * 256   // a copy's row is a multiple of 256 bytes
+          const buf = device.createBuffer({ size: bpr * 360, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+          const enc = device.createCommandEncoder()
+          enc.copyTextureToBuffer({ texture: o0.getCurrentTexture() }, { buffer: buf, bytesPerRow: bpr }, { width: 360, height: 360 })
+          device.queue.submit([enc.finish()])
+          await buf.mapAsync(GPUMapMode.READ)
+          const raw = new Uint8Array(buf.getMappedRange()), px = new Uint8ClampedArray(360 * 360 * 4)
+          for (let y = 0; y < 360; y++) px.set(raw.subarray(y * bpr, y * bpr + 360 * 4), (359 - y) * 360 * 4)   // the presenter turns the texture over on its way to the canvas; so does this
+          if (/^bgra/.test(navigator.gpu.getPreferredCanvasFormat())) for (let i = 0; i < px.length; i += 4) { const b = px[i]; px[i] = px[i + 2]; px[i + 2] = b }
+          sctx.putImageData(new ImageData(px, 360, 360), 0, 0)
+          buf.unmap()
+        }
+        const lines = []; let ok = true
+        for (const [view, x, y] of views) {
+          ax = x; ay = y
+          for (let i = 0; i < 4; i++) { hydra.tick(16); await wait(40) }
+          await grab()
+          const d = sctx.getImageData(0, 0, 360, 360).data
+          let x0 = 360, y0 = 360, x1 = -1, y1 = -1
+          for (let py = 0; py < 360; py++) for (let px = 0; px < 360; px++) { const i = (py * 360 + px) * 4; if (d[i] + d[i + 1] + d[i + 2] > 40) { if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py } }
+          if (x1 < 0) { lines.push(`${view}: nothing drawn`); ok = false; continue }
+          const face = grey(c => c.drawImage(shot, x0, y0, x1 - x0 + 1, y1 - y0 + 1, 0, 0, N, N))
+          const best = refs.map(r => ({ cell: r.cell, name: r.name, d: dist(face, r.g) })).sort((a, b) => a.d - b.d)[0]
+          if (best.name !== 'as drawn') ok = false
+          lines.push(`${view}: cell ${best.cell} ${best.name}  (distance ${best.d.toFixed(1)}, box ${x1 - x0 + 1} x ${y1 - y0 + 1})`)
+        }
+        // The cube is alone at level 1, so nothing clears and it leaves trails: ground it never touched must be opaque
+        // black on both backends (not see-through to the page), and each frame must start from the one before it:
+        // a pixel only the front view covered (just inside its edge; the side views are narrower) is still lit now.
+        const rgbaAt = async (x, y) => {
+          if (mode !== 'gpu') { const d = hydra.regl.read({ framebuffer: o0.getCurrent() }); const i = (y * 360 + x) * 4; /* the blit to the canvas turns the fbo over: canvas row y from the top is fbo row y */ return [d[i], d[i + 1], d[i + 2], d[i + 3]] }
+          await grab(); return Array.from(sctx.getImageData(x, y, 1, 1).data)
+        }
+        const corner = await rgbaAt(3, 3)
+        const cornerOk = corner[0] + corner[1] + corner[2] < 12 && corner[3] > 250
+        if (!cornerOk) ok = false
+        lines.push(`untouched ground: rgba ${corner.join(',')} ${cornerOk ? '(opaque black)' : '(should be opaque black)'}`)
+        // one frame tilted, then one frame front on: a pixel only the tilted cube reached must still be lit (the trail
+        // comes from the frame before, not from the ring slot being drawn into, which is older)
+        ax = 0.5; ay = 0.6; hydra.tick(16); await wait(60)
+        await grab()
+        let P = null
+        { const d = sctx.getImageData(0, 0, 360, 360).data; for (let py = 200; py < 300 && !P; py++) for (let px = 20; px < 70 && !P; px++) { const i = (py * 360 + px) * 4; if (d[i] + d[i + 1] + d[i + 2] > 120) P = [px, py] } }
+        ax = 0; ay = 0; hydra.tick(16); await wait(60)
+        const trail = P ? await rgbaAt(P[0], P[1]) : null
+        const trailOk = !!trail && trail[0] + trail[1] + trail[2] > 120
+        if (!trailOk) ok = false
+        lines.push(`trail from the last frame: ${P ? `pixel ${P.join(',')} rgba ${trail.join(',')}` : 'no pixel found outside the front face'} ${trailOk ? '(kept)' : '(lost)'}`)
+        // and the same image as an ordinary fullscreen chain: it must fill the canvas as drawn too
+        src(s0).out(o0)   // a plain out() replaces the cube's level (not hush(): it clears the sources too)
+        await wait(500)
+        for (let i = 0; i < 5; i++) { hydra.tick(16); await wait(60) }
+        await grab()
+        const whole = Object.entries(ORIENT).map(([name, [sx, sy]]) => ({ name, g: grey(c => { c.translate(sx < 0 ? N : 0, sy < 0 ? N : 0); c.scale(sx, sy); c.drawImage(img, 0, 0, N, N) }) }))
+        const flat = grey(c => c.drawImage(shot, 0, 0, N, N))
+        const bestFlat = whole.map(r => ({ name: r.name, d: dist(flat, r.g) })).sort((a, b) => a.d - b.d)[0]
+        if (bestFlat.name !== 'as drawn' || bestFlat.d > 40) ok = false
+        lines.push(`fullscreen src(s0): ${bestFlat.name}  (distance ${bestFlat.d.toFixed(1)})`)
+        say(`${mode} ${ok ? 'PASS' : 'FAIL'}\n` + lines.join('\n'))
+      } catch (e) {
+        console.error(e); say(`${mode} ERROR ${e.message}`)
+      }
+    </script>
+  </body>
+</html>

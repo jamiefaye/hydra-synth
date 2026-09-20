@@ -41,8 +41,10 @@ var Output = function ({ regl, precision, filter = 'nearest', float = false, lab
 //  this.passes = []
 }
 
-Output.prototype._makeFbos = function (depth, width, height) {
-  return (Array(depth)).fill().map(() => this.regl.framebuffer({
+// withDepthBuffer: the vertex extension asks for a z buffer once 3D geometry is drawn (its enableDepthBuffer
+// and setDepth call this one: createHydra's outputs are these Outputs with the extension's methods laid over)
+Output.prototype._makeFbos = function (depth, width, height, withDepthBuffer = false) {
+  return (Array(depth)).fill().map(() => this.regl.framebuffer(Object.assign({
     color: this.regl.texture({
       mag: this.filter,
       min: this.filter,
@@ -50,9 +52,8 @@ Output.prototype._makeFbos = function (depth, width, height) {
       height: height,
       format: 'rgba',
       type: this.float ? 'half float' : 'uint8'
-    }),
-    depthStencil: false
-  }))
+    })
+  }, withDepthBuffer ? { depth: true } : { depthStencil: false })))
 }
 
 Output.prototype.resize = function(width, height) {
@@ -72,12 +73,19 @@ Output.prototype.setDepth = function (depth) {
   this.fbos.forEach(fbo => fbo.destroy())
   this.depth = depth
   this.pingPongIndex = 0
-  this.fbos = this._makeFbos(depth, width, height)
+  this.fbos = this._makeFbos(depth, width, height, !!this.hasDepthBuffer)
   return this
 }
 
 Output.prototype.getCurrent = function () {
   return this.fbos[this.pingPongIndex]
+}
+
+// Step the ring. The frame loop calls this on every output before any of them draws, so outputs read
+// each other at the same frame (T-1) whichever draws first. Not called: the draw steps the ring itself.
+Output.prototype.advance = function () {
+  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth
+  this._advanced = true
 }
 
 // The frame `delay` frames ago (default 1 = the last completed frame)
@@ -142,7 +150,7 @@ Output.prototype.render = function (passes) {
              //var index = this.pingPongIndex ? 0 : 1
           //   var index = self.pingPong[(passIndex+1)%2]
           //  console.log('ping pong', self.pingPongIndex)
-            return self.fbos[self.pingPongIndex]
+            return self._advanced ? self.getTexture(1) : self.fbos[self.pingPongIndex]   // same frame as before advance(), whether or not the ring has stepped yet
           }
         })
 
@@ -153,7 +161,7 @@ Output.prototype.render = function (passes) {
     uniforms: uniforms,
     count: 3,
     framebuffer: () => {
-      self.pingPongIndex = (self.pingPongIndex + 1) % self.depth
+      if (self._advanced) self._advanced = false; else self.pingPongIndex = (self.pingPongIndex + 1) % self.depth
       return self.fbos[self.pingPongIndex]
     }
   })

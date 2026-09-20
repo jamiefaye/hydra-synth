@@ -79,10 +79,12 @@ var Output = function ({ regl, precision, label = "", chanNum, hydraSynth, width
 Output.prototype._makeFbos = function (depth, width, height, withDepthBuffer) {
   return (Array(depth)).fill().map(() => this.regl.framebuffer(Object.assign({
     color: this.regl.texture({
-      mag: 'nearest',
+      mag: this.filter || 'nearest',
+      min: this.filter || 'nearest',
       width: width,
       height: height,
-      format: 'rgba'
+      format: 'rgba',
+      type: this.float ? 'half float' : 'uint8'
     })
   }, withDepthBuffer ? { depth: true } : { depthStencil: false })))
 }
@@ -136,6 +138,14 @@ Output.prototype.enableDepthBuffer = function() {
 
 Output.prototype.getCurrent = function () {
   return this.fbos[this.pingPongIndex]
+}
+
+// Step the ring. The frame loop calls this on every output before any of them draws, so that a read of
+// another output means the same frame whichever of the two draws first: src(o1) from o0 and src(o0) from
+// o1 are both T-1. Stepped one by one inside each draw, an output later in the order read as T-2.
+Output.prototype.advance = function () {
+  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth
+  this._advanced = true
 }
 
 // The frame `delay` frames ago (default 1 = the last completed frame)
@@ -226,6 +236,9 @@ Output.prototype.init = function () {
       source: this.regl.prop('source')
     },
     count: 3,
+    // the last frame goes over an opaque black clear (frames are stored premultiplied), so ground nothing has
+    // drawn on is black with alpha 1, as on WebGPU, and not see-through to the page behind the canvas
+    blend: { enable: true, func: { srcRGB: 'one', srcAlpha: 'one', dstRGB: 'one minus src alpha', dstAlpha: 'one minus src alpha' } },
     depth: { enable: false }
   })
 
@@ -1157,7 +1170,7 @@ Output.prototype.render = function (passes) {
 Output.prototype._renderSprites = function (props) {
   if (this.sprites.size === 0) {
     // No sprites - clear framebuffer (for hush())
-    this.pingPongIndex = (this.pingPongIndex + 1) % this.depth
+    if (this._advanced) this._advanced = false; else this.pingPongIndex = (this.pingPongIndex + 1) % this.depth
     const targetFbo = this.fbos[this.pingPongIndex]
     this.regl.clear({
       color: [0, 0, 0, 1],
@@ -1170,8 +1183,9 @@ Output.prototype._renderSprites = function (props) {
   // Sort sprite levels ascending
   const levels = Array.from(this.sprites.keys()).sort((a, b) => a - b)
 
-  // Advance the frame ring once at start of frame
-  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth
+  // Advance the frame ring once at start of frame, unless the frame loop already stepped every ring
+  // together (advance(), below). A host loop that knows nothing of advance() gets the step here, as before.
+  if (this._advanced) this._advanced = false; else this.pingPongIndex = (this.pingPongIndex + 1) % this.depth
   const targetFbo = this.fbos[this.pingPongIndex]
   const prevFbo = this.getTexture(1)
 
@@ -1186,7 +1200,7 @@ Output.prototype._renderSprites = function (props) {
   // If level 0 exists, clear to start fresh
   if (!hasLevel0) {
     this.regl.clear({
-      color: [0, 0, 0, 0],
+      color: [0, 0, 0, 1],
       depth: needs3D ? 1 : undefined,
       framebuffer: targetFbo
     })

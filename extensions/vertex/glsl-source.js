@@ -242,8 +242,9 @@ ${shaderInfo.glslFunctions.map((transform) => {
     let c: vec4<f32> = vec4<f32>(1.0, 0.0, 0.0, 1.0);
     // Sprite grid UV picking (like GLSL version)
     var st: vec2<f32>;
-    // Flip X to correct mirroring in WGSL
-    let texcoord = vec2<f32>(1.0 - ourIn.texcoord.x, ourIn.texcoord.y);
+    // As the vertex stage gave it, like GLSL. (It was turned in x here once, and the fullscreen vertex shader
+    // pre-turned to cancel; geometry then read mirrored. Test: dev/test-cube-faces.html?mode=gpu)
+    let texcoord = ourIn.texcoord;
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
       // Combine instanceId and faceId for unique sprites per instance
       var spriteIndex: f32;
