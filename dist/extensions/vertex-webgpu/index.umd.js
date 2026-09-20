@@ -65,7 +65,8 @@
         fn main(ourIn: VertexOutput) -> @location(0) vec4<f32> {
           var uv :vec2<f32>;
           uv = ourIn.texcoord; //* ourStruct.scale + ourStruct.offset;
-          return textureSample(ourTex, ourSamp, uv);
+          let c = textureSample(ourTex, ourSamp, uv);
+          return vec4<f32>(c.rgb * clamp(c.a, 0.0, 1.0), 1.0);   // alpha is how much of a pixel is shown, as the WebGL blit
         }
       `;
       const vertexShaderModule = this.device.createShaderModule({ label: "vertFBO", code: vertexShaderCode2 });
@@ -217,7 +218,7 @@
       return;
     }
     ${chain}
-    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);${opaque ? "\n    gl_FragColor.a = 1.0;" : ""}
+    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);${opaque ? "\n    gl_FragColor = vec4(gl_FragColor.rgb * clamp(gl_FragColor.a, 0.0, 1.0), 1.0);" : ""}
   }`;
   }
   function gridReglUniforms(regl2, count) {
@@ -234,7 +235,7 @@
   const GRID_WGSL_UNIFORM_BYTES = 32;
   function gridWgsl(count) {
     const texDecls = range(count).map((i2) => `@group(0) @binding(${i2 + 1}) var tex${i2}: texture_2d<f32>;`).join("\n");
-    const chain = range(count).map((i2) => `${i2 ? "else " : ""}if (idx == ${i2}) { return textureSampleLevel(tex${i2}, samp, local, 0.0); }`).join("\n    ");
+    const chain = range(count).map((i2) => `${i2 ? "else " : ""}if (idx == ${i2}) { let c = textureSampleLevel(tex${i2}, samp, local, 0.0); return vec4f(c.rgb * clamp(c.a, 0.0, 1.0), 1.0); }`).join("\n    ");
     const prefix = `
 struct VertexOutput {
   @builtin(position) position : vec4f,
@@ -15796,6 +15797,25 @@ fn main(input: VertexInput) -> VertexOutput {
       wgsl: `   return vec4<f32>(_c0.rgb, alpha);`
     },
     {
+      // Moves alpha by delta and nothing else: a' = clamp(a + delta, 0, 1). In a feedback loop written with
+      // out(o, { blend: 'replace' }) (the write that keeps alpha) it is a counter riding on every pixel: negative counts
+      // down to expiry (time to live: -0.01 is a life of 100 passes), positive counts up. Alpha is how much of a pixel is
+      // shown (the blit to the canvas and layer() both go by it), so 0 is no-show and anything between is a fade, up or
+      // down; the colour underneath is left as it is. On 8 bit outputs a delta under about 0.002 rounds away to
+      // nothing; use float outputs for long lives. Test: dev/test-alpha.html
+      name: "age",
+      type: "color",
+      inputs: [
+        {
+          type: "float",
+          name: "delta",
+          default: -0.01
+        }
+      ],
+      glsl: `   return vec4(_c0.rgb, clamp(_c0.a + delta, 0.0, 1.0));`,
+      wgsl: `   return vec4<f32>(_c0.rgb, clamp(_c0.a + delta, 0.0, 1.0));`
+    },
+    {
       // Any affine colour transform in one step: rgb' = M * rgb + offset. Rows first (rr rg rb = what red is made
       // of), then the offset (ro go bo). Hue, saturation, brightness, contrast, white point and per-channel gain are
       // all special cases; composed into one matrix they cost one multiply, behave on values past 0..1 (hue() goes
@@ -26033,9 +26053,11 @@ fn main(input: VertexInput) -> VertexOutput {
         varying vec2 uv;
         uniform sampler2D tex0;
         void main () {
-          // alpha 1 on the canvas: what an output holds in alpha (coverage, age) is its own business, and
-          // transparent ground must show black, not the page behind the canvas
-          gl_FragColor = vec4(texture2D(tex0, vec2(1.0 - uv.x, uv.y)).rgb, 1.0);
+          // Alpha is how much of a pixel is shown: the canvas gets rgb x a over black, at alpha 1 (never the page
+          // behind the canvas). A frame written with the normal blend holds alpha 1 and shows as it is; one written
+          // with 'replace' fades with its alpha, and at 0 is not shown.
+          vec4 c = texture2D(tex0, vec2(1.0 - uv.x, uv.y));
+          gl_FragColor = vec4(c.rgb * clamp(c.a, 0.0, 1.0), 1.0);
         }
       `,
         vert: `
@@ -26103,8 +26125,8 @@ fn main(input: VertexInput) -> VertexOutput {
       });
       hydra.renderAll = makeRenderAll(hydra);
       hydra.renderFbo = hydra.regl({
-        frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = vec4(texture2D(tex0, vec2(1.0-uv.x, uv.y)).rgb, 1.0); }`,
-        // alpha 1, as the first renderFbo
+        frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { vec4 c = texture2D(tex0, vec2(1.0-uv.x, uv.y)); gl_FragColor = vec4(c.rgb * clamp(c.a, 0.0, 1.0), 1.0); }`,
+        // rgb x a over black, as the first renderFbo
         vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
         attributes: { position: [[-2, 0], [0, -2], [2, 2]] },
         uniforms: { tex0: hydra.regl.prop("tex0"), resolution: hydra.regl.prop("resolution") },
