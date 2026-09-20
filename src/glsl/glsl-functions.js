@@ -1211,6 +1211,27 @@ wgsl:
 `   return vec4<f32>(_c0.rgb, alpha);`
 },
 {
+  // Moves alpha by delta and nothing else: a' = clamp(a + delta, 0, 1). In a feedback loop written with
+  // out(o, { blend: 'replace' }) (the write that keeps alpha) it is a counter riding on every pixel: negative counts
+  // down to expiry (time to live: -0.01 is a life of 100 passes), positive counts up. Alpha is how much of a pixel is
+  // shown (the blit to the canvas and layer() both go by it), so 0 is no-show and anything between is a fade, up or
+  // down; the colour underneath is left as it is. On 8 bit outputs a delta under about 0.002 rounds away to
+  // nothing; use float outputs for long lives. Test: dev/test-alpha.html
+  name: 'age',
+  type: 'color',
+  inputs: [
+    {
+      type: 'float',
+      name: 'delta',
+      default: -0.01,
+    }
+  ],
+  glsl:
+`   return vec4(_c0.rgb, clamp(_c0.a + delta, 0.0, 1.0));`,
+  wgsl:
+`   return vec4<f32>(_c0.rgb, clamp(_c0.a + delta, 0.0, 1.0));`
+},
+{
   // Any affine colour transform in one step: rgb' = M * rgb + offset. Rows first (rr rg rb = what red is made
   // of), then the offset (ro go bo). Hue, saturation, brightness, contrast, white point and per-channel gain are
   // all special cases; composed into one matrix they cost one multiply, behave on values past 0..1 (hue() goes

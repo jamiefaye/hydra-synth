@@ -65,7 +65,7 @@ export function gridVertGlsl (precision) {
   }`
 }
 
-// opaque: the canvas gets alpha 1 whatever the outputs hold (the vertex extension keeps state in alpha)
+// opaque: the canvas gets rgb x a over black at alpha 1 (the vertex extension: alpha is how much of a pixel is shown)
 export function gridFragGlsl (count, precision, opaque = false) {
   const decls = range(count).map(i => `uniform sampler2D tex${i};`).join('\n  ')
   const chain = range(count)
@@ -91,7 +91,7 @@ export function gridFragGlsl (count, precision, opaque = false) {
       return;
     }
     ${chain}
-    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);${opaque ? '\n    gl_FragColor.a = 1.0;' : ''}
+    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);${opaque ? '\n    gl_FragColor = vec4(gl_FragColor.rgb * clamp(gl_FragColor.a, 0.0, 1.0), 1.0);' : ''}
   }`
 }
 
@@ -116,7 +116,7 @@ export function gridWgsl (count) {
     .map(i => `@group(0) @binding(${i + 1}) var tex${i}: texture_2d<f32>;`)
     .join('\n')
   const chain = range(count)
-    .map(i => `${i ? 'else ' : ''}if (idx == ${i}) { return textureSampleLevel(tex${i}, samp, local, 0.0); }`)
+    .map(i => `${i ? 'else ' : ''}if (idx == ${i}) { let c = textureSampleLevel(tex${i}, samp, local, 0.0); return vec4f(c.rgb * clamp(c.a, 0.0, 1.0), 1.0); }`)   // rgb x a over black, as the single-output blit
     .join('\n    ')
   const prefix = `
 struct VertexOutput {

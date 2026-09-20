@@ -347,9 +347,11 @@ export async function createHydra({
         varying vec2 uv;
         uniform sampler2D tex0;
         void main () {
-          // alpha 1 on the canvas: what an output holds in alpha (coverage, age) is its own business, and
-          // transparent ground must show black, not the page behind the canvas
-          gl_FragColor = vec4(texture2D(tex0, vec2(1.0 - uv.x, uv.y)).rgb, 1.0);
+          // Alpha is how much of a pixel is shown: the canvas gets rgb x a over black, at alpha 1 (never the page
+          // behind the canvas). A frame written with the normal blend holds alpha 1 and shows as it is; one written
+          // with 'replace' fades with its alpha, and at 0 is not shown.
+          vec4 c = texture2D(tex0, vec2(1.0 - uv.x, uv.y));
+          gl_FragColor = vec4(c.rgb * clamp(c.a, 0.0, 1.0), 1.0);
         }
       `,
       vert: `
@@ -440,7 +442,7 @@ export async function createHydra({
     // Recreate renderAll and renderFbo
     hydra.renderAll = makeRenderAll(hydra)
     hydra.renderFbo = hydra.regl({
-      frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = vec4(texture2D(tex0, vec2(1.0-uv.x, uv.y)).rgb, 1.0); }`,   // alpha 1, as the first renderFbo
+      frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { vec4 c = texture2D(tex0, vec2(1.0-uv.x, uv.y)); gl_FragColor = vec4(c.rgb * clamp(c.a, 0.0, 1.0), 1.0); }`,   // rgb x a over black, as the first renderFbo
       vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
       attributes: { position: [[-2,0],[0,-2],[2,2]] },
       uniforms: { tex0: hydra.regl.prop('tex0'), resolution: hydra.regl.prop('resolution') },

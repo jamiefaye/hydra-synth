@@ -83,7 +83,8 @@ class FBOToCanvas {
         fn main(ourIn: VertexOutput) -> @location(0) vec4<f32> {
           var uv :vec2<f32>;
           uv = ourIn.texcoord; //* ourStruct.scale + ourStruct.offset;
-          return textureSample(ourTex, ourSamp, uv);
+          let c = textureSample(ourTex, ourSamp, uv);
+          return vec4<f32>(c.rgb * clamp(c.a, 0.0, 1.0), 1.0);   // alpha is how much of a pixel is shown, as the WebGL blit
         }
       `;
 
