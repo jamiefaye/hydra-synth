@@ -1314,17 +1314,11 @@ class wgslHydra {
 				const levels = Array.from(rpe.sprites.keys()).sort((a, b) => a - b);
 				let depthCleared = false;  // Track if depth buffer has been cleared this frame
 
-				// No level 0: nothing clears, the frame starts from the last one (trails), as on WebGL. The slot being drawn
-				// into holds the frame from a whole ring ago, so the last frame is copied into it first; and a ring that has
-				// never been drawn to starts as opaque black, not as transparent nothing.
+				// No level 0: nothing clears, the frame starts from the last one (trails), as on WebGL, alpha included: an
+				// output with no level 0 owns its alpha. The slot being drawn into holds the frame from a whole ring ago,
+				// so the last frame is copied into it first. (New textures are transparent black; the canvas is opaque.)
 				if (!levels.includes(0)) {
 					const out = rpe.outputObject;
-					if (!out._primed) {
-						out._primed = true;
-						for (const view of out.views) {
-							commandEncoder.beginRenderPass({ label: `primePass_c${chan}`, colorAttachments: [{ view, clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, loadOp: "clear", storeOp: "store" }] }).end();
-						}
-					}
 					const prev = out.textures[delayedIndex(out.pingPongs, out.depth, 1)], cur = out.getCurrentTexture();
 					if (prev !== cur) commandEncoder.copyTextureToTexture({ texture: prev }, { texture: cur }, [cur.width, cur.height]);
 				}

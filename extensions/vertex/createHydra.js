@@ -347,7 +347,9 @@ export async function createHydra({
         varying vec2 uv;
         uniform sampler2D tex0;
         void main () {
-          gl_FragColor = texture2D(tex0, vec2(1.0 - uv.x, uv.y));
+          // alpha 1 on the canvas: what an output holds in alpha (coverage, age) is its own business, and
+          // transparent ground must show black, not the page behind the canvas
+          gl_FragColor = vec4(texture2D(tex0, vec2(1.0 - uv.x, uv.y)).rgb, 1.0);
         }
       `,
       vert: `
@@ -422,7 +424,6 @@ export async function createHydra({
         attributes: { position: output.defaultPositionBuffer },
         uniforms: { source: hydra.regl.prop('source') },
         count: 3,
-        blend: { enable: true, func: { srcRGB: 'one', srcAlpha: 'one', dstRGB: 'one minus src alpha', dstAlpha: 'one minus src alpha' } },   // as Output's copyCommand
         depth: { enable: false }
       })
     })
@@ -439,7 +440,7 @@ export async function createHydra({
     // Recreate renderAll and renderFbo
     hydra.renderAll = makeRenderAll(hydra)
     hydra.renderFbo = hydra.regl({
-      frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = texture2D(tex0, vec2(1.0-uv.x, uv.y)); }`,
+      frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = vec4(texture2D(tex0, vec2(1.0-uv.x, uv.y)).rgb, 1.0); }`,   // alpha 1, as the first renderFbo
       vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
       attributes: { position: [[-2,0],[0,-2],[2,2]] },
       uniforms: { tex0: hydra.regl.prop('tex0'), resolution: hydra.regl.prop('resolution') },
@@ -699,7 +700,7 @@ export default createHydra
 function makeRenderAll(hydra) {
   const count = hydra.o.length
   return hydra.regl({
-    frag: gridFragGlsl(count, hydra.precision),
+    frag: gridFragGlsl(count, hydra.precision, true),
     vert: gridVertGlsl(hydra.precision),
     attributes: { position: [[-2, 0], [0, -2], [2, 2]] },
     uniforms: gridReglUniforms(hydra.regl, count),

@@ -3,6 +3,11 @@ import VertexSource, { generateVertexWgsl, getPassthroughVertexWgsl } from '../v
 
 // Blend mode configurations for WebGPU
 const BLEND_MODES = {
+  // no blend: rgba lands as the chain made it, alpha included (see output.js). src x 1 + dst x 0.
+  replace: {
+    color: { srcFactor: 'one', dstFactor: 'zero', operation: 'add' },
+    alpha: { srcFactor: 'one', dstFactor: 'zero', operation: 'add' }
+  },
   normal: {
     color: {
       srcFactor: 'src-alpha',
@@ -305,7 +310,6 @@ class OutputWgsl {
       this.views[i] = this.textures[i].createView()
     }
     this.pingPongs = 0
-    this._primed = false   // new textures are transparent nothing until wgslHydra clears them (trails path)
   }
 
   getCurrentTextureView() {

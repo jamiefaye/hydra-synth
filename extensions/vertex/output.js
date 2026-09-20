@@ -39,7 +39,11 @@ const BLEND_MODES = {
       dstRGB: 'one minus src color',
       dstAlpha: 'one'
     }
-  }
+  },
+  // no blend: rgba lands as the chain made it, alpha included and colour not multiplied by it. The write that
+  // lets a feedback chain keep state in alpha between frames (age, time to live, keys); the others all end at
+  // alpha 1 over a level 0 clear. Test: dev/test-alpha.html
+  replace: { enable: false }
 }
 
 var Output = function ({ regl, precision, label = "", chanNum, hydraSynth, width, height, depth = 2 }) {
@@ -236,9 +240,8 @@ Output.prototype.init = function () {
       source: this.regl.prop('source')
     },
     count: 3,
-    // the last frame goes over an opaque black clear (frames are stored premultiplied), so ground nothing has
-    // drawn on is black with alpha 1, as on WebGPU, and not see-through to the page behind the canvas
-    blend: { enable: true, func: { srcRGB: 'one', srcAlpha: 'one', dstRGB: 'one minus src alpha', dstAlpha: 'one minus src alpha' } },
+    // the last frame as it was, alpha included: an output with no level 0 owns its alpha, nothing resets it.
+    // (Ground nothing has drawn on stays transparent in the store; the blit to the canvas shows it black.)
     depth: { enable: false }
   })
 
@@ -1200,7 +1203,7 @@ Output.prototype._renderSprites = function (props) {
   // If level 0 exists, clear to start fresh
   if (!hasLevel0) {
     this.regl.clear({
-      color: [0, 0, 0, 1],
+      color: [0, 0, 0, 0],
       depth: needs3D ? 1 : undefined,
       framebuffer: targetFbo
     })

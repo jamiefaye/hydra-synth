@@ -65,7 +65,8 @@ export function gridVertGlsl (precision) {
   }`
 }
 
-export function gridFragGlsl (count, precision) {
+// opaque: the canvas gets alpha 1 whatever the outputs hold (the vertex extension keeps state in alpha)
+export function gridFragGlsl (count, precision, opaque = false) {
   const decls = range(count).map(i => `uniform sampler2D tex${i};`).join('\n  ')
   const chain = range(count)
     .map(i => `${i ? 'else ' : ''}if (idx == ${i}) gl_FragColor = texture2D(tex${i}, local);`)
@@ -90,7 +91,7 @@ export function gridFragGlsl (count, precision) {
       return;
     }
     ${chain}
-    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);${opaque ? '\n    gl_FragColor.a = 1.0;' : ''}
   }`
 }
 

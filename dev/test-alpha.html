@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hydra alpha stability test</title>
+    <style>
+      body { margin: 0; background: #222; color: white; font-family: monospace; font-size: 12px; }
+      canvas { width: 640px; height: 360px; display: block; }   /* as the buffer: the extension sizes its textures to the CSS box */
+      #status { white-space: pre; padding: 4px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="640" height="360"></canvas>
+    <div id="status">Loading...</div>
+    <script type="module">
+      // An experiment, not a pass/fail test: what does a feedback loop do to alpha over a few hundred frames?
+      // mode = core | gl | gpu, float = 0 | 1. Each case primes o0 with the seed (alpha 1 everywhere), then runs its
+      // loop and reads rgba straight from o0's texture (not the canvas: that is 8 bit and has been through the blit)
+      // at three pixels on a few frames. o1 is the seed: still grey stripes, alpha 1.
+      // Results: the table below, console ALPHA-TEST, window.__results, and the title says DONE.
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'gl'
+      const wantFloat = /^(1|true|on)$/.test(q.get('float') || '')
+      const N = Number(q.get('frames')) || 300
+      const status = document.getElementById('status')
+      const canvas = document.getElementById('c')
+      const W = 640, H = 360
+      const AT = [1, 2, 5, 10, 30, 100, 200, N].filter((f, i, a) => f <= N && a.indexOf(f) === i)
+      const POINTS = { centre: [320, 180], right: [560, 180], corner: [8, 180] }   // all on the middle row: the stripes run down, so the row a backend calls first does not matter
+      try {
+        let hydra
+        const opts = { canvas, width: W, height: H, detectAudio: false, makeGlobal: true, numOutputs: 4, autoLoop: false, filter: 'linear', float: wantFloat }
+        if (mode === 'core') {
+          const HydraRenderer = (await import('../src/hydra-synth.js')).default
+          hydra = new HydraRenderer(opts)
+          await hydra.ready()
+        } else {
+          const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+          hydra = await createHydra({ ...opts, useWGSL: mode === 'gpu' })
+        }
+        window.__hydra = hydra
+        const gpu = mode === 'gpu'
+        const yieldNow = () => new Promise(resolve => { const ch = new MessageChannel(); ch.port1.onmessage = () => resolve(); ch.port2.postMessage(0) })   // a macrotask that a hidden tab does not throttle
+        const settle = async () => { for (let i = 0; i < 20; i++) await yieldNow(); await new Promise(resolve => setTimeout(resolve, 250)) }   // out() is async on WebGPU
+        const frame = async () => {
+          if (!gpu) { hydra.tick(16); return }
+          hydra.synth.time += 0.016
+          await hydra.wgslHydra.animate(hydra.synth.time, hydra.synth.mouse, hydra.synth.resolution, false)   // awaited, so frames never overlap
+        }
+        const half = (h) => { const s = (h & 0x8000) ? -1 : 1, e = (h >> 10) & 0x1f, f = h & 0x3ff; return e === 0 ? s * f * 2 ** -24 : e === 31 ? (f ? NaN : s * Infinity) : s * (1 + f / 1024) * 2 ** (e - 15) }
+        let storeKind = ''
+        const readAll = async () => {
+          const out = {}
+          if (gpu) {
+            const device = hydra.wgslHydra.device, tex = o0.getCurrentTexture(), isFloat = /16float/.test(tex.format)
+            storeKind = tex.format
+            const bpp = isFloat ? 8 : 4, bpr = W * bpp
+            const buf = device.createBuffer({ size: bpr * H, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+            const enc = device.createCommandEncoder()
+            enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: bpr }, { width: W, height: H })
+            device.queue.submit([enc.finish()])
+            await buf.mapAsync(GPUMapMode.READ)
+            const ab = buf.getMappedRange(), u8 = new Uint8Array(ab), u16 = new Uint16Array(ab), bgra = /^bgra/.test(tex.format)
+            for (const [name, [x, y]] of Object.entries(POINTS)) {
+              const i = y * W + x
+              const v = isFloat ? [0, 1, 2, 3].map(k => half(u16[i * 4 + k])) : [0, 1, 2, 3].map(k => u8[i * 4 + k] / 255)
+              out[name] = bgra ? [v[2], v[1], v[0], v[3]] : v
+            }
+            buf.unmap(); buf.destroy()
+          } else {
+            const gl = hydra.regl._gl, fbo = o0.getCurrent(), isFloat = !!o0.float
+            storeKind = isFloat ? 'half float' : 'uint8'
+            // bound by hand: regl binds lazily, so inside fbo.use() a raw readPixels still sees the canvas
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo._framebuffer.framebuffer)
+            {
+              for (const [name, [x, y]] of Object.entries(POINTS)) {
+                if (!isFloat) { const b = new Uint8Array(4); gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, b); out[name] = Array.from(b, v => v / 255); continue }
+                const f = new Float32Array(4); gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, f)
+                if (gl.getError() === gl.NO_ERROR) { out[name] = Array.from(f); continue }
+                const h = new Uint16Array(4); gl.readPixels(x, y, 1, 1, gl.RGBA, 0x8D61, h); out[name] = Array.from(h, half)   // HALF_FLOAT_OES
+              }
+            }
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null); hydra.regl._refresh()   // and regl told its picture of the state is stale
+          }
+          return out
+        }
+        osc(6, 0, 0).out(o1)   // the seed: grey stripes that stand still, alpha 1
+        const key = () => src(o1).luma(0.35, 0.1).mult(solid(1, 1, 1, 0.08), 1)   // herder's keyed seed at S1A 0.08, KEYA 0.35
+        const CASES = [
+          ['plain loop, nothing touches alpha', () => src(o0).scale(1.01)],
+          ['seed crossfaded: blend(seed, 0.08)', () => src(o0).scale(1.01).blend(src(o1), 0.08)],
+          ['  + opaque()', () => src(o0).scale(1.01).blend(src(o1), 0.08).opaque()],
+          ['seed keyed: layer(luma key x 0.08)', () => src(o0).scale(1.01).layer(key())],
+          ['  + opaque()', () => src(o0).scale(1.01).layer(key()).opaque()],
+          ['void, receding: srcb(o0).scale(0.98) + blend', () => srcb(o0).scale(0.98).blend(src(o1), 0.08)],
+          ['  + opaque()', () => srcb(o0).scale(0.98).blend(src(o1), 0.08).opaque()],
+          ['void + keyed seed (herder as it opens)', () => srcb(o0).scale(0.98).layer(key())],
+          ['  + opaque()', () => srcb(o0).scale(0.98).layer(key()).opaque()],
+          // written with { blend: 'replace' } (vertex extension): rgba lands as the chain made it, so alpha must come
+          // round the loop as it does on the core engine (the void band near 0.15, the keyed seed near 0.08)
+          ['void + blend, written with replace', () => srcb(o0).scale(0.98).blend(src(o1), 0.08), { blend: 'replace' }],
+          ['void + keyed seed, written with replace', () => srcb(o0).scale(0.98).layer(key()), { blend: 'replace' }]
+        ]
+        const results = []
+        for (const [name, chain, how] of CASES) {
+          if (how && mode === 'core') continue   // the core engine has no blend at the write: it always replaces
+          status.textContent = `${mode} running: ${name}`
+          src(o1).out(o0); await settle()
+          for (let i = 0; i < 4; i++) await frame()
+          const primed = await readAll()
+          if (how) chain().out(o0, how); else chain().out(o0)
+          await settle()
+          const series = {}
+          for (let f = 1; f <= N; f++) { await frame(); if (AT.includes(f)) series[f] = await readAll() }
+          results.push({ name, primed, series })
+        }
+        const fmt = (v) => (Number.isFinite(v) ? v.toFixed(4) : String(v)).padStart(8)
+        const lum = (p) => 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]
+        const verdict = (r) => {
+          const pts = Object.keys(POINTS), a = (f, p) => r.series[f][p][3], last = AT[AT.length - 1], mid = AT[AT.length - 3]
+          const end = pts.map(p => a(last, p)), moving = pts.some(p => Math.abs(a(last, p) - a(mid, p)) > 0.004)
+          if (end.some(v => !Number.isFinite(v))) return 'NOT A NUMBER'
+          if (end.some(v => v > 1.004)) return moving ? 'RUNS AWAY above 1' : 'rests above 1'
+          if (moving) return 'still moving at the end'
+          if (end.every(v => Math.abs(v - 1) <= 0.004)) return 'steady at 1'
+          return `rests below 1 (${Math.min(...end).toFixed(3)} .. ${Math.max(...end).toFixed(3)})`
+        }
+        const lines = [`${mode}  store: ${storeKind}  ${N} frames   (alpha at centre / right / corner; then luminance at centre)`, '']
+        for (const r of results) {
+          lines.push(`${r.name}   ->  ${verdict(r)}`)
+          lines.push(`   primed   a ${Object.keys(POINTS).map(p => fmt(r.primed[p][3])).join(' ')}    lum ${fmt(lum(r.primed.centre))}`)
+          for (const f of AT) lines.push(`   f ${String(f).padStart(4)}   a ${Object.keys(POINTS).map(p => fmt(r.series[f][p][3])).join(' ')}    lum ${fmt(lum(r.series[f].centre))}`)
+          lines.push('')
+        }
+        window.__results = { mode, store: storeKind, frames: N, results: results.map(r => ({ name: r.name.trim(), verdict: verdict(r), series: r.series })) }
+        window.__summary = `${mode} ${storeKind}\n` + results.map(r => `${r.name}  ->  ${verdict(r)}`).join('\n')
+        status.textContent = lines.join('\n'); console.log('ALPHA-TEST\n' + lines.join('\n')); document.title = `DONE ${mode} ${storeKind}`
+      } catch (e) {
+        console.error(e); status.textContent = `${mode} ERROR ${e.message}\n${e.stack}`; document.title = `ERROR ${e.message}`
+      }
+    </script>
+  </body>
+</html>

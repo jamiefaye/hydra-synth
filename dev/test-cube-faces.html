@@ -80,17 +80,20 @@
           if (best.name !== 'as drawn') ok = false
           lines.push(`${view}: cell ${best.cell} ${best.name}  (distance ${best.d.toFixed(1)}, box ${x1 - x0 + 1} x ${y1 - y0 + 1})`)
         }
-        // The cube is alone at level 1, so nothing clears and it leaves trails: ground it never touched must be opaque
-        // black on both backends (not see-through to the page), and each frame must start from the one before it:
+        // The cube is alone at level 1, so nothing clears and it leaves trails: ground it never touched must show
+        // black on both backends (not the page behind the canvas), and each frame must start from the one before it:
         // a pixel only the front view covered (just inside its edge; the side views are narrower) is still lit now.
         const rgbaAt = async (x, y) => {
           if (mode !== 'gpu') { const d = hydra.regl.read({ framebuffer: o0.getCurrent() }); const i = (y * 360 + x) * 4; /* the blit to the canvas turns the fbo over: canvas row y from the top is fbo row y */ return [d[i], d[i + 1], d[i + 2], d[i + 3]] }
           await grab(); return Array.from(sctx.getImageData(x, y, 1, 1).data)
         }
-        const corner = await rgbaAt(3, 3)
-        const cornerOk = corner[0] + corner[1] + corner[2] < 12 && corner[3] > 250
+        // on screen, that is: in the store the ground is transparent (an output with no level 0 owns its alpha, nothing
+        // resets it), and the blit to the canvas shows it black with alpha 1
+        await grab()
+        const corner = Array.from(sctx.getImageData(3, 3, 1, 1).data)
+        const cornerOk = corner[0] + corner[1] + corner[2] < 12 && (mode === 'gpu' || corner[3] > 250)   // the WebGPU canvas is opaque by configuration; grab() read its texture
         if (!cornerOk) ok = false
-        lines.push(`untouched ground: rgba ${corner.join(',')} ${cornerOk ? '(opaque black)' : '(should be opaque black)'}`)
+        lines.push(`untouched ground on screen: rgba ${corner.join(',')} ${cornerOk ? '(black)' : '(should be black, and opaque on the canvas)'}`)
         // one frame tilted, then one frame front on: a pixel only the tilted cube reached must still be lit (the trail
         // comes from the frame before, not from the ring slot being drawn into, which is older)
         ax = 0.5; ay = 0.6; hydra.tick(16); await wait(60)

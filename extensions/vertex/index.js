@@ -360,7 +360,6 @@ function patchOutput(hydra) {
         source: o.regl.prop('source')
       },
       count: 3,
-      blend: { enable: true, func: { srcRGB: 'one', srcAlpha: 'one', dstRGB: 'one minus src alpha', dstAlpha: 'one minus src alpha' } },   // as Output's copyCommand: over opaque black
       depth: { enable: false }
     })
   }
