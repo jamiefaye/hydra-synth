@@ -293,7 +293,7 @@
           .blend(reflected, glass.mirror)                      // beam splitter: the two halves sum to one
           .blend(src(other), link)                             // cross-link from the other loop
           .color(L.gain, L.gain, L.gain)                       // loop gain: exposure, a gain about black (contrast pivots on mid-grey and crushes the echoes)
-          .knee(2)                                             // the rails: past white the signal bends onto 2 instead of running (float outputs keep the reserve)
+          .knee(2, colourPath === 'chain' ? 0 : 1)               // the rails (matrix path: one factor for all three channels, so the rail keeps colour): past white the signal bends onto 2 instead of running (float outputs keep the reserve)
           .blend(src(self.delay(() => Math.round(L.pdly()))), L.persist)   // PRST at PDLY frames back
         for (const { tex, amount } of seeds) {
           // keyed: a seed replaces pixels only where its luminance passes the key (issue 71 in lightherder); else crossfaded

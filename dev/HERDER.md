@@ -91,6 +91,11 @@ with alpha blending, so alpha below 1 (the seed keyed over the void, mostly) dim
 were tuned with. The matrix path ends each loop opaque. Measured on one saved spiral, the chain path on this page and the
 build from before the matrix give the same picture statistics to three decimals.
 
+On the matrix path the loop's rail keeps colour: the knee takes one factor from the brightest channel for all three, so an
+overdriven centre rests on saturated colour instead of climbing to white. (A chroma rotation overshoots the gamut, the floor
+adds light, and a per-channel knee squeezes what chroma is left; Hydra's HSV hue never leaves the gamut, which is why the
+chain never needed this.) The chain path keeps the per-channel knee, as it was.
+
 The four knobs of a monitor are composed into one colour matrix and applied in a single multiply (`colormat()`).
 HUE turns the chroma plane and SAT scales it, in NTSC luma/chroma as on lightherder; BRT lifts; CON is a gain about
 mid-grey. It behaves on light past white, which the loops now carry, and with the knobs at rest it is exactly the

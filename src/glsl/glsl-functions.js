@@ -1297,16 +1297,33 @@ wgsl:
       type: 'float',
       name: 'headroom',
       default: 2,
+    },
+    {
+      // 0: each channel bends on its own (a bright colour pales toward white as it nears the rail, as on a real
+      //    monitor). 1: the brightest channel sets one factor for all three, so hue and saturation are kept and only
+      //    brightness is limited. In between blends the two. In a feedback loop that turns chroma with a matrix, 0 sends
+      //    an overdriven centre to white; 1 lets it rest on saturated colour, as Hydra's HSV hue() did by construction.
+      type: 'float',
+      name: 'keep',
+      default: 0,
     }
   ],
   glsl:
 `   vec3 x = max(_c0.rgb, vec3(1e-6));
    vec3 bent = vec3(headroom) - vec3(headroom * headroom) / (4.0 * x);
-   return vec4(max(mix(bent, _c0.rgb, step(x, vec3(0.5 * headroom))), vec3(0.0)), _c0.a);`,
+   vec3 per = max(mix(bent, _c0.rgb, step(x, vec3(0.5 * headroom))), vec3(0.0));
+   vec3 f = max(_c0.rgb, vec3(0.0));
+   float m = max(max(f.r, f.g), max(f.b, 1e-6));
+   float km = m <= 0.5 * headroom ? m : headroom - headroom * headroom / (4.0 * m);
+   return vec4(mix(per, f * (km / m), keep), _c0.a);`,
   wgsl:
 `   let x = max(_c0.rgb, vec3<f32>(1e-6));
    let bent = vec3<f32>(headroom) - vec3<f32>(headroom * headroom) / (4.0 * x);
-   return vec4<f32>(max(mix(bent, _c0.rgb, step(x, vec3<f32>(0.5 * headroom))), vec3<f32>(0.0)), _c0.a);`
+   let per = max(mix(bent, _c0.rgb, step(x, vec3<f32>(0.5 * headroom))), vec3<f32>(0.0));
+   let f = max(_c0.rgb, vec3<f32>(0.0));
+   let m = max(max(f.r, f.g), max(f.b, 1e-6));
+   let km = select(headroom - headroom * headroom / (4.0 * m), m, m <= 0.5 * headroom);
+   return vec4<f32>(mix(per, f * (km / m), keep), _c0.a);`
 },
 {
   name: 'brightness',
