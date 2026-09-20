@@ -12136,6 +12136,119 @@ const glslFunctions = () => [
    return vec4<f32>(c.rgb, _c0.a);`
   },
   {
+    // Negative light back into gamut without adding any. A chroma rotation or a saturation above 1 keeps luminance
+    // but can push a channel below zero; a plain floor (max 0) then raises the luminance, and in a feedback loop
+    // that is a gain the knobs never asked for. Here the colour is pulled toward its own luminance just far enough
+    // for the lowest channel to reach zero: hue and luminance stay. In-gamut colours pass through untouched, exactly.
+    // Not for a feedback path: applied every pass it bleeds chroma away (an overdriven loop goes white, a quiet one grey).
+    // There a plain floor is the better rail, as on real monitors; this is for a single pass that must not gain light.
+    name: "ingamut",
+    type: "color",
+    inputs: [],
+    glsl: `   vec3 c = _c0.rgb;
+   float mn = min(c.r, min(c.g, c.b));
+   if (mn >= 0.0) return _c0;
+   float y = dot(c, vec3(0.299, 0.587, 0.114));
+   if (y <= 0.0) return vec4(0.0, 0.0, 0.0, _c0.a);
+   return vec4(vec3(y) + (c - vec3(y)) * (y / (y - mn)), _c0.a);`,
+    wgsl: `   let c = _c0.rgb;
+   let mn = min(c.r, min(c.g, c.b));
+   if (mn >= 0.0) { return _c0; }
+   let y = dot(c, vec3<f32>(0.299, 0.587, 0.114));
+   if (y <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, _c0.a); }
+   return vec4<f32>(vec3<f32>(y) + (c - vec3<f32>(y)) * (y / (y - mn)), _c0.a);`
+  },
+  {
+    // Alpha back to a known value (1 by default). Hydra's blend/add/mult treat alpha as a fourth number and
+    // srcb/blurb/luma/mask write it, so at the end of a feedback chain it is whatever the path left; with float
+    // outputs nothing clamps it on the way round. End a loop with opaque() unless alpha is meant to carry something.
+    name: "opaque",
+    type: "color",
+    inputs: [
+      {
+        type: "float",
+        name: "alpha",
+        default: 1
+      }
+    ],
+    glsl: `   return vec4(_c0.rgb, alpha);`,
+    wgsl: `   return vec4<f32>(_c0.rgb, alpha);`
+  },
+  {
+    // Any affine colour transform in one step: rgb' = M * rgb + offset. Rows first (rr rg rb = what red is made
+    // of), then the offset (ro go bo). Hue, saturation, brightness, contrast, white point and per-channel gain are
+    // all special cases; composed into one matrix they cost one multiply, behave on values past 0..1 (hue() goes
+    // through HSV, which does not), and at neutral are exactly the identity, so nothing ratchets round a loop.
+    name: "colormat",
+    type: "color",
+    inputs: [
+      {
+        type: "float",
+        name: "rr",
+        default: 1
+      },
+      {
+        type: "float",
+        name: "rg",
+        default: 0
+      },
+      {
+        type: "float",
+        name: "rb",
+        default: 0
+      },
+      {
+        type: "float",
+        name: "gr",
+        default: 0
+      },
+      {
+        type: "float",
+        name: "gg",
+        default: 1
+      },
+      {
+        type: "float",
+        name: "gb",
+        default: 0
+      },
+      {
+        type: "float",
+        name: "br",
+        default: 0
+      },
+      {
+        type: "float",
+        name: "bg",
+        default: 0
+      },
+      {
+        type: "float",
+        name: "bb",
+        default: 1
+      },
+      {
+        type: "float",
+        name: "ro",
+        default: 0
+      },
+      {
+        type: "float",
+        name: "go",
+        default: 0
+      },
+      {
+        type: "float",
+        name: "bo",
+        default: 0
+      }
+    ],
+    glsl: `   vec3 c = _c0.rgb;
+   return vec4(dot(vec3(rr, rg, rb), c) + ro, dot(vec3(gr, gg, gb), c) + go, dot(vec3(br, bg, bb), c) + bo, _c0.a);`,
+    wgsl: `   let c = _c0.rgb;
+   return vec4<f32>(dot(vec3<f32>(rr, rg, rb), c) + ro, dot(vec3<f32>(gr, gg, gb), c) + go, dot(vec3<f32>(br, bg, bb), c) + bo, _c0.a);`
+  },
+  {
     // The rails of a video amplifier: untouched below half the headroom, bending asymptotically onto it
     // above (the arms meet in value and slope), floored at black. After lightherder's front panel. With
     // float outputs an overdriven feedback loop settles into structure instead of a flat white.
@@ -12146,14 +12259,31 @@ const glslFunctions = () => [
         type: "float",
         name: "headroom",
         default: 2
+      },
+      {
+        // 0: each channel bends on its own (a bright colour pales toward white as it nears the rail, as on a real
+        //    monitor). 1: the brightest channel sets one factor for all three, so hue and saturation are kept and only
+        //    brightness is limited. In between blends the two. In a feedback loop that turns chroma with a matrix, 0 sends
+        //    an overdriven centre to white; 1 lets it rest on saturated colour, as Hydra's HSV hue() did by construction.
+        type: "float",
+        name: "keep",
+        default: 0
       }
     ],
     glsl: `   vec3 x = max(_c0.rgb, vec3(1e-6));
    vec3 bent = vec3(headroom) - vec3(headroom * headroom) / (4.0 * x);
-   return vec4(max(mix(bent, _c0.rgb, step(x, vec3(0.5 * headroom))), vec3(0.0)), _c0.a);`,
+   vec3 per = max(mix(bent, _c0.rgb, step(x, vec3(0.5 * headroom))), vec3(0.0));
+   vec3 f = max(_c0.rgb, vec3(0.0));
+   float m = max(max(f.r, f.g), max(f.b, 1e-6));
+   float km = m <= 0.5 * headroom ? m : headroom - headroom * headroom / (4.0 * m);
+   return vec4(mix(per, f * (km / m), keep), _c0.a);`,
     wgsl: `   let x = max(_c0.rgb, vec3<f32>(1e-6));
    let bent = vec3<f32>(headroom) - vec3<f32>(headroom * headroom) / (4.0 * x);
-   return vec4<f32>(max(mix(bent, _c0.rgb, step(x, vec3<f32>(0.5 * headroom))), vec3<f32>(0.0)), _c0.a);`
+   let per = max(mix(bent, _c0.rgb, step(x, vec3<f32>(0.5 * headroom))), vec3<f32>(0.0));
+   let f = max(_c0.rgb, vec3<f32>(0.0));
+   let m = max(max(f.r, f.g), max(f.b, 1e-6));
+   let km = select(headroom - headroom * headroom / (4.0 * m), m, m <= 0.5 * headroom);
+   return vec4<f32>(mix(per, f * (km / m), keep), _c0.a);`
   },
   {
     name: "brightness",
@@ -12604,7 +12734,7 @@ function registerGeometryFunctions(synth) {
   console.log("[hydra-vertex] Registered geometry functions");
 }
 function registerLightingFunctions(synth) {
-  for (const fn of glslFunctions().filter((f) => ["blur", "blurb", "srcb", "offset", "tilt", "knee"].includes(f.name))) {
+  for (const fn of glslFunctions().filter((f) => ["blur", "blurb", "srcb", "offset", "tilt", "knee", "colormat", "opaque", "ingamut"].includes(f.name))) {
     if (!synth[fn.name]) synth.setFunction(fn);
   }
   for (const fn of lightingFunctions) {
