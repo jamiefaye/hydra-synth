@@ -1,5 +1,6 @@
 
 import loop from 'raf-loop'
+import { measureGl } from './lib/output-stats.js'
 import MouseTools from './lib/mouse.js'
 import Audio from './lib/audio.js'
 import VidRecorder from './lib/video-recorder.js'
@@ -364,6 +365,7 @@ class HydraRenderer {
           resolution: [this.canvas.width, this.canvas.height]
         })
       }
+      for (let i = 0; i < this.o.length; i++) if (this.o[i].stats) measureGl(this.o[i])   // o0.measure()
       if (this.isRenderingAll) {
         this.renderer.renderAllToScreen(this.o)
       } else {

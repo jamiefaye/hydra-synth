@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hydra output stats test</title>
+    <style>
+      body { margin: 0; background: #222; color: white; font-family: monospace; font-size: 12px; }
+      canvas { width: 640px; height: 360px; display: block; }
+      #status { white-space: pre; padding: 4px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="640" height="360"></canvas>
+    <div id="status">Loading...</div>
+    <script type="module">
+      // o0.measure() / o0.stats against pictures whose numbers are known. mode = core | gl | gpu, float = 0 | 1.
+      //   grey     solid 0.5: mean 0.5, no chroma, one bin holds everything
+      //   red      solid red: luminance 0.299, chroma 1
+      //   ramp     grey = x: mean 0.5, every bin about 1/64, a little black and a little on the rail
+      //   loop     a loop that keeps 0.98 of its light each pass: measured gain 0.98
+      // Results go to the console as STATS-TEST ... and to the title so a headless run can read them.
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'gl'
+      const wantFloat = /^(1|true|on)$/.test(q.get('float') || '')
+      const status = document.getElementById('status')
+      const canvas = document.getElementById('c')
+      const say = (t) => { status.textContent = t; console.log('STATS-TEST', t); document.title = t.split('\n')[0] }
+      try {
+        let hydra
+        const opts = { canvas, width: 640, height: 360, detectAudio: false, makeGlobal: true, numOutputs: 4, autoLoop: false, float: wantFloat }
+        if (mode === 'core') {
+          const HydraRenderer = (await import('../src/hydra-synth.js')).default
+          hydra = new HydraRenderer(opts)
+          await hydra.ready()
+        } else {
+          const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+          hydra = await createHydra({ ...opts, useWGSL: mode === 'gpu' })
+        }
+        window.__hydra = hydra
+        const gpu = mode === 'gpu'
+        const yieldNow = () => new Promise(resolve => { const ch = new MessageChannel(); ch.port1.onmessage = () => resolve(); ch.port2.postMessage(0) })
+        const settle = async () => { for (let i = 0; i < 20; i++) await yieldNow(); await new Promise(resolve => setTimeout(resolve, 250)) }
+        const frame = async () => {
+          if (!gpu) { hydra.tick(16); return }
+          hydra.synth.time += 0.016
+          await hydra.wgslHydra.animate(hydra.synth.time, hydra.synth.mouse, hydra.synth.resolution, false)
+          for (let i = 0; i < 4; i++) await yieldNow()   // let the counts land
+        }
+        o0.measure({ bins: 64, max: 1 })
+        const lines = []; let ok = true
+        const near = (got, want, tol) => Math.abs(got - want) <= tol
+        const check = (label, got, want, tol) => { const good = near(got, want, tol); if (!good) ok = false; lines.push(`  ${label.padEnd(22)} ${got.toFixed(4)}  (want ${want} +- ${tol}) ${good ? '' : '  <-- OFF'}`) }
+        const snap = () => Object.assign({}, o0.stats, { bins: Array.from(o0.stats.bins) })
+
+        lines.push('grey'); solid(0.5, 0.5, 0.5, 1).out(o0); await settle(); for (let i = 0; i < 6; i++) await frame()
+        let s = snap()
+        check('mean', s.mean, 0.5, 0.01); check('chroma', s.chroma, 0, 0.005); check('largest bin', Math.max(...s.bins), 1, 0.001); check('black', s.black, 0, 0.001); check('rail', s.rail, 0, 0.001)
+
+        lines.push('red'); solid(1, 0, 0, 1).out(o0); await settle(); for (let i = 0; i < 6; i++) await frame()
+        s = snap()
+        check('mean', s.mean, 0.299, 0.005); check('chroma', s.chroma, 1, 0.005)
+
+        lines.push('ramp'); gradient(0).r().opaque().out(o0)   /* r() puts the value in alpha too */; await settle(); for (let i = 0; i < 6; i++) await frame()
+        s = snap()
+        check('mean', s.mean, 0.5, 0.01); check('largest bin', Math.max(...s.bins), 1 / 64, 0.012); check('smallest bin', Math.min(...s.bins), 1 / 64, 0.012)
+        check('black (under 2/255)', s.black, 2 / 255, 0.012); check('rail (from 0.98)', s.rail, 0.02, 0.012); check('bins sum', s.bins.reduce((a, b) => a + b, 0), 1, 0.001)
+
+        lines.push('loop keeping 0.98 a pass'); solid(0.9, 0.9, 0.9, 1).out(o0); await settle(); for (let i = 0; i < 3; i++) await frame()
+        src(o0).color(0.98, 0.98, 0.98).out(o0); await settle(); for (let i = 0; i < 12; i++) await frame()
+        s = snap()
+        const gainAt12 = s.gain
+        for (let i = 0; i < 18; i++) await frame()   // the eased figure takes a while to arrive
+        s = Object.assign(snap(), { gain: gainAt12 })
+        check('gain', s.gain, 0.98, wantFloat ? 0.002 : 0.006); check('gainSmooth', s.gainSmooth, 0.98, 0.01)
+        lines.push(`  samples counted ${s.count}, measurements ${s.frame}`)
+
+        o0.measure(false); const before = o0.stats.frame; for (let i = 0; i < 3; i++) await frame()
+        if (o0.stats.frame !== before) { ok = false; lines.push('  measure(false) did not stop it  <-- OFF') } else lines.push('  measure(false) stops it')
+        say(`${mode} ${wantFloat ? 'float' : '8 bit'} ${ok ? 'PASS' : 'FAIL'}\n` + lines.join('\n'))
+      } catch (e) {
+        console.error(e); say(`${mode} ERROR ${e.message}\n${e.stack}`)
+      }
+    </script>
+  </body>
+</html>

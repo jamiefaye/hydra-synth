@@ -4,6 +4,7 @@ import {computeGridLayout} from "../../../src/lib/grid-layout.js";
 import {BLEND_MODES} from "./outputWgsl.js";
 import { computeSkinningMatrices, applySkinning } from '../geometry.js';
 import { delayedIndex } from '../../../src/lib/frame-ring.js';
+import { GpuStats } from './output-stats-gpu.js';
 
 // Used to enable a single pass through the "animate" routine.
 // Used for testing to avoid a flood of console error messages.
@@ -1501,7 +1502,15 @@ class wgslHydra {
 			}
    } // end "chan" loop.
    // Do all the channels now.
+    // outputs that asked to be measured (o0.measure()): one compute dispatch each, in this same submission;
+    // the counts are read back without waiting. See src/lib/output-stats.js
+    let statsPending = [];
+    if (this.outputChannelObjects.some(o => o && o.stats && o.stats.enabled)) {
+      if (!this._gpuStats) this._gpuStats = new GpuStats(this.device);
+      statsPending = this._gpuStats.encode(commandEncoder, this.outputChannelObjects);
+    }
     this.device.queue.submit([commandEncoder.finish()]);
+    if (statsPending.length) this._gpuStats.read(statsPending);
 
     await this.device.queue.onSubmittedWorkDone();
  

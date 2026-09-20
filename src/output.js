@@ -1,5 +1,6 @@
 //const transforms = require('./glsl-transforms.js')
 import { normalizeDepth, delayedIndex, makeDelayProxy } from './lib/frame-ring.js'
+import { measureMethod } from './lib/output-stats.js'
 
 const HALF_FLOAT_EXTENSIONS = ['OES_texture_half_float', 'OES_texture_half_float_linear', 'EXT_color_buffer_half_float']
 let warnedNoHalfFloat = false
@@ -172,5 +173,8 @@ Output.prototype.tick = function (props) {
 //  console.log(props)
   this.draw(props)
 }
+
+// o0.measure(): a luminance histogram and the measured loop gain, in o0.stats. See src/lib/output-stats.js
+Output.prototype.measure = measureMethod
 
 export default Output

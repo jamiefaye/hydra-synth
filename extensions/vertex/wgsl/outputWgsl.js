@@ -1,4 +1,5 @@
 import { normalizeDepth, delayedIndex, makeDelayProxy } from '../../../src/lib/frame-ring.js'
+import { measureMethod } from '../../../src/lib/output-stats.js'
 import VertexSource, { generateVertexWgsl, getPassthroughVertexWgsl } from '../vertex-source.js'
 
 // Blend mode configurations for WebGPU
@@ -326,5 +327,8 @@ class OutputWgsl {
     return this.getTexture(1)
   }
 }
+
+// o0.measure(): a luminance histogram and the measured loop gain, in o0.stats. See src/lib/output-stats.js
+OutputWgsl.prototype.measure = measureMethod
 
 export { OutputWgsl, BLEND_MODES }

@@ -6,6 +6,7 @@
  */
 
 // WebGPU imports (from extension's wgsl folder)
+import { measureGl } from '../../src/lib/output-stats.js'
 import { wgslHydra, setSamplerFilter, setOutputFloat } from './wgsl/wgsl-hydra.js'
 import { OutputWgsl } from './wgsl/outputWgsl.js'
 
@@ -679,6 +680,8 @@ function createTick(hydra) {
         bpm: hydra.synth.bpm,
         resolution: [hydra.canvas.width, hydra.canvas.height]
       }))
+
+      hydra.o.forEach(o => { if (o.stats) measureGl(o) })   // o0.measure(): see src/lib/output-stats.js
 
       if (hydra.isRenderingAll) {
         hydra.renderAll(gridRenderProps(hydra.o, hydra.gridLayout, [hydra.canvas.width, hydra.canvas.height]))
