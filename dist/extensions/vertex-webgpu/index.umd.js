@@ -194,7 +194,7 @@
     gl_Position = vec4(1.0 - 2.0 * position, 0, 1);
   }`;
   }
-  function gridFragGlsl(count, precision) {
+  function gridFragGlsl(count, precision, opaque = false) {
     const decls = range(count).map((i2) => `uniform sampler2D tex${i2};`).join("\n  ");
     const chain = range(count).map((i2) => `${i2 ? "else " : ""}if (idx == ${i2}) gl_FragColor = texture2D(tex${i2}, local);`).join("\n    ");
     return `
@@ -217,7 +217,7 @@
       return;
     }
     ${chain}
-    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    else gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);${opaque ? "\n    gl_FragColor.a = 1.0;" : ""}
   }`;
   }
   function gridReglUniforms(regl2, count) {
@@ -10164,6 +10164,11 @@ fn main(input: VertexInput) -> VertexOutput {
 `;
   }
   const BLEND_MODES$1 = {
+    // no blend: rgba lands as the chain made it, alpha included (see output.js). src x 1 + dst x 0.
+    replace: {
+      color: { srcFactor: "one", dstFactor: "zero", operation: "add" },
+      alpha: { srcFactor: "one", dstFactor: "zero", operation: "add" }
+    },
     normal: {
       color: {
         srcFactor: "src-alpha",
@@ -10432,7 +10437,6 @@ fn main(input: VertexInput) -> VertexOutput {
         this.views[i2] = this.textures[i2].createView();
       }
       this.pingPongs = 0;
-      this._primed = false;
     }
     getCurrentTextureView() {
       let p = this.pingPongs;
@@ -11553,12 +11557,6 @@ fn main(input: VertexInput) -> VertexOutput {
           let depthCleared = false;
           if (!levels.includes(0)) {
             const out = rpe.outputObject;
-            if (!out._primed) {
-              out._primed = true;
-              for (const view of out.views) {
-                commandEncoder.beginRenderPass({ label: `primePass_c${chan}`, colorAttachments: [{ view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" }] }).end();
-              }
-            }
             const prev = out.textures[delayedIndex(out.pingPongs, out.depth, 1)], cur = out.getCurrentTexture();
             if (prev !== cur) commandEncoder.copyTextureToTexture({ texture: prev }, { texture: cur }, [cur.width, cur.height]);
           }
@@ -26035,7 +26033,9 @@ fn main(input: VertexInput) -> VertexOutput {
         varying vec2 uv;
         uniform sampler2D tex0;
         void main () {
-          gl_FragColor = texture2D(tex0, vec2(1.0 - uv.x, uv.y));
+          // alpha 1 on the canvas: what an output holds in alpha (coverage, age) is its own business, and
+          // transparent ground must show black, not the page behind the canvas
+          gl_FragColor = vec4(texture2D(tex0, vec2(1.0 - uv.x, uv.y)).rgb, 1.0);
         }
       `,
         vert: `
@@ -26091,8 +26091,6 @@ fn main(input: VertexInput) -> VertexOutput {
           attributes: { position: output.defaultPositionBuffer },
           uniforms: { source: hydra.regl.prop("source") },
           count: 3,
-          blend: { enable: true, func: { srcRGB: "one", srcAlpha: "one", dstRGB: "one minus src alpha", dstAlpha: "one minus src alpha" } },
-          // as Output's copyCommand
           depth: { enable: false }
         });
       });
@@ -26105,7 +26103,8 @@ fn main(input: VertexInput) -> VertexOutput {
       });
       hydra.renderAll = makeRenderAll(hydra);
       hydra.renderFbo = hydra.regl({
-        frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = texture2D(tex0, vec2(1.0-uv.x, uv.y)); }`,
+        frag: `precision ${hydra.precision} float; varying vec2 uv; uniform sampler2D tex0; void main() { gl_FragColor = vec4(texture2D(tex0, vec2(1.0-uv.x, uv.y)).rgb, 1.0); }`,
+        // alpha 1, as the first renderFbo
         vert: `precision ${hydra.precision} float; attribute vec2 position; varying vec2 uv; void main() { uv=position; gl_Position=vec4(1.0-2.0*position,0,1); }`,
         attributes: { position: [[-2, 0], [0, -2], [2, 2]] },
         uniforms: { tex0: hydra.regl.prop("tex0"), resolution: hydra.regl.prop("resolution") },
@@ -26295,7 +26294,7 @@ fn main(input: VertexInput) -> VertexOutput {
   function makeRenderAll(hydra) {
     const count = hydra.o.length;
     return hydra.regl({
-      frag: gridFragGlsl(count, hydra.precision),
+      frag: gridFragGlsl(count, hydra.precision, true),
       vert: gridVertGlsl(hydra.precision),
       attributes: { position: [[-2, 0], [0, -2], [2, 2]] },
       uniforms: gridReglUniforms(hydra.regl, count),
@@ -27220,7 +27219,11 @@ ${shaderInfo.glslFunctions.map((transform) => {
         dstRGB: "one minus src color",
         dstAlpha: "one"
       }
-    }
+    },
+    // no blend: rgba lands as the chain made it, alpha included and colour not multiplied by it. The write that
+    // lets a feedback chain keep state in alpha between frames (age, time to live, keys); the others all end at
+    // alpha 1 over a level 0 clear. Test: dev/test-alpha.html
+    replace: { enable: false }
   };
   var Output = function({ regl: regl2, precision, label = "", chanNum, hydraSynth, width, height, depth = 2 }) {
     this.regl = regl2;
@@ -27370,9 +27373,8 @@ ${shaderInfo.glslFunctions.map((transform) => {
         source: this.regl.prop("source")
       },
       count: 3,
-      // the last frame goes over an opaque black clear (frames are stored premultiplied), so ground nothing has
-      // drawn on is black with alpha 1, as on WebGPU, and not see-through to the page behind the canvas
-      blend: { enable: true, func: { srcRGB: "one", srcAlpha: "one", dstRGB: "one minus src alpha", dstAlpha: "one minus src alpha" } },
+      // the last frame as it was, alpha included: an output with no level 0 owns its alpha, nothing resets it.
+      // (Ground nothing has drawn on stays transparent in the store; the blit to the canvas shows it black.)
       depth: { enable: false }
     });
     return this;
@@ -28107,7 +28109,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
     const needs3D = Array.from(this.sprites.values()).some((s) => s.has3D);
     if (!hasLevel0) {
       this.regl.clear({
-        color: [0, 0, 0, 1],
+        color: [0, 0, 0, 0],
         depth: needs3D ? 1 : void 0,
         framebuffer: targetFbo
       });
@@ -28466,8 +28468,6 @@ ${shaderInfo.glslFunctions.map((transform) => {
           source: o.regl.prop("source")
         },
         count: 3,
-        blend: { enable: true, func: { srcRGB: "one", srcAlpha: "one", dstRGB: "one minus src alpha", dstAlpha: "one minus src alpha" } },
-        // as Output's copyCommand: over opaque black
         depth: { enable: false }
       });
     }
