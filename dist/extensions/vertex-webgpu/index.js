@@ -10428,6 +10428,7 @@ class OutputWgsl {
       this.views[i] = this.textures[i].createView();
     }
     this.pingPongs = 0;
+    this._primed = false;
   }
   getCurrentTextureView() {
     let p = this.pingPongs;
@@ -10489,8 +10490,7 @@ const vertexShaderCode = vertexPrefix + `
 
      var output : VertexOutput;
      output.position = vec4<f32>( positions[vertexIndex], 0.0, 1.0);
-     // Pre-flip X so fragment shader's X-flip (for geometry) cancels out for fullscreen
-     output.texcoord = vec2<f32>(1.0 - (positions[vertexIndex].x / 2.0 + 0.5), positions[vertexIndex].y / 2.0 + 0.5);
+     output.texcoord = positions[vertexIndex] / 2.0 + 0.5; // positions are -1 to 1, texcoords are 0 to 1
      output.faceId = 0.0;
 
      // Default vertex data for fullscreen quad
@@ -10632,7 +10632,8 @@ class wgslHydra {
       mipLevelCount: 1,
       format: this.outputFormat,
       // COPY_SRC so frames can be read back (tests, screenshots, Syphon-style export)
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST
+      // COPY_DST: trails start from a copy of the last frame
     };
     for (let chan = 0; chan < this.numChannels; ++chan) {
       let outp = this.outputChannelObjects[chan];
@@ -11520,12 +11521,15 @@ class wgslHydra {
     this.device.queue.writeBuffer(this.mouseUniformBuffer, 0, this.mouseUniformValues);
     this.device.queue.writeBuffer(this.spriteUVUniformBuffer, 0, this.spriteUVUniformValues);
     for (let chan = 0; chan < this.numChannels; ++chan) {
+      const out = this.renderPassInfo[chan].outputObject;
+      if (out && out.views) out.flipPingPong();
+    }
+    for (let chan = 0; chan < this.numChannels; ++chan) {
       const rpe = this.renderPassInfo[chan];
       const hasSprites = rpe.sprites && rpe.sprites.size > 0;
       const hasLegacyPipeline = rpe.pipeline;
       if (!hasSprites && !hasLegacyPipeline) {
         if (rpe.outputObject && rpe.outputObject.views) {
-          rpe.outputObject.flipPingPong();
           const clearPassDescriptor = {
             label: `clearPass_c${chan}`,
             colorAttachments: [{
@@ -11540,10 +11544,20 @@ class wgslHydra {
         }
         continue;
       }
-      rpe.outputObject.flipPingPong();
       if (hasSprites) {
         const levels = Array.from(rpe.sprites.keys()).sort((a2, b) => a2 - b);
         let depthCleared = false;
+        if (!levels.includes(0)) {
+          const out = rpe.outputObject;
+          if (!out._primed) {
+            out._primed = true;
+            for (const view of out.views) {
+              commandEncoder.beginRenderPass({ label: `primePass_c${chan}`, colorAttachments: [{ view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" }] }).end();
+            }
+          }
+          const prev = out.textures[delayedIndex(out.pingPongs, out.depth, 1)], cur = out.getCurrentTexture();
+          if (prev !== cur) commandEncoder.copyTextureToTexture({ texture: prev }, { texture: cur }, [cur.width, cur.height]);
+        }
         for (let i = 0; i < levels.length; i++) {
           const level = levels[i];
           const spe = rpe.sprites.get(level);
@@ -13004,8 +13018,8 @@ var Output$1 = function({ regl: regl2, precision, filter = "nearest", float = fa
   this.depth = normalizeDepth(depth);
   this.fbos = this._makeFbos(this.depth, width, height);
 };
-Output$1.prototype._makeFbos = function(depth, width, height) {
-  return Array(depth).fill().map(() => this.regl.framebuffer({
+Output$1.prototype._makeFbos = function(depth, width, height, withDepthBuffer = false) {
+  return Array(depth).fill().map(() => this.regl.framebuffer(Object.assign({
     color: this.regl.texture({
       mag: this.filter,
       min: this.filter,
@@ -13013,9 +13027,8 @@ Output$1.prototype._makeFbos = function(depth, width, height) {
       height,
       format: "rgba",
       type: this.float ? "half float" : "uint8"
-    }),
-    depthStencil: false
-  }));
+    })
+  }, withDepthBuffer ? { depth: true } : { depthStencil: false })));
 };
 Output$1.prototype.resize = function(width, height) {
   this.width = width;
@@ -13031,11 +13044,15 @@ Output$1.prototype.setDepth = function(depth) {
   this.fbos.forEach((fbo) => fbo.destroy());
   this.depth = depth;
   this.pingPongIndex = 0;
-  this.fbos = this._makeFbos(depth, width, height);
+  this.fbos = this._makeFbos(depth, width, height, !!this.hasDepthBuffer);
   return this;
 };
 Output$1.prototype.getCurrent = function() {
   return this.fbos[this.pingPongIndex];
+};
+Output$1.prototype.advance = function() {
+  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
+  this._advanced = true;
 };
 Output$1.prototype.getTexture = function(delay = 1) {
   return this.fbos[delayedIndex(this.pingPongIndex, this.depth, delay)];
@@ -13085,7 +13102,7 @@ Output$1.prototype.render = function(passes) {
   var self2 = this;
   var uniforms = Object.assign(pass.uniforms, {
     prevBuffer: () => {
-      return self2.fbos[self2.pingPongIndex];
+      return self2._advanced ? self2.getTexture(1) : self2.fbos[self2.pingPongIndex];
     }
   });
   self2.draw = self2.regl({
@@ -13095,7 +13112,8 @@ Output$1.prototype.render = function(passes) {
     uniforms,
     count: 3,
     framebuffer: () => {
-      self2.pingPongIndex = (self2.pingPongIndex + 1) % self2.depth;
+      if (self2._advanced) self2._advanced = false;
+      else self2.pingPongIndex = (self2.pingPongIndex + 1) % self2.depth;
       return self2.fbos[self2.pingPongIndex];
     }
   });
@@ -26055,15 +26073,9 @@ async function createHydra$1({
     hydra.regl.clear({ color: [0, 0, 0, 1] });
     hydra.o.forEach((output) => {
       output.regl = hydra.regl;
-      output.fbos = Array(2).fill().map(() => hydra.regl.framebuffer({
-        color: hydra.regl.texture({
-          mag: "nearest",
-          width: hydra.width,
-          height: hydra.height,
-          format: "rgba"
-        }),
-        depthStencil: false
-      }));
+      output.hasDepthBuffer = false;
+      output.pingPongIndex = 0;
+      output.fbos = output._makeFbos(output.depth || 2, hydra.width, hydra.height, false);
       output.draw = () => {
       };
       output.sprites = /* @__PURE__ */ new Map();
@@ -26075,6 +26087,8 @@ async function createHydra$1({
         attributes: { position: output.defaultPositionBuffer },
         uniforms: { source: hydra.regl.prop("source") },
         count: 3,
+        blend: { enable: true, func: { srcRGB: "one", srcAlpha: "one", dstRGB: "one minus src alpha", dstAlpha: "one minus src alpha" } },
+        // as Output's copyCommand
         depth: { enable: false }
       });
     });
@@ -26255,6 +26269,7 @@ function createTick(hydra) {
       hydra.wgslHydra.outChannel = hydra.output ? hydra.output.chanNum : 0;
       hydra.wgslHydra.animate(hydra.synth.time, hydra.synth.mouse, hydra.synth.resolution, hydra.isRenderingAll);
     } else {
+      hydra.o.forEach((o) => o.advance && o.advance());
       hydra.o.forEach((o) => o.tick && o.tick({
         time: hydra.synth.time,
         mouse: hydra.synth.mouse,
@@ -27057,8 +27072,9 @@ ${shaderInfo.glslFunctions.map((transform) => {
     let c: vec4<f32> = vec4<f32>(1.0, 0.0, 0.0, 1.0);
     // Sprite grid UV picking (like GLSL version)
     var st: vec2<f32>;
-    // Flip X to correct mirroring in WGSL
-    let texcoord = vec2<f32>(1.0 - ourIn.texcoord.x, ourIn.texcoord.y);
+    // As the vertex stage gave it, like GLSL. (It was turned in x here once, and the fullscreen vertex shader
+    // pre-turned to cancel; geometry then read mirrored. Test: dev/test-cube-faces.html?mode=gpu)
+    let texcoord = ourIn.texcoord;
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
       // Combine instanceId and faceId for unique sprites per instance
       var spriteIndex: f32;
@@ -27226,10 +27242,12 @@ var Output = function({ regl: regl2, precision, label = "", chanNum, hydraSynth,
 Output.prototype._makeFbos = function(depth, width, height, withDepthBuffer) {
   return Array(depth).fill().map(() => this.regl.framebuffer(Object.assign({
     color: this.regl.texture({
-      mag: "nearest",
+      mag: this.filter || "nearest",
+      min: this.filter || "nearest",
       width,
       height,
-      format: "rgba"
+      format: "rgba",
+      type: this.float ? "half float" : "uint8"
     })
   }, withDepthBuffer ? { depth: true } : { depthStencil: false })));
 };
@@ -27265,6 +27283,10 @@ Output.prototype.enableDepthBuffer = function() {
 };
 Output.prototype.getCurrent = function() {
   return this.fbos[this.pingPongIndex];
+};
+Output.prototype.advance = function() {
+  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
+  this._advanced = true;
 };
 Output.prototype.getTexture = function(delay = 1) {
   return this.fbos[delayedIndex(this.pingPongIndex, this.depth, delay)];
@@ -27344,6 +27366,9 @@ Output.prototype.init = function() {
       source: this.regl.prop("source")
     },
     count: 3,
+    // the last frame goes over an opaque black clear (frames are stored premultiplied), so ground nothing has
+    // drawn on is black with alpha 1, as on WebGPU, and not see-through to the page behind the canvas
+    blend: { enable: true, func: { srcRGB: "one", srcAlpha: "one", dstRGB: "one minus src alpha", dstAlpha: "one minus src alpha" } },
     depth: { enable: false }
   });
   return this;
@@ -28058,7 +28083,8 @@ Output.prototype.render = function(passes) {
 };
 Output.prototype._renderSprites = function(props) {
   if (this.sprites.size === 0) {
-    this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
+    if (this._advanced) this._advanced = false;
+    else this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
     const targetFbo2 = this.fbos[this.pingPongIndex];
     this.regl.clear({
       color: [0, 0, 0, 1],
@@ -28068,7 +28094,8 @@ Output.prototype._renderSprites = function(props) {
     return;
   }
   const levels = Array.from(this.sprites.keys()).sort((a2, b) => a2 - b);
-  this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
+  if (this._advanced) this._advanced = false;
+  else this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
   const targetFbo = this.fbos[this.pingPongIndex];
   const prevFbo = this.getTexture(1);
   const level0Sprite = this.sprites.get(0);
@@ -28076,7 +28103,7 @@ Output.prototype._renderSprites = function(props) {
   const needs3D = Array.from(this.sprites.values()).some((s) => s.has3D);
   if (!hasLevel0) {
     this.regl.clear({
-      color: [0, 0, 0, 0],
+      color: [0, 0, 0, 1],
       depth: needs3D ? 1 : void 0,
       framebuffer: targetFbo
     });
@@ -28435,6 +28462,8 @@ function patchOutput(hydra) {
         source: o.regl.prop("source")
       },
       count: 3,
+      blend: { enable: true, func: { srcRGB: "one", srcAlpha: "one", dstRGB: "one minus src alpha", dstAlpha: "one minus src alpha" } },
+      // as Output's copyCommand: over opaque black
       depth: { enable: false }
     });
   }

@@ -9934,8 +9934,9 @@ ${shaderInfo.glslFunctions.map((transform) => {
     let c: vec4<f32> = vec4<f32>(1.0, 0.0, 0.0, 1.0);
     // Sprite grid UV picking (like GLSL version)
     var st: vec2<f32>;
-    // Flip X to correct mirroring in WGSL
-    let texcoord = vec2<f32>(1.0 - ourIn.texcoord.x, ourIn.texcoord.y);
+    // As the vertex stage gave it, like GLSL. (It was turned in x here once, and the fullscreen vertex shader
+    // pre-turned to cancel; geometry then read mirrored. Test: dev/test-cube-faces.html?mode=gpu)
+    let texcoord = ourIn.texcoord;
     if (u_spriteGrid.x > 1.0 || u_spriteGrid.y > 1.0) {
       // Combine instanceId and faceId for unique sprites per instance
       var spriteIndex: f32;
@@ -10129,10 +10130,12 @@ ${shaderInfo.glslFunctions.map((transform) => {
   Output.prototype._makeFbos = function(depth, width, height, withDepthBuffer) {
     return Array(depth).fill().map(() => this.regl.framebuffer(Object.assign({
       color: this.regl.texture({
-        mag: "nearest",
+        mag: this.filter || "nearest",
+        min: this.filter || "nearest",
         width,
         height,
-        format: "rgba"
+        format: "rgba",
+        type: this.float ? "half float" : "uint8"
       })
     }, withDepthBuffer ? { depth: true } : { depthStencil: false })));
   };
@@ -10168,6 +10171,10 @@ ${shaderInfo.glslFunctions.map((transform) => {
   };
   Output.prototype.getCurrent = function() {
     return this.fbos[this.pingPongIndex];
+  };
+  Output.prototype.advance = function() {
+    this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
+    this._advanced = true;
   };
   Output.prototype.getTexture = function(delay = 1) {
     return this.fbos[delayedIndex(this.pingPongIndex, this.depth, delay)];
@@ -10247,6 +10254,9 @@ ${shaderInfo.glslFunctions.map((transform) => {
         source: this.regl.prop("source")
       },
       count: 3,
+      // the last frame goes over an opaque black clear (frames are stored premultiplied), so ground nothing has
+      // drawn on is black with alpha 1, as on WebGPU, and not see-through to the page behind the canvas
+      blend: { enable: true, func: { srcRGB: "one", srcAlpha: "one", dstRGB: "one minus src alpha", dstAlpha: "one minus src alpha" } },
       depth: { enable: false }
     });
     return this;
@@ -10961,7 +10971,8 @@ ${shaderInfo.glslFunctions.map((transform) => {
   };
   Output.prototype._renderSprites = function(props) {
     if (this.sprites.size === 0) {
-      this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
+      if (this._advanced) this._advanced = false;
+      else this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
       const targetFbo2 = this.fbos[this.pingPongIndex];
       this.regl.clear({
         color: [0, 0, 0, 1],
@@ -10971,7 +10982,8 @@ ${shaderInfo.glslFunctions.map((transform) => {
       return;
     }
     const levels = Array.from(this.sprites.keys()).sort((a, b) => a - b);
-    this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
+    if (this._advanced) this._advanced = false;
+    else this.pingPongIndex = (this.pingPongIndex + 1) % this.depth;
     const targetFbo = this.fbos[this.pingPongIndex];
     const prevFbo = this.getTexture(1);
     const level0Sprite = this.sprites.get(0);
@@ -10979,7 +10991,7 @@ ${shaderInfo.glslFunctions.map((transform) => {
     const needs3D = Array.from(this.sprites.values()).some((s) => s.has3D);
     if (!hasLevel0) {
       this.regl.clear({
-        color: [0, 0, 0, 0],
+        color: [0, 0, 0, 1],
         depth: needs3D ? 1 : void 0,
         framebuffer: targetFbo
       });
@@ -12826,6 +12838,8 @@ ${shaderInfo.glslFunctions.map((transform) => {
           source: o.regl.prop("source")
         },
         count: 3,
+        blend: { enable: true, func: { srcRGB: "one", srcAlpha: "one", dstRGB: "one minus src alpha", dstAlpha: "one minus src alpha" } },
+        // as Output's copyCommand: over opaque black
         depth: { enable: false }
       });
     }

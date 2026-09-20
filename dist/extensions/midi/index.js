@@ -38,8 +38,10 @@ class MidiState {
       // 'linear' | 'log' (min and max must be > 0) | 'exp'
       wrap: false,
       // relative: wrap around instead of clamping (rotation)
-      fine: 0
+      fine: 0,
       // relative: divide the step by this while the encoder's push note is held (0 = off)
+      snap: true
+      // relative: detents land on the grid of steps (of steps * fine while fine), so ends and round values are reachable
     }, defaults);
     this.controls = /* @__PURE__ */ new Map();
     this.notes = /* @__PURE__ */ new Map();
@@ -51,7 +53,7 @@ class MidiState {
   /**
    * Register a continuous control and get a function returning its value.
    * cc(number, min, max, init) or
-   * cc(number, {min, max, init, mode, channel, steps, curve, wrap, fine, fineNote})
+   * cc(number, {min, max, init, mode, channel, steps, curve, wrap, fine, fineNote, snap})
    * The returned function also has .value, .set(v), .reset(), .config, .v
    */
   cc(number, a, b, c) {
@@ -67,13 +69,16 @@ class MidiState {
     const k = key(cfg.channel, number);
     let rec = this.controls.get(k);
     if (!rec) {
-      rec = { number, config: cfg, pos: valueToPos(cfg, cfg.init), lastChannel: cfg.channel || 1 };
+      rec = { number, config: cfg, pos: valueToPos(cfg, cfg.init), lastChannel: cfg.channel || 1, aliases: [{ channel: cfg.channel, number }] };
       this.controls.set(k, rec);
     } else {
       const value = posToValue(rec.config, rec.pos);
       rec.config = cfg;
       rec.pos = valueToPos(cfg, value);
     }
+    return this._fnFor(rec, number);
+  }
+  _fnFor(rec, number) {
     const get = () => posToValue(rec.config, rec.pos);
     const fn = () => get();
     fn.value = get;
@@ -82,12 +87,31 @@ class MidiState {
       this._emitSet(rec);
       return get();
     };
-    fn.reset = () => fn.set(cfg.init);
-    fn.config = cfg;
+    fn.reset = () => fn.set(rec.config.init);
     fn.number = number;
+    Object.defineProperty(fn, "config", { get: () => rec.config });
     Object.defineProperty(fn, "v", { get });
     Object.defineProperty(fn, "pos", { get: () => rec.pos });
+    Object.defineProperty(fn, "aliases", { get: () => rec.aliases.slice() });
     return fn;
+  }
+  /**
+   * Bind a second encoder to an existing control: one value, several positions on the
+   * surface. Turning either moves it, both displays follow, a push on either is the fine
+   * push. Returns the same kind of getter cc() returns.
+   */
+  alias(number, ofNumber, opts = {}) {
+    const channel = opts.channel === void 0 ? this.defaults.channel : opts.channel;
+    const rec = this._find(this.controls, channel, ofNumber);
+    if (!rec) throw new Error(`midi.alias: no control on cc ${ofNumber} to alias`);
+    const k = key(channel, number);
+    const taken = this.controls.get(k);
+    if (taken && taken !== rec) throw new Error(`midi.alias: cc ${number} already has a control of its own`);
+    if (!taken) {
+      this.controls.set(k, rec);
+      rec.aliases.push({ channel, number });
+    }
+    return this._fnFor(rec, number);
   }
   /**
    * Register a note (encoder push or button). Returns a function giving 1 while held
@@ -115,7 +139,7 @@ class MidiState {
   /** Snapshot of every registered control value, keyed "channel:number". */
   snapshot() {
     const out = {};
-    for (const [k, rec] of this.controls) out[k] = posToValue(rec.config, rec.pos);
+    for (const [k, rec] of this.controls) if (k === key(rec.aliases[0].channel, rec.number)) out[k] = posToValue(rec.config, rec.pos);
     return out;
   }
   restore(snap) {
@@ -130,8 +154,9 @@ class MidiState {
   /** Every registered control as {channel, number, pos, value}, e.g. to refresh a device display. */
   positions() {
     const out = [];
-    for (const rec of this.controls.values()) {
-      out.push({ channel: rec.lastChannel, number: rec.number, pos: rec.pos, value: posToValue(rec.config, rec.pos) });
+    for (const [k, rec] of this.controls) {
+      if (k !== key(rec.aliases[0].channel, rec.number)) continue;
+      for (const a of rec.aliases) out.push({ channel: a.channel || rec.lastChannel, number: a.number, pos: rec.pos, value: posToValue(rec.config, rec.pos) });
     }
     return out;
   }
@@ -144,7 +169,7 @@ class MidiState {
     for (const fn of this.listeners) fn(ev);
   }
   _emitSet(rec) {
-    this._emit({ type: "set", channel: rec.lastChannel, number: rec.number, registered: true, pos: rec.pos, after: posToValue(rec.config, rec.pos) });
+    this._emit({ type: "set", channel: rec.lastChannel, number: rec.number, registered: true, pos: rec.pos, after: posToValue(rec.config, rec.pos), aliases: rec.aliases });
   }
   _find(map, channel, number) {
     return map.get(key(channel, number)) || map.get(key(null, number));
@@ -194,15 +219,23 @@ class MidiState {
     }
     if (cfg.mode === "abs") return this._applyPos(rec, channel, value, value / 127, "abs");
     let delta = decodeRelative(cfg.mode, value);
-    const fine = cfg.fine && this._isHeld(channel, cfg.fineNote);
-    let step = 1 / cfg.steps;
-    if (fine) step /= cfg.fine;
+    const fine = cfg.fine && (this._isHeld(channel, cfg.fineNote) || rec.aliases.some((a) => this._isHeld(channel, a.number)));
+    const n = fine ? cfg.steps * cfg.fine : cfg.steps;
     const before = posToValue(cfg, rec.pos);
-    let p = rec.pos + delta * step;
-    if (cfg.wrap) p = p - Math.floor(p);
-    else p = clamp01(p);
+    let p;
+    if (cfg.snap && delta !== 0) {
+      let x = rec.pos * n;
+      if (Math.abs(x - Math.round(x)) < 1e-6) x = Math.round(x);
+      let k = (delta > 0 ? Math.floor(x) : Math.ceil(x)) + delta;
+      if (cfg.wrap) k = (k % n + n) % n;
+      p = clamp01(k / n);
+    } else {
+      p = rec.pos + delta / n;
+      if (cfg.wrap) p = p - Math.floor(p);
+      else p = clamp01(p);
+    }
     rec.pos = p;
-    const ev = { type: "cc", channel, number, value, registered: true, mode: cfg.mode, delta, fine: !!fine, before, after: posToValue(cfg, rec.pos), pos: rec.pos };
+    const ev = { type: "cc", channel, number, value, registered: true, mode: cfg.mode, delta, fine: !!fine, before, after: posToValue(cfg, rec.pos), pos: rec.pos, aliases: rec.aliases };
     this._emit(ev);
     return ev;
   }
@@ -210,7 +243,7 @@ class MidiState {
     const cfg = rec.config;
     const before = posToValue(cfg, rec.pos);
     rec.pos = clamp01(pos);
-    const ev = { type: "cc", channel, number: rec.number, value: raw, registered: true, mode: how, before, after: posToValue(cfg, rec.pos), pos: rec.pos };
+    const ev = { type: "cc", channel, number: rec.number, value: raw, registered: true, mode: how, before, after: posToValue(cfg, rec.pos), pos: rec.pos, aliases: rec.aliases };
     this._emit(ev);
     return ev;
   }
@@ -307,7 +340,7 @@ class Controller {
     this._unlisten = this.state.onEvent((ev) => {
       if (this._logging) console.log("[midi]", describeEvent(ev));
       if (this.opts.feedback && ev.registered && ev.pos !== void 0 && (ev.type === "cc" || ev.type === "set")) {
-        this.sendFeedback(ev.channel, ev.number, ev.pos);
+        for (const a of ev.aliases || [{ channel: ev.channel, number: ev.number }]) this.sendFeedback(a.channel || ev.channel, a.number, ev.pos);
       }
     });
     if (this.opts.profile) this.use(this.opts.profile);
@@ -331,6 +364,12 @@ class Controller {
     const opts = typeof a === "object" && a !== null ? defined$1(a) : defined$1({ min: a, max: b, init: c });
     if (opts.channel === void 0 && channel != null) opts.channel = channel;
     return this.state.cc(number, opts);
+  }
+  /** alias(id, ofId): bind another encoder to an existing control (one value, two places). */
+  alias(id, ofId) {
+    const { number, channel } = resolveControl(this.profile, id);
+    const of = resolveControl(this.profile, ofId);
+    return this.state.alias(number, of.number, { channel: channel == null ? of.channel : channel });
   }
   /** note(id, opts); id = number | [group, n] | 'name' (the encoder's push) */
   note(id, opts = {}) {
@@ -422,8 +461,19 @@ async function connectWebMidi(controller, options = {}) {
   try {
     access = await navigator.requestMIDIAccess({ sysex: opts.sysex });
   } catch (e) {
-    console.warn("[midi] MIDI access refused:", e.message);
-    return controller;
+    if (opts.sysex) {
+      console.warn("[midi] no sysex access (" + e.message + "); carrying on without it");
+      opts.sysex = false;
+      try {
+        access = await navigator.requestMIDIAccess({ sysex: false });
+      } catch (e2) {
+        access = null;
+      }
+    }
+    if (!access) {
+      console.warn("[midi] MIDI access refused:", e.message);
+      return controller;
+    }
   }
   const matchIn = matcher(opts.inputFilter);
   const matchOut = matcher(opts.outputFilter);
@@ -781,8 +831,45 @@ function parseDump(bytes) {
   img.pages = pagesSeen;
   return img;
 }
+const EC4_HEAD = [240, 0, 0, 0, 78, 44, 27];
+const EC4_QUERY = [240, 0, 0, 0, 78, 32, 16, 247];
+const selectBytes = (setup, group) => [...EC4_HEAD, 78, 40, 16 | setup - 1, 78, 36, 16 | group - 1, 247];
+const parseSelect = (b) => b.length === 14 && EC4_HEAD.every((v, i) => b[i] === v) && b[7] === 78 && b[8] === 40 && b[10] === 78 && b[11] === 36 ? { setup: (b[9] & 15) + 1, group: (b[12] & 15) + 1 } : null;
 function ec4Tools(controller) {
+  const selectListeners = /* @__PURE__ */ new Set();
+  const canSend = () => !!(controller.transport && controller.transport.send && controller.transport.sysex);
+  controller.onSysex((bytes) => {
+    const at = parseSelect(bytes);
+    if (!at) return;
+    tools.where = at;
+    for (const fn of selectListeners) {
+      try {
+        fn(at);
+      } catch (e) {
+      }
+    }
+  });
   const tools = {
+    /** { setup, group } (1-based) as last reported by the device, or null. */
+    where: null,
+    /** Ask the device where it is; the answer arrives through onSelect and lands in `where`. */
+    query() {
+      if (!canSend()) return false;
+      controller.transport.send(EC4_QUERY);
+      return true;
+    },
+    /** Put the device on a group (and setup; default the one it is on). 1-based. False when it cannot be sent. */
+    select(group, setup = tools.where && tools.where.setup || 1) {
+      if (!canSend() || !(group >= 1 && group <= 16) || !(setup >= 1 && setup <= 16)) return false;
+      controller.transport.send(selectBytes(setup, group));
+      tools.where = { setup, group };
+      return true;
+    },
+    /** Called with { setup, group } whenever the device reports a change (its own keys included). */
+    onSelect(fn) {
+      selectListeners.add(fn);
+      return () => selectListeners.delete(fn);
+    },
     image: null,
     Ec4Image,
     parseDump,
