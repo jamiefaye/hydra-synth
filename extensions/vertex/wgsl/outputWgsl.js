@@ -110,7 +110,7 @@ class OutputWgsl {
 
   // Register a sprite at a given level (parallel to WebGL Output.registerSprite)
   async registerSprite(spriteLevel, config) {
-    const { passes, vertexData, blendMode = 'normal', primitive = 'triangles', sprite = null } = config
+    const { passes, vertexData, blendMode = 'normal', primitive = 'triangles', sprite = null, enabled = true } = config
     const pass = passes[0]
 
     // Extract raw vertices and check for VertexSource
@@ -215,6 +215,7 @@ class OutputWgsl {
 
     // Store sprite config
     this.sprites.set(spriteLevel, {
+      enabled,   // a level can be switched off and on without touching its pipeline: enableSprite / disableSprite
       passes,
       vertexData,
       rawVerts,
@@ -281,6 +282,22 @@ class OutputWgsl {
     // Clear existing sprites and register at level 0
     this.clearSprites()
     await this.registerSprite(0, { passes, vertexData: null, blendMode: 'normal' })
+  }
+
+  // Switch a level off or on. Its pipeline and buffers stay as they are, so nothing is recompiled and nothing
+  // that runs on `time` loses its place: the level is simply skipped while off. With level 0 off nothing clears
+  // and the frame starts from the last one, as if there were no level 0. (Same as the WebGL output.)
+  enableSprite(level, enabled = true) {
+    if (this.sprites.has(level)) this.sprites.get(level).enabled = enabled
+  }
+
+  disableSprite(level) {
+    this.enableSprite(level, false)
+  }
+
+  isSpriteEnabled(level) {
+    const s = this.sprites.get(level)
+    return !s || s.enabled !== false
   }
 
   // Clear all sprites

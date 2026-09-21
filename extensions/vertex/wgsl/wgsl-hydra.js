@@ -1318,7 +1318,8 @@ class wgslHydra {
 				// No level 0: nothing clears, the frame starts from the last one (trails), as on WebGL, alpha included: an
 				// output with no level 0 owns its alpha. The slot being drawn into holds the frame from a whole ring ago,
 				// so the last frame is copied into it first. (New textures are transparent black; the canvas is opaque.)
-				if (!levels.includes(0)) {
+				const levelOn = (l) => !rpe.outputObject.isSpriteEnabled || rpe.outputObject.isSpriteEnabled(l);   // enableSprite / disableSprite
+				if (!(levels.includes(0) && levelOn(0))) {
 					const out = rpe.outputObject;
 					const prev = out.textures[delayedIndex(out.pingPongs, out.depth, 1)], cur = out.getCurrentTexture();
 					if (prev !== cur) commandEncoder.copyTextureToTexture({ texture: prev }, { texture: cur }, [cur.width, cur.height]);
@@ -1327,6 +1328,7 @@ class wgslHydra {
 				for (let i = 0; i < levels.length; i++) {
 					const level = levels[i];
 					const spe = rpe.sprites.get(level);
+					if (!levelOn(level)) continue;   // switched off: skipped, pipeline kept
 
 					// Update animation buffers if this sprite is animated
 					if (spe.animation) {

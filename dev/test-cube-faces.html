@@ -105,6 +105,17 @@
         const trailOk = !!trail && trail[0] + trail[1] + trail[2] > 120
         if (!trailOk) ok = false
         lines.push(`trail from the last frame: ${P ? `pixel ${P.join(',')} rgba ${trail.join(',')}` : 'no pixel found outside the front face'} ${trailOk ? '(kept)' : '(lost)'}`)
+        // a level switched off and on again: skipped while off, and nothing rebuilt (the draw command / pipeline entry
+        // is the same object afterwards), so a chain that runs on `time` would not lose its place
+        solid(0, 0, 1, 1).out(o0, { level: 0 }); await wait(500)
+        const made = () => mode === 'gpu' ? o0.wgslHydra.renderPassInfo[o0.chanNum].sprites.get(1) : o0.sprites.get(1).drawCommand
+        const centreIsBlue = async () => { hydra.tick(16); await wait(80); await grab(); const d = sctx.getImageData(180, 180, 1, 1).data; return d[2] > 200 && d[0] < 60 && d[1] < 60 }
+        const before = made()
+        const on1 = await centreIsBlue(); o0.disableSprite(1); const off = await centreIsBlue(); o0.enableSprite(1); const on2 = await centreIsBlue()
+        const switchOk = !on1 && off && !on2 && made() === before
+        if (!switchOk) ok = false
+        lines.push(`level 1 off and on: cube ${on1 ? 'MISSING' : 'shown'}, off ${off ? 'gone (blue ground)' : 'STILL THERE'}, on again ${on2 ? 'MISSING' : 'shown'}, ${made() === before ? 'nothing rebuilt' : 'REBUILT'}`)
+        o0.removeSprite ? o0.removeSprite(0) : null
         // and the same image as an ordinary fullscreen chain: it must fill the canvas as drawn too
         src(s0).out(o0)   // a plain out() replaces the cube's level (not hush(): it clears the sources too)
         await wait(500)
