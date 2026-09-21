@@ -10368,7 +10368,7 @@ fn main(input: VertexInput) -> VertexOutput {
     }
     // Register a sprite at a given level (parallel to WebGL Output.registerSprite)
     async registerSprite(spriteLevel, config) {
-      const { passes, vertexData, blendMode = "normal", primitive = "triangles", sprite = null } = config;
+      const { passes, vertexData, blendMode = "normal", primitive = "triangles", sprite = null, enabled = true } = config;
       const pass = passes[0];
       let rawVerts = null;
       let vertexSource = null;
@@ -10454,6 +10454,8 @@ fn main(input: VertexInput) -> VertexOutput {
         };
       }
       this.sprites.set(spriteLevel, {
+        enabled,
+        // a level can be switched off and on without touching its pipeline: enableSprite / disableSprite
         passes,
         vertexData,
         rawVerts,
@@ -10516,6 +10518,19 @@ fn main(input: VertexInput) -> VertexOutput {
     async render(passes) {
       this.clearSprites();
       await this.registerSprite(0, { passes, vertexData: null, blendMode: "normal" });
+    }
+    // Switch a level off or on. Its pipeline and buffers stay as they are, so nothing is recompiled and nothing
+    // that runs on `time` loses its place: the level is simply skipped while off. With level 0 off nothing clears
+    // and the frame starts from the last one, as if there were no level 0. (Same as the WebGL output.)
+    enableSprite(level, enabled = true) {
+      if (this.sprites.has(level)) this.sprites.get(level).enabled = enabled;
+    }
+    disableSprite(level) {
+      this.enableSprite(level, false);
+    }
+    isSpriteEnabled(level) {
+      const s = this.sprites.get(level);
+      return !s || s.enabled !== false;
     }
     // Clear all sprites
     clearSprites() {
@@ -11768,7 +11783,8 @@ fn main (@builtin(global_invocation_id) id: vec3<u32>) {
         if (hasSprites) {
           const levels = Array.from(rpe.sprites.keys()).sort((a2, b) => a2 - b);
           let depthCleared = false;
-          if (!levels.includes(0)) {
+          const levelOn = (l) => !rpe.outputObject.isSpriteEnabled || rpe.outputObject.isSpriteEnabled(l);
+          if (!(levels.includes(0) && levelOn(0))) {
             const out = rpe.outputObject;
             const prev = out.textures[delayedIndex(out.pingPongs, out.depth, 1)], cur = out.getCurrentTexture();
             if (prev !== cur) commandEncoder.copyTextureToTexture({ texture: prev }, { texture: cur }, [cur.width, cur.height]);
@@ -11776,6 +11792,7 @@ fn main (@builtin(global_invocation_id) id: vec3<u32>) {
           for (let i2 = 0; i2 < levels.length; i2++) {
             const level = levels[i2];
             const spe = rpe.sprites.get(level);
+            if (!levelOn(level)) continue;
             if (spe.animation) {
               const anim = spe.animation;
               const time = typeof anim.timeFunc === "function" ? anim.timeFunc() : 0;
