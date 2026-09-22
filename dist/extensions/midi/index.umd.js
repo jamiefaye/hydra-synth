@@ -276,15 +276,31 @@
     }
     return ev.registered ? base : `${base}  (unassigned)`;
   }
+  const byOffset = (channel) => ({
+    encoder: (group, n) => ({ number: (group - 1) * 16 + (n - 1), channel }),
+    push: (group, n) => ({ note: (group - 1) * 16 + (n - 1), channel }),
+    locate: (number, ch) => number >= 0 && number < 128 && (ch == null || ch === channel) ? [Math.floor(number / 16) + 1, number % 16 + 1] : null
+  });
   const ec4 = {
     name: "Faderfox EC4",
     match: /faderfox|ec4/i,
     mode: "r2",
     channel: 1,
+    setup: 1,
     groups: 16,
     encodersPerGroup: 16,
-    encoder: (group, n) => ({ number: (group - 1) * 16 + (n - 1), channel: 1 }),
-    push: (group, n) => ({ note: (group - 1) * 16 + (n - 1), channel: 1 }),
+    ...byOffset(1),
+    names: {}
+  };
+  const parm = {
+    name: "Faderfox EC4 PARM (setup 14)",
+    match: /faderfox|ec4/i,
+    mode: "r2",
+    channel: 14,
+    setup: 14,
+    groups: 8,
+    encodersPerGroup: 16,
+    ...byOffset(14),
     names: {}
   };
   const generic = {
@@ -296,7 +312,7 @@
     push: (group, n) => ({ note: n, channel: null }),
     names: {}
   };
-  const profiles = { ec4, generic };
+  const profiles = { ec4, parm, generic };
   function resolveControl(profile, id) {
     if (typeof id === "number") return { number: id, channel: profile ? profile.channel : null };
     if (Array.isArray(id) && id.length === 2) {
@@ -340,6 +356,8 @@
       this.ready = Promise.resolve(this);
       this.onInputsChanged = null;
       this._sysexListeners = /* @__PURE__ */ new Set();
+      this._transportListeners = /* @__PURE__ */ new Set();
+      this._labelListeners = /* @__PURE__ */ new Set();
       this._logging = !!this.opts.log;
       this._unlisten = this.state.onEvent((ev) => {
         if (this._logging) console.log("[midi]", describeEvent(ev));
@@ -362,12 +380,23 @@
       Object.assign(this.profile.names, map);
       return this.profile.names;
     }
-    /** cc(id, min, max, init) or cc(id, opts); id = number | [group, n] | 'name' */
+    /**
+     * cc(id, min, max, init) or cc(id, opts); id = number | [group, n] | 'name'.
+     * opts.label (up to 4 characters) names the encoder on a device display that can be
+     * written live (EC4: midi.ec4.display); listeners from onLabels hear about it.
+     */
     cc(id, a, b, c) {
       const { number, channel } = resolveControl(this.profile, id);
       const opts = typeof a === "object" && a !== null ? defined$1(a) : defined$1({ min: a, max: b, init: c });
       if (opts.channel === void 0 && channel != null) opts.channel = channel;
-      return this.state.cc(number, opts);
+      const fn = this.state.cc(number, opts);
+      if (opts.label !== void 0) for (const l of this._labelListeners) {
+        try {
+          l();
+        } catch (e) {
+        }
+      }
+      return fn;
     }
     /** alias(id, ofId): bind another encoder to an existing control (one value, two places). */
     alias(id, ofId) {
@@ -394,6 +423,16 @@
     onSysex(fn) {
       this._sysexListeners.add(fn);
       return () => this._sysexListeners.delete(fn);
+    }
+    /** Called after every attachTransport (ports opened or changed). */
+    onTransport(fn) {
+      this._transportListeners.add(fn);
+      return () => this._transportListeners.delete(fn);
+    }
+    /** Called whenever a control is registered with a label. */
+    onLabels(fn) {
+      this._labelListeners.add(fn);
+      return () => this._labelListeners.delete(fn);
     }
     snapshot() {
       return this.state.snapshot();
@@ -432,6 +471,12 @@
       this.outputs = transport.outputs || [];
       if (this.onInputsChanged) this.onInputsChanged(this.inputs);
       this.refresh();
+      for (const fn of this._transportListeners) {
+        try {
+          fn(transport);
+        } catch (e) {
+        }
+      }
     }
     close() {
       this._unlisten();
@@ -836,12 +881,119 @@
     return img;
   }
   const EC4_HEAD = [240, 0, 0, 0, 78, 44, 27];
-  const EC4_QUERY = [240, 0, 0, 0, 78, 32, 16, 247];
+  const NAME_WIDTH = 4;
+  const NAMES_PER_GROUP = 16;
+  const ROW_WIDTH = 20;
+  const ROWS = 4;
+  const BLANK_NAME = "----";
+  const nib = (v) => [32 | v >> 4 & 15, 16 | v & 15];
+  const chars = (text) => Array.from(text, (c) => [77, ...nib(c.charCodeAt(0))]).flat();
+  function fit(text, width) {
+    const s = String(text ?? "").replace(/[^\x20-\x7e]/g, " ");
+    return s.length >= width ? s.slice(0, width) : s.padEnd(width, " ");
+  }
+  function normalizeNames(names) {
+    const out = Array(NAMES_PER_GROUP).fill(BLANK_NAME);
+    const put = (i, n) => {
+      if (i >= 0 && i < NAMES_PER_GROUP && n != null) out[i] = fit(n, NAME_WIDTH);
+    };
+    if (Array.isArray(names)) names.forEach((n, i) => put(i, n));
+    else if (names && typeof names === "object") for (const [e, n] of Object.entries(names)) put(Number(e) - 1, n);
+    return out;
+  }
+  function namesBytes(names) {
+    return [...EC4_HEAD, 78, 34, 16, 74, ...nib(0), ...chars(normalizeNames(names).join("")), 247];
+  }
+  function clearNamesBytes() {
+    return namesBytes([]);
+  }
+  function screenBytes(rows) {
+    const list = Array.isArray(rows) ? rows : String(rows ?? "").split("\n");
+    const text = Array.from({ length: ROWS }, (_, i) => fit(list[i], ROW_WIDTH)).join("");
+    return [...EC4_HEAD, 78, 34, 19, 74, ...nib(0), ...chars(text), 247];
+  }
+  function hideScreenBytes() {
+    return [...EC4_HEAD, 78, 34, 21, 247];
+  }
   const selectBytes = (setup, group) => [...EC4_HEAD, 78, 40, 16 | setup - 1, 78, 36, 16 | group - 1, 247];
+  const QUERY_BYTES = [240, 0, 0, 0, 78, 32, 16, 247];
   const parseSelect = (b) => b.length === 14 && EC4_HEAD.every((v, i) => b[i] === v) && b[7] === 78 && b[8] === 40 && b[10] === 78 && b[11] === 36 ? { setup: (b[9] & 15) + 1, group: (b[12] & 15) + 1 } : null;
+  class Ec4Labels {
+    constructor() {
+      this.map = /* @__PURE__ */ new Map();
+    }
+    static key(setup, group) {
+      return `${setup}:${group}`;
+    }
+    /** Replace (array) or merge ({ encoder: name }) the names of one group. */
+    set(setup, group, names) {
+      const k = Ec4Labels.key(setup, group);
+      if (Array.isArray(names) || !names) {
+        this.map.set(k, normalizeNames(names));
+        return this;
+      }
+      const cur = this.map.get(k) || Array(NAMES_PER_GROUP).fill(BLANK_NAME);
+      const add = normalizeNames(names);
+      for (const [e, n] of Object.entries(names)) {
+        const i = Number(e) - 1;
+        if (i >= 0 && i < NAMES_PER_GROUP && n != null) cur[i] = add[i];
+      }
+      this.map.set(k, cur);
+      return this;
+    }
+    get(setup, group) {
+      return this.map.get(Ec4Labels.key(setup, group)) || null;
+    }
+    clear(setup, group) {
+      if (setup === void 0) this.map.clear();
+      else if (group === void 0) for (const k of [...this.map.keys()]) {
+        if (k.startsWith(`${setup}:`)) this.map.delete(k);
+      }
+      else this.map.delete(Ec4Labels.key(setup, group));
+      return this;
+    }
+    /** Groups that have names in a setup, ascending. */
+    groups(setup) {
+      return [...this.map.keys()].filter((k) => k.startsWith(`${setup}:`)).map((k) => Number(k.split(":")[1])).sort((a, b) => a - b);
+    }
+  }
+  function labelsFromControls(controller, setup) {
+    const labels = new Ec4Labels();
+    const profile = controller.profile;
+    if (!profile || !profile.locate) return labels;
+    const byKey = /* @__PURE__ */ new Map();
+    for (const [name, id] of Object.entries(profile.names || {})) {
+      try {
+        const at = Array.isArray(id) ? profile.encoder(id[0], id[1]) : typeof id === "number" ? { number: id, channel: profile.channel } : null;
+        if (at) byKey.set(`${at.channel ?? "*"}:${at.number}`, name);
+      } catch (e) {
+      }
+    }
+    for (const rec of controller.state.controls.values()) {
+      for (const a of rec.aliases || []) {
+        const at = profile.locate(a.number, a.channel);
+        if (!at) continue;
+        const label = rec.config.label ?? byKey.get(`${a.channel ?? "*"}:${a.number}`) ?? byKey.get(`*:${a.number}`);
+        if (label == null) continue;
+        labels.set(setup, at[0], { [at[1]]: label });
+      }
+    }
+    return labels;
+  }
+  const SELECT_SETTLE_MS = 80;
+  const QUERY_AFTER_CONNECT_MS = 300;
   function ec4Tools(controller) {
     const selectListeners = /* @__PURE__ */ new Set();
     const canSend = () => !!(controller.transport && controller.transport.send && controller.transport.sysex);
+    const sendBytes = (bytes) => {
+      if (!canSend()) return false;
+      try {
+        controller.transport.send(bytes);
+      } catch (e) {
+        return false;
+      }
+      return true;
+    };
     controller.onSysex((bytes) => {
       const at = parseSelect(bytes);
       if (!at) return;
@@ -852,21 +1004,74 @@
         } catch (e) {
         }
       }
+      if (display.auto) display.refresh();
     });
+    controller.onTransport((t) => {
+      if (t && t.sysex && display.auto) setTimeout(() => tools.query(), QUERY_AFTER_CONNECT_MS);
+    });
+    let labelTimer = null;
+    controller.onLabels(() => {
+      if (!display.auto || labelTimer) return;
+      labelTimer = setTimeout(() => {
+        labelTimer = null;
+        display.fromControls();
+      }, 0);
+    });
+    const homeSetup = () => controller.profile && controller.profile.setup || tools.where && tools.where.setup || 1;
+    const display = {
+      /** re-send on connect / group change / registration; off = a page does its own refresh() */
+      auto: true,
+      labels: new Ec4Labels(),
+      /** names(group, names, setup?): array (encoder 1 first) or { encoder: name }; sent now if that group is on screen */
+      names(group, names, setup = homeSetup()) {
+        display.labels.set(setup, group, names);
+        return display.refresh(setup, group);
+      },
+      /** Send the names of the group on screen from the model. (setup, group) given: only if that is the one on screen. */
+      refresh(setup, group) {
+        const at = tools.where;
+        if (!at) return false;
+        if (setup !== void 0 && group !== void 0 && (setup !== at.setup || group !== at.group)) return false;
+        const names = display.labels.get(at.setup, at.group);
+        return names ? sendBytes(namesBytes(names)) : false;
+      },
+      /** Labels for every group from the registered controls (their `label` option, else their profile name), then refresh. */
+      fromControls(setup = homeSetup()) {
+        const built = labelsFromControls(controller, setup);
+        display.labels.clear(setup);
+        for (const g of built.groups(setup)) display.labels.set(setup, g, built.get(setup, g));
+        display.refresh();
+        return display.labels;
+      },
+      /** Forget a group's names (or a setup's, or all) and put the device's blanks back if it is on screen. */
+      clear(group, setup = homeSetup()) {
+        display.labels.clear(group === void 0 ? void 0 : setup, group);
+        const at = tools.where;
+        if (at && (group === void 0 || group === at.group && setup === at.setup)) sendBytes(clearNamesBytes());
+        return display.labels;
+      },
+      /** Free text over the whole display, up to 4 rows of 20, until hide(). */
+      text(rows) {
+        return sendBytes(screenBytes(rows));
+      },
+      hide() {
+        return sendBytes(hideScreenBytes());
+      }
+    };
     const tools = {
+      display,
       /** { setup, group } (1-based) as last reported by the device, or null. */
       where: null,
       /** Ask the device where it is; the answer arrives through onSelect and lands in `where`. */
       query() {
-        if (!canSend()) return false;
-        controller.transport.send(EC4_QUERY);
-        return true;
+        return sendBytes(QUERY_BYTES);
       },
       /** Put the device on a group (and setup; default the one it is on). 1-based. False when it cannot be sent. */
       select(group, setup = tools.where && tools.where.setup || 1) {
         if (!canSend() || !(group >= 1 && group <= 16) || !(setup >= 1 && setup <= 16)) return false;
         controller.transport.send(selectBytes(setup, group));
         tools.where = { setup, group };
+        if (display.auto) setTimeout(() => display.refresh(setup, group), SELECT_SETTLE_MS);
         return true;
       },
       /** Called with { setup, group } whenever the device reports a change (its own keys included). */
@@ -938,7 +1143,7 @@
     };
     return tools;
   }
-  const VERSION = "0.2.0";
+  const VERSION = "0.3.0";
   let _midi = null;
   async function install(hydra = null, options = {}) {
     if (_midi) return _midi;
@@ -971,6 +1176,7 @@
   exports2.CURVES = CURVES;
   exports2.Controller = Controller;
   exports2.Ec4Image = Ec4Image;
+  exports2.Ec4Labels = Ec4Labels;
   exports2.MODES = MODES$1;
   exports2.MidiState = MidiState;
   exports2.VERSION = VERSION;
@@ -981,9 +1187,14 @@
   exports2.ec4Tools = ec4Tools;
   exports2.encodeDump = encodeDump;
   exports2.generic = generic;
+  exports2.hideScreenBytes = hideScreenBytes;
   exports2.install = install;
+  exports2.labelsFromControls = labelsFromControls;
+  exports2.namesBytes = namesBytes;
+  exports2.parm = parm;
   exports2.parseDump = parseDump;
   exports2.profiles = profiles;
+  exports2.screenBytes = screenBytes;
   exports2.uninstall = uninstall;
   Object.defineProperty(exports2, Symbol.toStringTag, { value: "Module" });
 }));
