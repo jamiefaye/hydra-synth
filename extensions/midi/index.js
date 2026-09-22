@@ -2,7 +2,8 @@
  * MIDI extension for Hydra: Hydra glue around a transport-agnostic controller core.
  *
  *   core/midi-state.js   value model (relative/absolute decode, curves, wrap, fine, snapshots)
- *   core/profiles.js     device layouts (Faderfox EC4 as programmed, generic CC)
+ *   core/profiles.js     device layouts (Faderfox EC4 setup 1, EC4 setup 14 PARM, generic CC)
+ *   core/ec4-display.js  live OLED writes (names, whole screen) and the labels model
  *   core/controller.js   Controller = state + profile + feedback + transport interface
  *   adapters/web-midi.js browser ports          adapters/virtual.js  tests / bridges
  *   index.js             this file: install(hydra) -> window.midi and hydra.synth.midi
@@ -20,6 +21,13 @@
  *   learn(on), last, snapshot(), restore(obj), refresh(), inputs, outputs, ready, state, profile.
  *   id = CC number | [group, encoder] | 'name'.
  *
+ * Live OLED labels (EC4 firmware 2.x, install with { sysex: true }): an encoder registered with
+ * a label, midi.cc([1, 3], { label: 'FREQ', ... }), gets that name on the display, and the names
+ * go out again on connect and on every group change (the device forgets them). Only encoders
+ * whose stored name is '----' take a written name; the PARM setup (profile parm, setup 14) is
+ * all blanks for exactly this. midi.ec4.display.names(group, [...16]) sets a group by hand,
+ * .text(rows) / .hide() take the whole 4x20 screen, .auto = false leaves refreshing to the page.
+ *
  * Encoder modes: 'r1' (EC4 CCr1: 1 down / 127 up), 'r2' (EC4 CCr2: 63 down / 65 up),
  * 'abs' (0..127), 'abs14' (EC4 CCah, MSB on n and LSB on n+32). Per-control options:
  * mode, channel, steps, curve 'linear'|'log'|'exp', wrap, fine, fineNote.
@@ -27,14 +35,15 @@
 
 import { Controller } from './core/controller.js'
 import { MidiState, describeEvent, MODES, CURVES } from './core/midi-state.js'
-import { profiles, ec4, generic } from './core/profiles.js'
+import { profiles, ec4, parm, generic } from './core/profiles.js'
 import { connectWebMidi } from './adapters/web-midi.js'
 import { connectVirtual } from './adapters/virtual.js'
 import { ec4Tools } from './adapters/sysex.js'
 import { Ec4Image, parseDump, encodeDump } from './core/ec4-sysex.js'
+import { Ec4Labels, labelsFromControls, namesBytes, screenBytes, hideScreenBytes } from './core/ec4-display.js'
 
-export const VERSION = '0.2.0'
-export { Controller, MidiState, describeEvent, MODES, CURVES, profiles, ec4, generic, connectWebMidi, connectVirtual, ec4Tools, Ec4Image, parseDump, encodeDump }
+export const VERSION = '0.3.0'
+export { Controller, MidiState, describeEvent, MODES, CURVES, profiles, ec4, parm, generic, connectWebMidi, connectVirtual, ec4Tools, Ec4Image, parseDump, encodeDump, Ec4Labels, labelsFromControls, namesBytes, screenBytes, hideScreenBytes }
 
 let _midi = null
 

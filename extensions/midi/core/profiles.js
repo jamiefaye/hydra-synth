@@ -9,8 +9,17 @@
  *   channel   default channel, or null for any
  *   encoder(group, n)  -> { number, channel }   1-based group and encoder
  *   push(group, n)     -> { note, channel }     the encoder's push, when set to send a note
+ *   locate(number, channel) -> [group, n] | null   the inverse, for display labels
+ *   setup     the EC4 setup this layout lives in (labels go there)
  *   names     { alias: [group, n] }  user-defined names for encoders
  */
+
+// group g, encoder n -> CC (g-1)*16 + (n-1) on one channel, and back
+const byOffset = (channel) => ({
+  encoder: (group, n) => ({ number: (group - 1) * 16 + (n - 1), channel }),
+  push: (group, n) => ({ note: (group - 1) * 16 + (n - 1), channel }),
+  locate: (number, ch) => (number >= 0 && number < 128 && (ch == null || ch === channel)) ? [Math.floor(number / 16) + 1, (number % 16) + 1] : null
+})
 
 // Faderfox EC4 as programmed in setup SE01 (Sep 2026): groups GR01..GR04 as CCr2 on channel 1,
 // numbered by group offset (encoder n of group g = CC (g-1)*16 + n-1). Push type Note sends the same number.
@@ -19,10 +28,25 @@ export const ec4 = {
   match: /faderfox|ec4/i,
   mode: 'r2',
   channel: 1,
+  setup: 1,
   groups: 16,
   encodersPerGroup: 16,
-  encoder: (group, n) => ({ number: (group - 1) * 16 + (n - 1), channel: 1 }),
-  push: (group, n) => ({ note: (group - 1) * 16 + (n - 1), channel: 1 }),
+  ...byOffset(1),
+  names: {}
+}
+
+// Faderfox EC4 setup 14 "PARM" (Sep 2026, dev/parming-ec4-labels.json): groups PRM1..PRM8 as CCr2 on
+// channel 14, numbered by group offset, push = Note of the same number. Every encoder name is '----' so a
+// page labels the OLED live (midi.ec4.display); groups 9..16 are as the device had them.
+export const parm = {
+  name: 'Faderfox EC4 PARM (setup 14)',
+  match: /faderfox|ec4/i,
+  mode: 'r2',
+  channel: 14,
+  setup: 14,
+  groups: 8,
+  encodersPerGroup: 16,
+  ...byOffset(14),
   names: {}
 }
 
@@ -37,7 +61,7 @@ export const generic = {
   names: {}
 }
 
-export const profiles = { ec4, generic }
+export const profiles = { ec4, parm, generic }
 
 /**
  * Resolve what a sketch passed as a control id against a profile.

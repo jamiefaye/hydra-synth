@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>EC4 live labels (PARM, setup 14)</title>
+    <style>
+      body { margin: 0; background: black; color: #ddd; font-family: monospace; font-size: 13px; }
+      canvas { width: 100vw; height: 60vh; display: block; }
+      #panel { padding: 8px; height: 40vh; overflow: auto; box-sizing: border-box; }
+      #log { white-space: pre; color: #9f9; }
+      .val { color: #ff9; }
+      button, input, select { font: inherit; background: #222; color: #ddd; border: 1px solid #555; margin: 2px; }
+      table { border-collapse: collapse; } td { padding: 1px 6px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="1280" height="720"></canvas>
+    <div id="panel">
+      <div id="inputs">Requesting MIDI access (with sysex)...</div>
+      <div>
+        EC4 at: <span class="val" id="where">?</span>
+        <button id="query">query</button>
+        group: <select id="group"></select> <button id="select">select</button>
+        <button id="refresh">refresh labels</button>
+        <button id="clear">clear group</button>
+        &nbsp; screen: <input id="text" size="40" value="HELLO FROM THE PAGE&#10;PARM setup 14"> <button id="show">show</button> <button id="hide">hide</button>
+        &nbsp; <label><input type="checkbox" id="auto" checked> auto refresh</label>
+      </div>
+      <div>Group 1 knobs drive the sketch (labels come from the cc() label option); group 2 is labelled by hand with display.names(). Switch groups on the EC4: the names should follow.</div>
+      <table id="vals"></table>
+      <div id="log"></div>
+    </div>
+    <script type="module">
+      import HydraRenderer from '../src/hydra-synth.js'
+      import { install, parm, describeEvent } from '../extensions/midi/index.js'
+
+      const canvas = document.getElementById('c')
+      const hydra = new HydraRenderer({ canvas, width: 1280, height: 720, detectAudio: false, makeGlobal: true })
+      await hydra.ready()
+
+      const midi = await install(hydra, { profile: parm, sysex: true, log: false })
+      const $ = (id) => document.getElementById(id)
+      const showInputs = () => { $('inputs').textContent = 'MIDI inputs: ' + (midi.inputs.join(', ') || '(none)') + '; feedback to: ' + (midi.outputs.join(', ') || '(none)') + (midi.transport && midi.transport.sysex ? ' (sysex)' : ' (NO sysex: labels cannot be written)') }
+      midi.onInputsChanged = showInputs
+      midi.ready.then(showInputs)
+
+      const g = $('group'); for (let i = 1; i <= 8; i++) g.add(new Option('PRM' + i, i))
+      const showWhere = (at) => { $('where').textContent = at ? `setup ${at.setup} group ${at.group}` : '?'; if (at) g.value = at.group }
+      midi.ec4.onSelect(showWhere)
+      $('query').onclick = () => midi.ec4.query()
+      $('select').onclick = () => { midi.ec4.select(Number(g.value)); showWhere(midi.ec4.where) }
+      $('refresh').onclick = () => midi.ec4.display.refresh()
+      $('clear').onclick = () => midi.ec4.display.clear(Number(g.value))
+      $('show').onclick = () => midi.ec4.display.text($('text').value)
+      $('hide').onclick = () => midi.ec4.display.hide()
+      $('auto').onchange = () => { midi.ec4.display.auto = $('auto').checked }
+
+      // Group 1: the sketch's knobs, labelled where they are registered
+      const freq = midi.cc([1, 1], { min: 2, max: 80, init: 12, curve: 'log', fine: 10, label: 'FREQ' })
+      const sync = midi.cc([1, 2], { min: 0, max: 1, init: 0.1, label: 'SYNC' })
+      const off = midi.cc([1, 3], { min: 0, max: 2, init: 0.8, label: 'OFFS' })
+      const rot = midi.cc([1, 4], { min: 0, max: 6.283, init: 0, wrap: true, fine: 10, label: 'ROT' })
+      const kal = midi.cc([1, 5], { min: 1, max: 12, init: 1, steps: 22, label: 'KAL' })
+      const scl = midi.cc([1, 6], { min: 0.2, max: 5, init: 1, curve: 'log', label: 'SCAL' })
+      midi.cc([1, 16], { min: 0, max: 1, init: 0, label: 'LAST' })
+      osc(freq, sync, off).kaleid(() => Math.round(kal())).rotate(rot).scale(scl).out(o0)
+
+      // Group 2: labelled by hand, all sixteen
+      midi.ec4.display.names(2, ['ONE', 'TWO', 'THRE', 'FOUR', 'FIVE', 'SIX', 'SEVN', 'EIGT', 'NINE', 'TEN', 'ELVN', 'TWLV', 'THTN', 'FRTN', 'FFTN', 'SXTN'])
+
+      const knobs = { FREQ: freq, SYNC: sync, OFFS: off, ROT: rot, KAL: kal, SCAL: scl }
+      const lines = []
+      midi.state.onEvent(ev => { lines.push(describeEvent(ev)); if (lines.length > 6) lines.shift(); $('log').textContent = lines.join('\n') })
+      setInterval(() => { $('vals').innerHTML = Object.entries(knobs).map(([k, f]) => `<tr><td>${k}</td><td class="val">${f().toFixed(3)}</td></tr>`).join('') }, 100)
+      window.midi = midi
+    </script>
+  </body>
+</html>

@@ -32,6 +32,8 @@ export class Controller {
     this.ready = Promise.resolve(this)
     this.onInputsChanged = null
     this._sysexListeners = new Set()
+    this._transportListeners = new Set()
+    this._labelListeners = new Set()
     this._logging = !!this.opts.log
     this._unlisten = this.state.onEvent(ev => {
       if (this._logging) console.log('[midi]', describeEvent(ev))
@@ -58,12 +60,18 @@ export class Controller {
     return this.profile.names
   }
 
-  /** cc(id, min, max, init) or cc(id, opts); id = number | [group, n] | 'name' */
+  /**
+   * cc(id, min, max, init) or cc(id, opts); id = number | [group, n] | 'name'.
+   * opts.label (up to 4 characters) names the encoder on a device display that can be
+   * written live (EC4: midi.ec4.display); listeners from onLabels hear about it.
+   */
   cc (id, a, b, c) {
     const { number, channel } = resolveControl(this.profile, id)
     const opts = (typeof a === 'object' && a !== null) ? defined(a) : defined({ min: a, max: b, init: c })
     if (opts.channel === undefined && channel != null) opts.channel = channel
-    return this.state.cc(number, opts)
+    const fn = this.state.cc(number, opts)
+    if (opts.label !== undefined) for (const l of this._labelListeners) { try { l() } catch (e) { /* a listener's problem */ } }
+    return fn
   }
 
   /** alias(id, ofId): bind another encoder to an existing control (one value, two places). */
@@ -93,6 +101,10 @@ export class Controller {
   }
 
   onSysex (fn) { this._sysexListeners.add(fn); return () => this._sysexListeners.delete(fn) }
+  /** Called after every attachTransport (ports opened or changed). */
+  onTransport (fn) { this._transportListeners.add(fn); return () => this._transportListeners.delete(fn) }
+  /** Called whenever a control is registered with a label. */
+  onLabels (fn) { this._labelListeners.add(fn); return () => this._labelListeners.delete(fn) }
   snapshot () { return this.state.snapshot() }
   restore (snap) { return this.state.restore(snap) }
   onEvent (fn) { return this.state.onEvent(fn) }
@@ -123,6 +135,7 @@ export class Controller {
     this.outputs = transport.outputs || []
     if (this.onInputsChanged) this.onInputsChanged(this.inputs)
     this.refresh()
+    for (const fn of this._transportListeners) { try { fn(transport) } catch (e) { /* a listener's problem */ } }
   }
 
   close () {

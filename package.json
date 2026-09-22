@@ -16,6 +16,9 @@
     "./extensions/vertex": {
       "import": "./extensions/vertex/index.js"
     },
+    "./extensions/vertex/lighting-functions.js": {
+      "import": "./extensions/vertex/lighting-functions.js"
+    },
     "./extensions/vertex/webgpu": {
       "import": "./extensions/vertex/index-webgpu.js"
     },

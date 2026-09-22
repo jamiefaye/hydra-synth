@@ -92,3 +92,42 @@ test('alias: one control on two encoders, both turn it and both displays follow'
   assert.throws(() => c.alias([1, 2], [1, 1]), /already has a control/)
   assert.throws(() => c.alias([7, 3], [4, 9]), /no control/)
 })
+
+test('ec4 display: labels follow registrations, go out on connect and group change, only for the group on screen', async () => {
+  const { ec4Tools } = await import('../adapters/sysex.js')
+  const { parm } = await import('./profiles.js')
+  const c = new Controller({ profile: parm, feedback: false })
+  const ec4 = ec4Tools(c)
+  const t = connectVirtual(c); t.sysex = true
+  c.cc([1, 1], { min: 0, max: 1, init: 0, label: 'FREQ' })
+  c.cc([2, 1], { min: 0, max: 1, init: 0, label: 'ROT' })
+  ec4.display.names(3, ['HAND'])                         // set by hand, in the same burst
+  await new Promise(r => setTimeout(r, 5))               // the registration burst has settled
+  assert.equal(ec4.display.labels.get(14, 1)[0], 'FREQ'); assert.equal(ec4.display.labels.get(14, 2)[0], 'ROT ')
+  assert.equal(ec4.display.labels.get(14, 3)[0], 'HAND')  // the rebuild from controls leaves it alone
+  assert.equal(t.sent.length, 0)                         // nothing on screen yet: where is unknown
+  // the device answers the query: setup 14 group 2 -> group 2's names go out
+  c.handleMessage([0xF0, 0, 0, 0, 0x4E, 0x2C, 0x1B, 0x4E, 0x28, 0x1D, 0x4E, 0x24, 0x11, 0xF7])
+  assert.equal(t.sent.length, 1)
+  assert.equal(String.fromCharCode(...[13, 16, 19].map(i => (t.sent[0][i + 1] & 0x0f) << 4 | (t.sent[0][i + 2] & 0x0f))), 'ROT')
+  // a group with no labels sends nothing; names() for a group not on screen is kept, not sent
+  t.sent.length = 0
+  c.handleMessage([0xF0, 0, 0, 0, 0x4E, 0x2C, 0x1B, 0x4E, 0x28, 0x1D, 0x4E, 0x24, 0x14, 0xF7])
+  assert.equal(t.sent.length, 0)
+  assert.equal(ec4.display.names(1, ['A']), false)
+  assert.equal(ec4.display.labels.get(14, 1)[0], 'A   ')
+  // remote select: the write follows after the device has had a moment to switch
+  assert.equal(ec4.select(1), true); assert.equal(t.sent.length, 1)     // the select itself
+  await new Promise(r => setTimeout(r, 120))
+  assert.equal(t.sent.length, 2)
+  assert.equal((t.sent[1][14] & 0x0f) << 4 | (t.sent[1][15] & 0x0f), 'A'.charCodeAt(0))
+  // whole screen and hide, clear puts blanks back
+  t.sent.length = 0
+  assert.equal(ec4.display.text('HI'), true); assert.equal(ec4.display.hide(), true)
+  assert.equal(t.sent[0][9], 0x13); assert.equal(t.sent[1][9], 0x15)
+  ec4.display.clear(1)
+  assert.equal(ec4.display.labels.get(14, 1), null); assert.equal(t.sent[2][9], 0x10)
+  // without sysex on the transport nothing is sent and nothing throws
+  t.sysex = false
+  assert.equal(ec4.display.names(1, ['B']), false); assert.equal(ec4.display.text('x'), false)
+})
