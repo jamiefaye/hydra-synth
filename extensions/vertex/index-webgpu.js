@@ -204,6 +204,7 @@ function patchOutput(hydra) {
   OutputProto._renderSprites = Output.prototype._renderSprites
   OutputProto.clearSprites = Output.prototype.clearSprites
   OutputProto.removeSprite = Output.prototype.removeSprite
+  OutputProto._destroySprite = Output.prototype._destroySprite
   OutputProto.enableSprite = Output.prototype.enableSprite
   OutputProto.disableSprite = Output.prototype.disableSprite
   OutputProto.tick = Output.prototype.tick

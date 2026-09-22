@@ -213,34 +213,11 @@ class OutputWgsl {
       }
     }
 
-    // Store sprite config
-    this.sprites.set(spriteLevel, {
-      enabled,   // a level can be switched off and on without touching its pipeline: enableSprite / disableSprite
-      passes,
-      vertexData,
-      rawVerts,
-      vertexSource,
-      blendMode,
-      primitive,
-      vertexWgsl,
-      vertexUniforms,
-      hasCustomGeometry: rawVerts !== null,
-      has3D,
-      hasExplicitUVs,
-      hasFaceIds,
-      hasNormals,
-      hasTangents,
-      hasColors,
-      hasInstancing,
-      hasInstanceRotation,
-      hasInstanceScale,
-      instanceCount,
-      sprite,
-      animation
-    })
-
-    // Setup the pipeline in wgslHydra
-    await this.wgslHydra.setupSpriteChain(this.chanNum, spriteLevel, {
+    // The chain is built first (pipeline compiled off the frame loop); the config lands beside it only once
+    // the swap has happened, so a failed shader leaves the level exactly as it was: the previous picture stays
+    let swapped = false
+    try {
+      swapped = await this.wgslHydra.setupSpriteChain(this.chanNum, spriteLevel, {
       uniforms: pass.uniforms,
       fragShader: pass.frag,
       vertexWgsl,
@@ -275,13 +252,48 @@ class OutputWgsl {
       sprite,
       animation
     })
+    } catch (err) {
+      console.error('[hydra-vertex-webgpu] keeping the previous picture:', err.message)
+      return false
+    }
+    if (swapped) this.sprites.set(spriteLevel, {
+      enabled,   // a level can be switched off and on without touching its pipeline: enableSprite / disableSprite
+      passes,
+      vertexData,
+      rawVerts,
+      vertexSource,
+      blendMode,
+      primitive,
+      vertexWgsl,
+      vertexUniforms,
+      hasCustomGeometry: rawVerts !== null,
+      has3D,
+      hasExplicitUVs,
+      hasFaceIds,
+      hasNormals,
+      hasTangents,
+      hasColors,
+      hasInstancing,
+      hasInstanceRotation,
+      hasInstanceScale,
+      instanceCount,
+      sprite,
+      animation
+    })
+    return swapped
   }
 
   // Legacy render method - registers at sprite level 0
   async render(passes) {
-    // Clear existing sprites and register at level 0
-    this.clearSprites()
-    await this.registerSprite(0, { passes, vertexData: null, blendMode: 'normal' })
+    // Build the new level 0 first; the old one keeps drawing until the swap. Then the other levels go:
+    // a plain out() means the whole output. A shader that fails to compile changes nothing on screen.
+    const swapped = await this.registerSprite(0, { passes, vertexData: null, blendMode: 'normal' })
+    if (!swapped) return   // the shader failed; the previous picture stays
+    for (const level of [...this.sprites.keys()]) {
+      if (level === 0) continue
+      this.sprites.delete(level)
+      if (this.wgslHydra.removeSpriteChain) this.wgslHydra.removeSpriteChain(this.chanNum, level)
+    }
   }
 
   // Switch a level off or on. Its pipeline and buffers stay as they are, so nothing is recompiled and nothing

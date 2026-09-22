@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hydra shader swap test</title>
+    <style>
+      body { margin: 0; background: #222; color: white; font-family: monospace; font-size: 12px; }
+      canvas { width: 640px; height: 360px; display: block; }
+      #status { white-space: pre; padding: 4px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="640" height="360"></canvas>
+    <div id="status">Loading...</div>
+    <script type="module">
+      // An eval swaps an output's shader atomically: the old picture stays until the new one is ready, a shader
+      // that does not compile changes nothing, and of two evals in a row the later one wins. mode = gl | gpu.
+      // Measured with o0.measure(): mean luminance of solid greys. Results go to the console as SWAP-TEST ... and
+      // to the title so a headless run can read them.
+      const q = new URLSearchParams(location.search)
+      const mode = q.get('mode') || 'gl'
+      const status = document.getElementById('status')
+      const canvas = document.getElementById('c')
+      const say = (t) => { status.textContent = t; console.log('SWAP-TEST', t); document.title = t.split('\n')[0] }
+      try {
+        const { createHydra } = await import('../extensions/vertex/index-webgpu.js')
+        const hydra = await createHydra({ canvas, width: 640, height: 360, detectAudio: false, makeGlobal: true, numOutputs: 4, autoLoop: false, useWGSL: mode === 'gpu' })
+        window.__hydra = hydra
+        const gpu = mode === 'gpu'
+        const yieldNow = () => new Promise(resolve => { const ch = new MessageChannel(); ch.port1.onmessage = () => resolve(); ch.port2.postMessage(0) })
+        const settle = async () => { for (let i = 0; i < 20; i++) await yieldNow(); await new Promise(resolve => setTimeout(resolve, 250)) }
+        const frame = async () => {
+          if (!gpu) { hydra.tick(16); return }
+          hydra.synth.time += 0.016
+          await hydra.wgslHydra.animate(hydra.synth.time, hydra.synth.mouse, hydra.synth.resolution, false)
+          for (let i = 0; i < 4; i++) await yieldNow()
+        }
+        const run = async () => { await settle(); for (let i = 0; i < 6; i++) await frame() }
+        o0.measure({ bins: 16, max: 1 })
+        const lines = []; let ok = true
+        const check = (label, got, want, tol = 0.01) => { const good = Math.abs(got - want) <= tol; if (!good) ok = false; lines.push(`  ${label.padEnd(30)} ${got.toFixed(4)}  (want ${want} +- ${tol}) ${good ? '' : '  <-- OFF'}`) }
+        const errors = []
+        const origError = console.error; console.error = (...a) => { errors.push(a.join(' ')); origError(...a) }
+
+        // a function whose shader cannot compile, in both languages
+        hydra.synth.setFunction({ name: 'broken', type: 'color', inputs: [], glsl: 'return this is not glsl;', wgsl: 'return this is not wgsl;' })
+
+        lines.push('1. a grey'); solid(0.5, 0.5, 0.5, 1).out(o0); await run()
+        check('mean', o0.stats.mean, 0.5)
+        lines.push('2. a shader that does not compile: the grey stays'); solid(1, 1, 1, 1).broken().out(o0); await run()
+        check('mean', o0.stats.mean, 0.5)
+        lines.push(`   (${errors.length} error line${errors.length === 1 ? '' : 's'} logged, none thrown)`)
+        lines.push('3. a new good shader replaces it'); solid(1, 1, 1, 1).out(o0); await run()
+        check('mean', o0.stats.mean, 1)
+        lines.push('4. two evals back to back: the later one wins'); solid(0.25, 0.25, 0.25, 1).out(o0); solid(0.75, 0.75, 0.75, 1).out(o0); await run()
+        check('mean', o0.stats.mean, 0.75)
+        lines.push('5. and again the other way round'); solid(0.75, 0.75, 0.75, 1).out(o0); solid(0.25, 0.25, 0.25, 1).out(o0); await run()
+        check('mean', o0.stats.mean, 0.25)
+        lines.push('6. a broken one after a good one in the same tick: the good one stays'); solid(0.5, 0.5, 0.5, 1).out(o0); solid(1, 1, 1, 1).broken().out(o0); await run()
+        check('mean', o0.stats.mean, 0.5)
+        console.error = origError
+        say(`${ok ? 'PASS' : 'FAIL'} swap ${mode}\n` + lines.join('\n'))
+      } catch (e) {
+        say(`FAIL swap ${mode}: ${e.message}`)
+        console.error(e)
+      }
+    </script>
+  </body>
+</html>

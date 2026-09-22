@@ -959,8 +959,9 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     console.log('Fragment shader (first 500 chars):', pass.frag.substring(0, 500) + '...')
     console.groupEnd()
 
-    // Return early - sprite won't render but won't crash
-    return
+    // The level keeps its previous sprite (still drawing); free what was built for this one
+    this._destroySprite({ positionBuffer, uvBuffer, faceIdBuffer, normalBuffer, tangentBuffer, colorBuffer, fragmentCenterBuffer, fragmentSeedBuffer, fragmentDistanceBuffer, instanceOffsetBuffer, instanceIdBuffer, instanceRotationBuffer, instanceScaleBuffer })
+    return false
   }
 
   // Store sprite config with all buffer references for cleanup
@@ -1005,7 +1006,11 @@ Output.prototype.registerSprite = function (spriteLevel, config) {
     }
   }
 
+  // The swap: the new sprite is complete before the old one goes, so a frame sees one or the other
+  const previous = this.sprites.get(spriteLevel)
   this.sprites.set(spriteLevel, spriteConfig)
+  if (previous && previous !== spriteConfig) this._destroySprite(previous)
+  return true
 }
 
 // Clear all sprites (called by hush)
@@ -1058,48 +1063,20 @@ Output.prototype.clearSprites = function () {
 // Remove a specific sprite level
 Output.prototype.removeSprite = function (level) {
   if (this.sprites.has(level)) {
-    const sprite = this.sprites.get(level)
-    // Clean up all GPU buffers
-    if (sprite.positionBuffer && sprite.positionBuffer !== this.defaultPositionBuffer) {
-      sprite.positionBuffer.destroy()
-    }
-    if (sprite.uvBuffer) {
-      sprite.uvBuffer.destroy()
-    }
-    if (sprite.faceIdBuffer) {
-      sprite.faceIdBuffer.destroy()
-    }
-    if (sprite.normalBuffer) {
-      sprite.normalBuffer.destroy()
-    }
-    if (sprite.tangentBuffer) {
-      sprite.tangentBuffer.destroy()
-    }
-    if (sprite.colorBuffer) {
-      sprite.colorBuffer.destroy()
-    }
-    if (sprite.fragmentCenterBuffer) {
-      sprite.fragmentCenterBuffer.destroy()
-    }
-    if (sprite.fragmentSeedBuffer) {
-      sprite.fragmentSeedBuffer.destroy()
-    }
-    if (sprite.fragmentDistanceBuffer) {
-      sprite.fragmentDistanceBuffer.destroy()
-    }
-    if (sprite.instanceOffsetBuffer) {
-      sprite.instanceOffsetBuffer.destroy()
-    }
-    if (sprite.instanceIdBuffer) {
-      sprite.instanceIdBuffer.destroy()
-    }
-    if (sprite.instanceRotationBuffer) {
-      sprite.instanceRotationBuffer.destroy()
-    }
-    if (sprite.instanceScaleBuffer) {
-      sprite.instanceScaleBuffer.destroy()
-    }
+    this._destroySprite(this.sprites.get(level))
     this.sprites.delete(level)
+  }
+}
+
+// Free every GPU buffer a sprite owns (the shared default position buffer is not one of them)
+Output.prototype._destroySprite = function (sprite) {
+  if (!sprite) return
+  const owned = ['positionBuffer', 'uvBuffer', 'faceIdBuffer', 'normalBuffer', 'tangentBuffer', 'colorBuffer',
+    'fragmentCenterBuffer', 'fragmentSeedBuffer', 'fragmentDistanceBuffer',
+    'instanceOffsetBuffer', 'instanceIdBuffer', 'instanceRotationBuffer', 'instanceScaleBuffer']
+  for (const k of owned) {
+    const b = sprite[k]
+    if (b && b !== this.defaultPositionBuffer && typeof b.destroy === 'function') b.destroy()
   }
 }
 
@@ -1116,50 +1093,8 @@ Output.prototype.disableSprite = function (level) {
 
 // Legacy render method - registers at sprite level 0
 Output.prototype.render = function (passes) {
-  // Clear existing sprite at level 0 and register new one
-  if (this.sprites.has(0)) {
-    const oldSprite = this.sprites.get(0)
-    // Clean up all GPU buffers from old sprite
-    if (oldSprite.positionBuffer && oldSprite.positionBuffer !== this.defaultPositionBuffer) {
-      oldSprite.positionBuffer.destroy()
-    }
-    if (oldSprite.uvBuffer) {
-      oldSprite.uvBuffer.destroy()
-    }
-    if (oldSprite.faceIdBuffer) {
-      oldSprite.faceIdBuffer.destroy()
-    }
-    if (oldSprite.normalBuffer) {
-      oldSprite.normalBuffer.destroy()
-    }
-    if (oldSprite.tangentBuffer) {
-      oldSprite.tangentBuffer.destroy()
-    }
-    if (oldSprite.colorBuffer) {
-      oldSprite.colorBuffer.destroy()
-    }
-    if (oldSprite.fragmentCenterBuffer) {
-      oldSprite.fragmentCenterBuffer.destroy()
-    }
-    if (oldSprite.fragmentSeedBuffer) {
-      oldSprite.fragmentSeedBuffer.destroy()
-    }
-    if (oldSprite.fragmentDistanceBuffer) {
-      oldSprite.fragmentDistanceBuffer.destroy()
-    }
-    if (oldSprite.instanceOffsetBuffer) {
-      oldSprite.instanceOffsetBuffer.destroy()
-    }
-    if (oldSprite.instanceIdBuffer) {
-      oldSprite.instanceIdBuffer.destroy()
-    }
-    if (oldSprite.instanceRotationBuffer) {
-      oldSprite.instanceRotationBuffer.destroy()
-    }
-    if (oldSprite.instanceScaleBuffer) {
-      oldSprite.instanceScaleBuffer.destroy()
-    }
-  }
+  // Level 0 is replaced by registerSprite, which builds the new sprite first, swaps it in and only then frees
+  // the old one; if the new shader fails to compile the old sprite keeps drawing (show must go on)
   this.registerSprite(0, { passes, vertexData: null, blendMode: 'normal' })
 
   // For backwards compatibility, also set this.draw

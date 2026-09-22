@@ -506,7 +506,18 @@ class wgslHydra {
 	// ------------------------------------------------------------------------------
 	// Setup a sprite render chain with optional custom geometry and vertex shader
 	//
-	async setupSpriteChain(chan, spriteLevel, config) {
+	// Builds for one level run one after another: order decides which picture ends up on screen, and a build
+	// that fails never cancels one that succeeded before it. Resolves true when the built sprite was swapped in.
+	setupSpriteChain(chan, spriteLevel, config) {
+		const rpe = this.renderPassInfo[chan];
+		if (!rpe.spriteBuilds) rpe.spriteBuilds = new Map();
+		const previous = rpe.spriteBuilds.get(spriteLevel) || Promise.resolve();
+		const job = previous.catch(() => {}).then(() => this._buildSpriteChain(chan, spriteLevel, config));
+		rpe.spriteBuilds.set(spriteLevel, job);
+		return job;
+	}
+
+	async _buildSpriteChain(chan, spriteLevel, config) {
 		if (trace) console.timeStamp("setupSpriteChain");
 		const { uniforms, fragShader, vertexWgsl, vertexUniforms, rawVerts, blendMode, primitive, has3D,
 			hasExplicitUVs, hasFaceIds, hasNormals, hasTangents, hasColors, uvs, faceIds, normals, tangents, colors,
@@ -517,14 +528,9 @@ class wgslHydra {
 		const rpe = this.renderPassInfo[chan];
 		rpe.outputObject = this.outputChannelObjects[chan];
 
-		// Create or get sprite entry
-		let spe = rpe.sprites.get(spriteLevel);
-		if (!spe) {
-			spe = new SpritePassEntry(chan, spriteLevel);
-			rpe.sprites.set(spriteLevel, spe);
-		} else {
-			spe.reset();
-		}
+		// A fresh entry, built off to the side: the level's current sprite keeps drawing until this one is
+		// complete (pipeline included), then they swap.
+		const spe = new SpritePassEntry(chan, spriteLevel);
 
 		spe.uniformList = uniforms;
 		spe.blendMode = blendMode || 'normal';
@@ -898,15 +904,26 @@ class wgslHydra {
 			};
 		}
 
-		spe.pipeline = this.device.createRenderPipeline(pipelineDescriptor);
-
+		// Compiled off the frame loop; a shader error rejects here instead of surfacing at the first draw
+		try {
+			spe.pipeline = await this.device.createRenderPipelineAsync(pipelineDescriptor);
+		} catch (err) {
+			this.destroySpriteChain(spe);
+			throw new Error(`shader for output ${chan} level ${spriteLevel} did not compile: ${err.message}`);
+		}
 		// Create samplers/buffers for fragment uniforms
 		this.createSamplerOrBuffersForSprite(spe);
 
 		// Create per-sprite bind group with sprite-specific spriteGrid values
 		this.createSpriteBindGroup(spe);
 
+		// The swap, then the old one goes
+		const previous = rpe.sprites.get(spriteLevel);
+		rpe.sprites.set(spriteLevel, spe);
+		if (previous && previous !== spe) this.destroySpriteChain(previous);
+
 		if (trace) console.timeStamp("spriteChain", "setupSpriteChain", undefined, "wgsl-hydra", "hydra", "secondary-light");
+		return true;
 	}
 
 	// Create per-sprite bind group with sprite-specific spriteGrid and facesPerInstance
@@ -961,56 +978,29 @@ class wgslHydra {
 	clearSpriteChains(chan) {
 		const rpe = this.renderPassInfo[chan];
 		if (rpe.sprites) {
-			for (const [level, spe] of rpe.sprites) {
-				if (spe.vertexBuffer) {
-					spe.vertexBuffer.destroy();
-				}
-				if (spe.uvBuffer) {
-					spe.uvBuffer.destroy();
-				}
-				if (spe.faceIdBuffer) {
-					spe.faceIdBuffer.destroy();
-				}
-				if (spe.normalBuffer) {
-					spe.normalBuffer.destroy();
-				}
-				if (spe.tangentBuffer) {
-					spe.tangentBuffer.destroy();
-				}
-				if (spe.colorBuffer) {
-					spe.colorBuffer.destroy();
-				}
-				if (spe.vertexUniformBuffer) {
-					spe.vertexUniformBuffer.destroy();
-				}
-				if (spe.spriteGridBuffer) {
-					spe.spriteGridBuffer.destroy();
-				}
-				if (spe.facesPerInstanceBuffer) {
-					spe.facesPerInstanceBuffer.destroy();
-				}
-				// Instance buffers
-				if (spe.instanceOffsetBuffer) {
-					spe.instanceOffsetBuffer.destroy();
-				}
-				if (spe.instanceRotationBuffer) {
-					spe.instanceRotationBuffer.destroy();
-				}
-				if (spe.instanceScaleBuffer) {
-					spe.instanceScaleBuffer.destroy();
-				}
-				// Fragment buffers for explosion effect
-				if (spe.fragmentCenterBuffer) {
-					spe.fragmentCenterBuffer.destroy();
-				}
-				if (spe.fragmentSeedBuffer) {
-					spe.fragmentSeedBuffer.destroy();
-				}
-				if (spe.fragmentDistanceBuffer) {
-					spe.fragmentDistanceBuffer.destroy();
-				}
-			}
+			for (const spe of rpe.sprites.values()) this.destroySpriteChain(spe);
 			rpe.sprites.clear();
+		}
+	}
+
+	// Drop one level's sprite (its buffers freed); nothing happens if there is none
+	removeSpriteChain(chan, spriteLevel) {
+		const rpe = this.renderPassInfo[chan];
+		const spe = rpe.sprites && rpe.sprites.get(spriteLevel);
+		if (!spe) return;
+		this.destroySpriteChain(spe);
+		rpe.sprites.delete(spriteLevel);
+	}
+
+	// Free every GPU buffer a sprite entry owns
+	destroySpriteChain(spe) {
+		const owned = ['vertexBuffer', 'uvBuffer', 'faceIdBuffer', 'normalBuffer', 'tangentBuffer', 'colorBuffer',
+			'vertexUniformBuffer', 'spriteGridBuffer', 'facesPerInstanceBuffer',
+			'instanceOffsetBuffer', 'instanceRotationBuffer', 'instanceScaleBuffer',
+			'fragmentCenterBuffer', 'fragmentSeedBuffer', 'fragmentDistanceBuffer'];
+		for (const k of owned) {
+			const b = spe[k];
+			if (b && typeof b.destroy === 'function') b.destroy();
 		}
 	}
 
