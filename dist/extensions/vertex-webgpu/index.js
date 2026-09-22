@@ -10449,7 +10449,48 @@ class OutputWgsl {
         is3D: has3D
       };
     }
-    this.sprites.set(spriteLevel, {
+    let swapped = false;
+    try {
+      swapped = await this.wgslHydra.setupSpriteChain(this.chanNum, spriteLevel, {
+        uniforms: pass.uniforms,
+        fragShader: pass.frag,
+        vertexWgsl,
+        vertexUniforms,
+        rawVerts,
+        blendMode,
+        primitive,
+        has3D,
+        hasExplicitUVs,
+        hasFaceIds,
+        hasNormals,
+        hasTangents,
+        hasColors,
+        uvs: vertexSource?.uvs,
+        faceIds: vertexSource?.faceIds,
+        normals: vertexSource?.normals,
+        tangents: vertexSource?.tangents,
+        colors: vertexSource?.colors,
+        // Instancing data
+        hasInstancing,
+        hasInstanceRotation,
+        hasInstanceScale,
+        instanceCount,
+        instancePositions: vertexSource?.instancePositions,
+        instanceRotations: vertexSource?.instanceRotations,
+        instanceScales: vertexSource?.instanceScales,
+        // Fragment data for explosion effect
+        hasFragments,
+        fragmentCenters: vertexSource?.fragmentCenters,
+        fragmentSeeds: vertexSource?.fragmentSeeds,
+        fragmentDistances: vertexSource?.fragmentDistances,
+        sprite,
+        animation
+      });
+    } catch (err) {
+      console.error("[hydra-vertex-webgpu] keeping the previous picture:", err.message);
+      return false;
+    }
+    if (swapped) this.sprites.set(spriteLevel, {
       enabled,
       // a level can be switched off and on without touching its pipeline: enableSprite / disableSprite
       passes,
@@ -10474,46 +10515,17 @@ class OutputWgsl {
       sprite,
       animation
     });
-    await this.wgslHydra.setupSpriteChain(this.chanNum, spriteLevel, {
-      uniforms: pass.uniforms,
-      fragShader: pass.frag,
-      vertexWgsl,
-      vertexUniforms,
-      rawVerts,
-      blendMode,
-      primitive,
-      has3D,
-      hasExplicitUVs,
-      hasFaceIds,
-      hasNormals,
-      hasTangents,
-      hasColors,
-      uvs: vertexSource?.uvs,
-      faceIds: vertexSource?.faceIds,
-      normals: vertexSource?.normals,
-      tangents: vertexSource?.tangents,
-      colors: vertexSource?.colors,
-      // Instancing data
-      hasInstancing,
-      hasInstanceRotation,
-      hasInstanceScale,
-      instanceCount,
-      instancePositions: vertexSource?.instancePositions,
-      instanceRotations: vertexSource?.instanceRotations,
-      instanceScales: vertexSource?.instanceScales,
-      // Fragment data for explosion effect
-      hasFragments,
-      fragmentCenters: vertexSource?.fragmentCenters,
-      fragmentSeeds: vertexSource?.fragmentSeeds,
-      fragmentDistances: vertexSource?.fragmentDistances,
-      sprite,
-      animation
-    });
+    return swapped;
   }
   // Legacy render method - registers at sprite level 0
   async render(passes) {
-    this.clearSprites();
-    await this.registerSprite(0, { passes, vertexData: null, blendMode: "normal" });
+    const swapped = await this.registerSprite(0, { passes, vertexData: null, blendMode: "normal" });
+    if (!swapped) return;
+    for (const level of [...this.sprites.keys()]) {
+      if (level === 0) continue;
+      this.sprites.delete(level);
+      if (this.wgslHydra.removeSpriteChain) this.wgslHydra.removeSpriteChain(this.chanNum, level);
+    }
   }
   // Switch a level off or on. Its pipeline and buffers stay as they are, so nothing is recompiled and nothing
   // that runs on `time` loses its place: the level is simply skipped while off. With level 0 off nothing clears
@@ -11081,7 +11093,18 @@ class wgslHydra {
   // ------------------------------------------------------------------------------
   // Setup a sprite render chain with optional custom geometry and vertex shader
   //
-  async setupSpriteChain(chan, spriteLevel, config) {
+  // Builds for one level run one after another: order decides which picture ends up on screen, and a build
+  // that fails never cancels one that succeeded before it. Resolves true when the built sprite was swapped in.
+  setupSpriteChain(chan, spriteLevel, config) {
+    const rpe = this.renderPassInfo[chan];
+    if (!rpe.spriteBuilds) rpe.spriteBuilds = /* @__PURE__ */ new Map();
+    const previous = rpe.spriteBuilds.get(spriteLevel) || Promise.resolve();
+    const job = previous.catch(() => {
+    }).then(() => this._buildSpriteChain(chan, spriteLevel, config));
+    rpe.spriteBuilds.set(spriteLevel, job);
+    return job;
+  }
+  async _buildSpriteChain(chan, spriteLevel, config) {
     const {
       uniforms,
       fragShader,
@@ -11117,13 +11140,7 @@ class wgslHydra {
     } = config;
     const rpe = this.renderPassInfo[chan];
     rpe.outputObject = this.outputChannelObjects[chan];
-    let spe = rpe.sprites.get(spriteLevel);
-    if (!spe) {
-      spe = new SpritePassEntry(chan, spriteLevel);
-      rpe.sprites.set(spriteLevel, spe);
-    } else {
-      spe.reset();
-    }
+    const spe = new SpritePassEntry(chan, spriteLevel);
     spe.uniformList = uniforms;
     spe.blendMode = blendMode || "normal";
     spe.hasCustomGeometry = rawVerts !== null && rawVerts !== void 0;
@@ -11438,9 +11455,18 @@ class wgslHydra {
         depthCompare: "less"
       };
     }
-    spe.pipeline = this.device.createRenderPipeline(pipelineDescriptor);
+    try {
+      spe.pipeline = await this.device.createRenderPipelineAsync(pipelineDescriptor);
+    } catch (err) {
+      this.destroySpriteChain(spe);
+      throw new Error(`shader for output ${chan} level ${spriteLevel} did not compile: ${err.message}`);
+    }
     this.createSamplerOrBuffersForSprite(spe);
     this.createSpriteBindGroup(spe);
+    const previous = rpe.sprites.get(spriteLevel);
+    rpe.sprites.set(spriteLevel, spe);
+    if (previous && previous !== spe) this.destroySpriteChain(previous);
+    return true;
   }
   // Create per-sprite bind group with sprite-specific spriteGrid and facesPerInstance
   createSpriteBindGroup(spe) {
@@ -11488,54 +11514,40 @@ class wgslHydra {
   clearSpriteChains(chan) {
     const rpe = this.renderPassInfo[chan];
     if (rpe.sprites) {
-      for (const [level, spe] of rpe.sprites) {
-        if (spe.vertexBuffer) {
-          spe.vertexBuffer.destroy();
-        }
-        if (spe.uvBuffer) {
-          spe.uvBuffer.destroy();
-        }
-        if (spe.faceIdBuffer) {
-          spe.faceIdBuffer.destroy();
-        }
-        if (spe.normalBuffer) {
-          spe.normalBuffer.destroy();
-        }
-        if (spe.tangentBuffer) {
-          spe.tangentBuffer.destroy();
-        }
-        if (spe.colorBuffer) {
-          spe.colorBuffer.destroy();
-        }
-        if (spe.vertexUniformBuffer) {
-          spe.vertexUniformBuffer.destroy();
-        }
-        if (spe.spriteGridBuffer) {
-          spe.spriteGridBuffer.destroy();
-        }
-        if (spe.facesPerInstanceBuffer) {
-          spe.facesPerInstanceBuffer.destroy();
-        }
-        if (spe.instanceOffsetBuffer) {
-          spe.instanceOffsetBuffer.destroy();
-        }
-        if (spe.instanceRotationBuffer) {
-          spe.instanceRotationBuffer.destroy();
-        }
-        if (spe.instanceScaleBuffer) {
-          spe.instanceScaleBuffer.destroy();
-        }
-        if (spe.fragmentCenterBuffer) {
-          spe.fragmentCenterBuffer.destroy();
-        }
-        if (spe.fragmentSeedBuffer) {
-          spe.fragmentSeedBuffer.destroy();
-        }
-        if (spe.fragmentDistanceBuffer) {
-          spe.fragmentDistanceBuffer.destroy();
-        }
-      }
+      for (const spe of rpe.sprites.values()) this.destroySpriteChain(spe);
       rpe.sprites.clear();
+    }
+  }
+  // Drop one level's sprite (its buffers freed); nothing happens if there is none
+  removeSpriteChain(chan, spriteLevel) {
+    const rpe = this.renderPassInfo[chan];
+    const spe = rpe.sprites && rpe.sprites.get(spriteLevel);
+    if (!spe) return;
+    this.destroySpriteChain(spe);
+    rpe.sprites.delete(spriteLevel);
+  }
+  // Free every GPU buffer a sprite entry owns
+  destroySpriteChain(spe) {
+    const owned = [
+      "vertexBuffer",
+      "uvBuffer",
+      "faceIdBuffer",
+      "normalBuffer",
+      "tangentBuffer",
+      "colorBuffer",
+      "vertexUniformBuffer",
+      "spriteGridBuffer",
+      "facesPerInstanceBuffer",
+      "instanceOffsetBuffer",
+      "instanceRotationBuffer",
+      "instanceScaleBuffer",
+      "fragmentCenterBuffer",
+      "fragmentSeedBuffer",
+      "fragmentDistanceBuffer"
+    ];
+    for (const k of owned) {
+      const b = spe[k];
+      if (b && typeof b.destroy === "function") b.destroy();
     }
   }
   // Reshape vertex data to vec3 format
@@ -28155,7 +28167,8 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
     console.log("Vertex shader (first 500 chars):", vert.substring(0, 500) + "...");
     console.log("Fragment shader (first 500 chars):", pass.frag.substring(0, 500) + "...");
     console.groupEnd();
-    return;
+    this._destroySprite({ positionBuffer, uvBuffer, faceIdBuffer, normalBuffer, tangentBuffer, colorBuffer, fragmentCenterBuffer, fragmentSeedBuffer, fragmentDistanceBuffer, instanceOffsetBuffer, instanceIdBuffer, instanceRotationBuffer, instanceScaleBuffer });
+    return false;
   }
   const spriteConfig = {
     drawCommand,
@@ -28196,7 +28209,10 @@ Output.prototype.registerSprite = function(spriteLevel, config) {
       is3D: has3D
     };
   }
+  const previous = this.sprites.get(spriteLevel);
   this.sprites.set(spriteLevel, spriteConfig);
+  if (previous && previous !== spriteConfig) this._destroySprite(previous);
+  return true;
 };
 Output.prototype.clearSprites = function() {
   for (const [level, sprite] of this.sprites) {
@@ -28244,47 +28260,30 @@ Output.prototype.clearSprites = function() {
 };
 Output.prototype.removeSprite = function(level) {
   if (this.sprites.has(level)) {
-    const sprite = this.sprites.get(level);
-    if (sprite.positionBuffer && sprite.positionBuffer !== this.defaultPositionBuffer) {
-      sprite.positionBuffer.destroy();
-    }
-    if (sprite.uvBuffer) {
-      sprite.uvBuffer.destroy();
-    }
-    if (sprite.faceIdBuffer) {
-      sprite.faceIdBuffer.destroy();
-    }
-    if (sprite.normalBuffer) {
-      sprite.normalBuffer.destroy();
-    }
-    if (sprite.tangentBuffer) {
-      sprite.tangentBuffer.destroy();
-    }
-    if (sprite.colorBuffer) {
-      sprite.colorBuffer.destroy();
-    }
-    if (sprite.fragmentCenterBuffer) {
-      sprite.fragmentCenterBuffer.destroy();
-    }
-    if (sprite.fragmentSeedBuffer) {
-      sprite.fragmentSeedBuffer.destroy();
-    }
-    if (sprite.fragmentDistanceBuffer) {
-      sprite.fragmentDistanceBuffer.destroy();
-    }
-    if (sprite.instanceOffsetBuffer) {
-      sprite.instanceOffsetBuffer.destroy();
-    }
-    if (sprite.instanceIdBuffer) {
-      sprite.instanceIdBuffer.destroy();
-    }
-    if (sprite.instanceRotationBuffer) {
-      sprite.instanceRotationBuffer.destroy();
-    }
-    if (sprite.instanceScaleBuffer) {
-      sprite.instanceScaleBuffer.destroy();
-    }
+    this._destroySprite(this.sprites.get(level));
     this.sprites.delete(level);
+  }
+};
+Output.prototype._destroySprite = function(sprite) {
+  if (!sprite) return;
+  const owned = [
+    "positionBuffer",
+    "uvBuffer",
+    "faceIdBuffer",
+    "normalBuffer",
+    "tangentBuffer",
+    "colorBuffer",
+    "fragmentCenterBuffer",
+    "fragmentSeedBuffer",
+    "fragmentDistanceBuffer",
+    "instanceOffsetBuffer",
+    "instanceIdBuffer",
+    "instanceRotationBuffer",
+    "instanceScaleBuffer"
+  ];
+  for (const k of owned) {
+    const b = sprite[k];
+    if (b && b !== this.defaultPositionBuffer && typeof b.destroy === "function") b.destroy();
   }
 };
 Output.prototype.enableSprite = function(level, enabled = true) {
@@ -28296,48 +28295,6 @@ Output.prototype.disableSprite = function(level) {
   this.enableSprite(level, false);
 };
 Output.prototype.render = function(passes) {
-  if (this.sprites.has(0)) {
-    const oldSprite = this.sprites.get(0);
-    if (oldSprite.positionBuffer && oldSprite.positionBuffer !== this.defaultPositionBuffer) {
-      oldSprite.positionBuffer.destroy();
-    }
-    if (oldSprite.uvBuffer) {
-      oldSprite.uvBuffer.destroy();
-    }
-    if (oldSprite.faceIdBuffer) {
-      oldSprite.faceIdBuffer.destroy();
-    }
-    if (oldSprite.normalBuffer) {
-      oldSprite.normalBuffer.destroy();
-    }
-    if (oldSprite.tangentBuffer) {
-      oldSprite.tangentBuffer.destroy();
-    }
-    if (oldSprite.colorBuffer) {
-      oldSprite.colorBuffer.destroy();
-    }
-    if (oldSprite.fragmentCenterBuffer) {
-      oldSprite.fragmentCenterBuffer.destroy();
-    }
-    if (oldSprite.fragmentSeedBuffer) {
-      oldSprite.fragmentSeedBuffer.destroy();
-    }
-    if (oldSprite.fragmentDistanceBuffer) {
-      oldSprite.fragmentDistanceBuffer.destroy();
-    }
-    if (oldSprite.instanceOffsetBuffer) {
-      oldSprite.instanceOffsetBuffer.destroy();
-    }
-    if (oldSprite.instanceIdBuffer) {
-      oldSprite.instanceIdBuffer.destroy();
-    }
-    if (oldSprite.instanceRotationBuffer) {
-      oldSprite.instanceRotationBuffer.destroy();
-    }
-    if (oldSprite.instanceScaleBuffer) {
-      oldSprite.instanceScaleBuffer.destroy();
-    }
-  }
   this.registerSprite(0, { passes, vertexData: null, blendMode: "normal" });
   const self2 = this;
   this.draw = function(props) {
@@ -28664,6 +28621,7 @@ function patchOutput(hydra) {
   OutputProto._renderSprites = Output.prototype._renderSprites;
   OutputProto.clearSprites = Output.prototype.clearSprites;
   OutputProto.removeSprite = Output.prototype.removeSprite;
+  OutputProto._destroySprite = Output.prototype._destroySprite;
   OutputProto.enableSprite = Output.prototype.enableSprite;
   OutputProto.disableSprite = Output.prototype.disableSprite;
   OutputProto.tick = Output.prototype.tick;
