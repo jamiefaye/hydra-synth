@@ -389,8 +389,10 @@
       const { number, channel } = resolveControl(this.profile, id);
       const opts = typeof a === "object" && a !== null ? defined$1(a) : defined$1({ min: a, max: b, init: c });
       if (opts.channel === void 0 && channel != null) opts.channel = channel;
+      const before = this.state.controls.get(`${opts.channel == null ? "*" : opts.channel}:${number}`);
+      const hadLabel = before ? before.config.label : void 0;
       const fn = this.state.cc(number, opts);
-      if (opts.label !== void 0) for (const l of this._labelListeners) {
+      if (opts.label !== void 0 && opts.label !== hadLabel) for (const l of this._labelListeners) {
         try {
           l();
         } catch (e) {
@@ -910,7 +912,7 @@
   function screenBytes(rows) {
     const list = Array.isArray(rows) ? rows : String(rows ?? "").split("\n");
     const text = Array.from({ length: ROWS }, (_, i) => fit(list[i], ROW_WIDTH)).join("");
-    return [...EC4_HEAD, 78, 34, 19, 74, ...nib(0), ...chars(text), 247];
+    return [...EC4_HEAD, 78, 34, 19, 74, ...nib(0), ...chars(text), 78, 34, 20, 247];
   }
   function hideScreenBytes() {
     return [...EC4_HEAD, 78, 34, 21, 247];
@@ -1035,10 +1037,12 @@
         const names = display.labels.get(at.setup, at.group);
         return names ? sendBytes(namesBytes(names)) : false;
       },
-      /** Labels for every group from the registered controls (their `label` option, else their profile name), then refresh. */
+      /**
+       * Labels from the registered controls (their `label` option, else their profile name), then refresh.
+       * A group with labelled controls is rebuilt whole; groups set by names() alone are left as they are.
+       */
       fromControls(setup = homeSetup()) {
         const built = labelsFromControls(controller, setup);
-        display.labels.clear(setup);
         for (const g of built.groups(setup)) display.labels.set(setup, g, built.get(setup, g));
         display.refresh();
         return display.labels;

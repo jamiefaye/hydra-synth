@@ -101,9 +101,13 @@ test('ec4 display: labels follow registrations, go out on connect and group chan
   const t = connectVirtual(c); t.sysex = true
   c.cc([1, 1], { min: 0, max: 1, init: 0, label: 'FREQ' })
   c.cc([2, 1], { min: 0, max: 1, init: 0, label: 'ROT' })
+  let rebuilds = 0; c.onLabels(() => rebuilds++)
+  c.cc([1, 1], { min: 0, max: 1, init: 0, label: 'FREQ' }) // same label again: no rebuild
+  c.cc([1, 1], { min: 0, max: 1, init: 0, label: 'FRQ2' }) // a new label: one
+  assert.equal(rebuilds, 1)
   ec4.display.names(3, ['HAND'])                         // set by hand, in the same burst
   await new Promise(r => setTimeout(r, 5))               // the registration burst has settled
-  assert.equal(ec4.display.labels.get(14, 1)[0], 'FREQ'); assert.equal(ec4.display.labels.get(14, 2)[0], 'ROT ')
+  assert.equal(ec4.display.labels.get(14, 1)[0], 'FRQ2'); assert.equal(ec4.display.labels.get(14, 2)[0], 'ROT ')
   assert.equal(ec4.display.labels.get(14, 3)[0], 'HAND')  // the rebuild from controls leaves it alone
   assert.equal(t.sent.length, 0)                         // nothing on screen yet: where is unknown
   // the device answers the query: setup 14 group 2 -> group 2's names go out

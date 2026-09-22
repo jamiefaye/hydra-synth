@@ -69,8 +69,11 @@ export class Controller {
     const { number, channel } = resolveControl(this.profile, id)
     const opts = (typeof a === 'object' && a !== null) ? defined(a) : defined({ min: a, max: b, init: c })
     if (opts.channel === undefined && channel != null) opts.channel = channel
+    const before = this.state.controls.get(`${opts.channel == null ? '*' : opts.channel}:${number}`)
+    const hadLabel = before ? before.config.label : undefined
     const fn = this.state.cc(number, opts)
-    if (opts.label !== undefined) for (const l of this._labelListeners) { try { l() } catch (e) { /* a listener's problem */ } }
+    // a re-registration with the same label (a sketch re-eval, a per-frame call) is not news
+    if (opts.label !== undefined && opts.label !== hadLabel) for (const l of this._labelListeners) { try { l() } catch (e) { /* a listener's problem */ } }
     return fn
   }
 
