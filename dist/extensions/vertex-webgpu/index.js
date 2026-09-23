@@ -13176,46 +13176,87 @@ function generate(node, options) {
 }
 const watchListArray = ["time", "fps", "speed", "bpm"];
 const watchList = new Set(watchListArray);
+const SKIP_KEYS = /* @__PURE__ */ new Set(["type", "start", "end", "loc", "range", "comments", "leadingComments", "trailingComments"]);
 function Deglobalize(textIn, prefix) {
-  let textCleaned = textIn.replace(/[\u200B-\u200D\uFEFF]/g, "");
-  let text = "async function* f() {\n" + textCleaned + "\n}";
-  let traveler = makeTraveler({
-    go: function(node, state2) {
-      if (node.type === "Identifier") {
-        if (watchList.has(node.name)) {
-          state2.refTab.push(node);
-        }
-      }
-      this.super.go.call(this, node, state2);
-    }
-    //MemberExpression: ignore
-  });
-  var comments = [];
+  const textCleaned = textIn.replace(/[\u200B-\u200D\uFEFF]/g, "");
+  const text = "async function* f() {\n" + textCleaned + "\n}";
   let ast;
   try {
-    ast = Parser.parse(
-      text,
-      {
-        locations: false,
-        ecmaVersion: "latest",
-        allowReserved: true,
-        allowAwaitOutsideFunction: true,
-        onComment: comments
-      }
-    );
+    ast = Parser.parse(text, { locations: false, ecmaVersion: "latest", allowReserved: true, allowAwaitOutsideFunction: true });
   } catch (err) {
     console.log("Deglobalize err: " + err);
     console.log(textCleaned);
     return textCleaned;
   }
-  let state = {
-    refTab: []
+  const declared = /* @__PURE__ */ new Set();
+  const declare = (pat) => {
+    if (!pat) return;
+    switch (pat.type) {
+      case "Identifier":
+        declared.add(pat.name);
+        break;
+      case "ObjectPattern":
+        pat.properties.forEach((p) => declare(p.type === "RestElement" ? p.argument : p.value));
+        break;
+      case "ArrayPattern":
+        pat.elements.forEach(declare);
+        break;
+      case "RestElement":
+        declare(pat.argument);
+        break;
+      case "AssignmentPattern":
+        declare(pat.left);
+        break;
+    }
   };
-  traveler.go(ast, state);
-  if (state.refTab.length === 0) return textCleaned;
-  for (let i = 0; i < state.refTab.length; ++i) {
-    let node = state.refTab[i];
-    let vn = node.name;
+  const eachChild = (node, fn) => {
+    for (const key of Object.keys(node)) {
+      if (SKIP_KEYS.has(key)) continue;
+      const child = node[key];
+      if (Array.isArray(child)) child.forEach((c) => {
+        if (c && typeof c.type === "string") fn(c, key);
+      });
+      else if (child && typeof child.type === "string") fn(child, key);
+    }
+  };
+  const scan = (node) => {
+    if (node.type === "VariableDeclarator") declare(node.id);
+    if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression" || node.type === "ArrowFunctionExpression") {
+      if (node.id && node !== ast.body[0]) declare(node.id);
+      node.params.forEach(declare);
+    }
+    if (node.type === "CatchClause") declare(node.param);
+    if (node.type === "ClassDeclaration" && node.id) declare(node.id);
+    eachChild(node, scan);
+  };
+  scan(ast);
+  const refs = [];
+  const visit = (node, parent, key) => {
+    if (node.type === "Identifier") {
+      if (!watchList.has(node.name) || declared.has(node.name)) return;
+      if (parent) {
+        if (parent.type === "MemberExpression" && key === "property" && !parent.computed) return;
+        if ((parent.type === "Property" || parent.type === "MethodDefinition" || parent.type === "PropertyDefinition") && key === "key" && !parent.computed) return;
+        if (parent.type === "LabeledStatement" || parent.type === "BreakStatement" || parent.type === "ContinueStatement") return;
+        if (parent.type === "ImportSpecifier" || parent.type === "ImportDefaultSpecifier" || parent.type === "ExportSpecifier") return;
+      }
+      refs.push(node);
+      return;
+    }
+    if (node.type === "Property" && node.shorthand && node.value.type === "Identifier") {
+      if (watchList.has(node.value.name) && !declared.has(node.value.name)) {
+        node.shorthand = false;
+        node.value = { type: "Identifier", name: node.value.name };
+        refs.push(node.value);
+      }
+      return;
+    }
+    eachChild(node, (child, k) => visit(child, node, k));
+  };
+  visit(ast, null, null);
+  if (refs.length === 0) return textCleaned;
+  for (const node of refs) {
+    const vn = node.name;
     node.type = "MemberExpression";
     delete node.name;
     node.object = { type: "Identifier", name: prefix };
@@ -13223,15 +13264,13 @@ function Deglobalize(textIn, prefix) {
     node.computed = false;
     node.optional = false;
   }
-  let regen = generate(ast);
-  return stripOutStuff(regen);
+  return stripOutStuff(generate(ast));
 }
 function stripOutStuff(inp) {
-  let firstX = inp.indexOf("{");
-  let lastX = inp.lastIndexOf("}");
+  const firstX = inp.indexOf("{");
+  const lastX = inp.lastIndexOf("}");
   if (firstX === -1 || lastX === -1) return inp;
-  let outp = inp.substring(firstX + 1, lastX);
-  return outp;
+  return inp.substring(firstX + 1, lastX);
 }
 const HALF_FLOAT_EXTENSIONS = ["OES_texture_half_float", "OES_texture_half_float_linear", "EXT_color_buffer_half_float"];
 let warnedNoHalfFloat = false;
@@ -26196,6 +26235,11 @@ async function createHydra$1({
       hydra.wgslHydra.resizeOutputsTo(w, h);
     }
     hydra.o.forEach((o) => o.resize && o.resize(w, h));
+    if (hydra.regl && !hydra.useWGSL) hydra.regl.poll();
+    if (hydra.makeGlobal && typeof window !== "undefined") {
+      window.width = w;
+      window.height = h;
+    }
   }).bind(hydra);
   hydra.synth.hush = hydra.hush = (function() {
     hydra.s.forEach((source) => source.clear && source.clear());

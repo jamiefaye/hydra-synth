@@ -6,6 +6,12 @@ function decodeRelative(mode, v) {
   return 0;
 }
 const clamp01 = (x) => Math.min(Math.max(x, 0), 1);
+function rail(cfg, p) {
+  if (cfg.open === true) return p;
+  if (cfg.open === "up") return Math.max(p, 0);
+  if (cfg.open === "down") return Math.min(p, 1);
+  return clamp01(p);
+}
 function key(channel, number) {
   return `${channel == null ? "*" : channel}:${number}`;
 }
@@ -18,9 +24,9 @@ function posToValue(cfg, p) {
 function valueToPos(cfg, v) {
   const { min, max, curve } = cfg;
   if (max === min) return 0;
-  if (curve === "log") return clamp01(Math.log(v / min) / Math.log(max / min));
-  if (curve === "exp") return clamp01(Math.sqrt((v - min) / (max - min)));
-  return clamp01((v - min) / (max - min));
+  if (curve === "log") return rail(cfg, Math.log(v / min) / Math.log(max / min));
+  if (curve === "exp") return rail(cfg, Math.sqrt(Math.max(0, (v - min) / (max - min))));
+  return rail(cfg, (v - min) / (max - min));
 }
 class MidiState {
   constructor(defaults = {}) {
@@ -38,6 +44,9 @@ class MidiState {
       // 'linear' | 'log' (min and max must be > 0) | 'exp'
       wrap: false,
       // relative: wrap around instead of clamping (rotation)
+      open: false,
+      // relative: no rails; min..max sets the detent size and the value keeps going past either end
+      //   ('up': past max only, 'down': past min only; log never reaches 0). Endless encoders only
       fine: 0,
       // relative: divide the step by this while the encoder's push note is held (0 = off)
       snap: true
@@ -228,11 +237,11 @@ class MidiState {
       if (Math.abs(x - Math.round(x)) < 1e-6) x = Math.round(x);
       let k = (delta > 0 ? Math.floor(x) : Math.ceil(x)) + delta;
       if (cfg.wrap) k = (k % n + n) % n;
-      p = clamp01(k / n);
+      p = rail(cfg, k / n);
     } else {
       p = rec.pos + delta / n;
       if (cfg.wrap) p = p - Math.floor(p);
-      else p = clamp01(p);
+      else p = rail(cfg, p);
     }
     rec.pos = p;
     const ev = { type: "cc", channel, number, value, registered: true, mode: cfg.mode, delta, fine: !!fine, before, after: posToValue(cfg, rec.pos), pos: rec.pos, aliases: rec.aliases };
@@ -452,7 +461,8 @@ class Controller {
   /** Echo a control's 0..1 position to the device as the same CC (display feedback). */
   sendFeedback(channel, number, pos) {
     if (!this.opts.feedback || !this.transport || !this.transport.send) return;
-    const msg = [176 | (channel || 1) - 1, number & 127, Math.round(pos * 127) & 127];
+    const shown = Math.min(Math.max(pos, 0), 1);
+    const msg = [176 | (channel || 1) - 1, number & 127, Math.round(shown * 127) & 127];
     try {
       this.transport.send(msg);
     } catch (e) {
