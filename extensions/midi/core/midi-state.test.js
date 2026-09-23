@@ -147,6 +147,25 @@ test('wrap: rotation knob goes round instead of clamping', () => {
   m.handleMessage(cc(1, 7, 62)); assert.equal(Math.round(f()), 90)    // -180 from 270
 })
 
+test('open: no rails, the range only sets the detent size', () => {
+  const m = new MidiState({ mode: 'r2', steps: 4 })
+  const lin = m.cc(8, { min: 0, max: 2, init: 1, open: true })
+  for (let i = 0; i < 6; i++) m.handleMessage(cc(1, 8, 65))
+  assert.equal(lin(), 4)                                     // 1 + 6 * 0.5, past max
+  for (let i = 0; i < 12; i++) m.handleMessage(cc(1, 8, 63))
+  assert.equal(lin(), -2)                                    // and past min
+  assert.equal(lin.set(10), 10)                              // set is not clipped either
+  const log = m.cc(9, { min: 1, max: 16, init: 4, curve: 'log', open: true })
+  for (let i = 0; i < 8; i++) m.handleMessage(cc(1, 9, 65))
+  assert.equal(Math.round(log()), 1024)                      // each detent doubles, on past 16
+  for (let i = 0; i < 20; i++) m.handleMessage(cc(1, 9, 63))
+  assert.ok(log() > 0 && log() < 0.5)                        // down toward 0, never reaching it
+  const up = m.cc(10, { min: 1, max: 8, init: 1, open: 'up' })
+  m.handleMessage(cc(1, 10, 63)); assert.equal(up(), 1)      // floor kept
+  for (let i = 0; i < 8; i++) m.handleMessage(cc(1, 10, 65))
+  assert.equal(up(), 15)                                     // ceiling gone
+})
+
 test('fine: step divides while the encoder push note is held', () => {
   const m = new MidiState({ mode: 'r2', steps: 10 })
   const f = m.cc(8, { min: 0, max: 1, init: 0, fine: 10 })

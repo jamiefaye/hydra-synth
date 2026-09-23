@@ -138,6 +138,9 @@ const x     = midi.cc(4, { min: -1, max: 1, init: 0, steps: 200, fine: 20 }) // 
   picks a different note, e.g. one button as a shift for every knob.
 - `curve` is `'linear'` (default), `'log'` (min and max above 0; each detent multiplies), or `'exp'`.
 - `wrap` makes the range circular instead of clamped, for angles.
+- `open` takes the rails off: min and max only set the detent size and the value keeps going
+  past either end (`'up'` or `'down'` opens one end). A log control turned down approaches 0 without
+  reaching it. The display bar pins at the end. For endless encoders; an absolute control ignores it.
 - The EC4's own acceleration (Acc1 to Acc3) sends bigger steps when turned fast and is honoured,
   so slow turns are fine and flicks are coarse without any code.
 
@@ -162,7 +165,7 @@ resends everything, and is called automatically when ports connect.
 - `outputFilter` which outputs get feedback (`/faderfox|ec4/i`); `null` for all
 - `makeGlobal` expose `window.midi` (true)
 
-`midi.cc(number, {min, max, init, mode, channel, steps, curve, wrap, fine, fineNote})` per-control overrides.
+`midi.cc(number, {min, max, init, mode, channel, steps, curve, wrap, open, fine, fineNote})` per-control overrides.
 The returned function has `.set(v)`, `.reset()` and `.v` (current value).
 
 `midi.note(number, {toggle, velocity, channel})` for encoder pushes or buttons.

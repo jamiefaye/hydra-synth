@@ -31,6 +31,14 @@ export function decodeRelative (mode, v) {
 
 const clamp01 = (x) => Math.min(Math.max(x, 0), 1)
 
+// The rails: a position stays in 0..1 unless the control is open at that end
+function rail (cfg, p) {
+  if (cfg.open === true) return p
+  if (cfg.open === 'up') return Math.max(p, 0)
+  if (cfg.open === 'down') return Math.min(p, 1)
+  return clamp01(p)
+}
+
 function key (channel, number) {
   return `${channel == null ? '*' : channel}:${number}`
 }
@@ -46,9 +54,9 @@ function posToValue (cfg, p) {
 function valueToPos (cfg, v) {
   const { min, max, curve } = cfg
   if (max === min) return 0
-  if (curve === 'log') return clamp01(Math.log(v / min) / Math.log(max / min))
-  if (curve === 'exp') return clamp01(Math.sqrt((v - min) / (max - min)))
-  return clamp01((v - min) / (max - min))
+  if (curve === 'log') return rail(cfg, Math.log(v / min) / Math.log(max / min))
+  if (curve === 'exp') return rail(cfg, Math.sqrt(Math.max(0, (v - min) / (max - min))))
+  return rail(cfg, (v - min) / (max - min))
 }
 
 export class MidiState {
@@ -62,6 +70,8 @@ export class MidiState {
       max: 1,
       curve: 'linear', // 'linear' | 'log' (min and max must be > 0) | 'exp'
       wrap: false,     // relative: wrap around instead of clamping (rotation)
+      open: false,     // relative: no rails; min..max sets the detent size and the value keeps going past either end
+                       //   ('up': past max only, 'down': past min only; log never reaches 0). Endless encoders only
       fine: 0,         // relative: divide the step by this while the encoder's push note is held (0 = off)
       snap: true       // relative: detents land on the grid of steps (of steps * fine while fine), so ends and round values are reachable
     }, defaults)
@@ -257,11 +267,11 @@ export class MidiState {
       if (Math.abs(x - Math.round(x)) < 1e-6) x = Math.round(x)
       let k = (delta > 0 ? Math.floor(x) : Math.ceil(x)) + delta
       if (cfg.wrap) k = ((k % n) + n) % n
-      p = clamp01(k / n)
+      p = rail(cfg, k / n)
     } else {
       p = rec.pos + delta / n
       if (cfg.wrap) p = p - Math.floor(p)
-      else p = clamp01(p)
+      else p = rail(cfg, p)
     }
     rec.pos = p
     const ev = { type: 'cc', channel, number, value, registered: true, mode: cfg.mode, delta, fine: !!fine, before, after: posToValue(cfg, rec.pos), pos: rec.pos, aliases: rec.aliases }

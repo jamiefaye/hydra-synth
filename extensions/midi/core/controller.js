@@ -122,7 +122,9 @@ export class Controller {
   /** Echo a control's 0..1 position to the device as the same CC (display feedback). */
   sendFeedback (channel, number, pos) {
     if (!this.opts.feedback || !this.transport || !this.transport.send) return
-    const msg = [0xB0 | ((channel || 1) - 1), number & 0x7f, Math.round(pos * 127) & 0x7f]
+    // An open control's position can leave 0..1: the display pins at the end rather than wrapping
+    const shown = Math.min(Math.max(pos, 0), 1)
+    const msg = [0xB0 | ((channel || 1) - 1), number & 0x7f, Math.round(shown * 127) & 0x7f]
     try { this.transport.send(msg) } catch (e) { /* port went away */ }
   }
 
