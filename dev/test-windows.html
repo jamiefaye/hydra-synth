@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>windows: screens, placement, memory</title>
+<style>
+  body { margin: 0; background: #111; color: #ccc; font: 13px monospace; }
+  main { padding: 12px; max-width: 1100px; }
+  table { border-collapse: collapse; margin: 8px 0; } td, th { padding: 2px 8px; text-align: left; border-bottom: 1px solid #222; }
+  .cur { color: #fd6; } .dim { color: #777; } .err { color: #f88; }
+  button, input { font: inherit; background: #1a1a1a; color: #ddd; border: 1px solid #444; padding: 2px 8px; margin: 2px; cursor: pointer; }
+  pre { background: #0a0a0a; padding: 8px; overflow: auto; max-height: 200px; }
+  #stage { position: fixed; inset: 0; display: block; }
+  #stagebar { position: fixed; left: 8px; top: 8px; }
+</style>
+</head>
+<body>
+<script type="module">
+  import { getScreens, screensGranted, onScreensChange, fingerprint, screenId, homeFor, portal, openWindow, fullscreenOn, layoutStore } from '../src/lib/windows.js'
+
+  const q = new URLSearchParams(location.search)
+  const store = layoutStore(null, 'hydra.windows.test')
+  const $ = (id) => document.getElementById(id)
+
+  if (q.get('stage')) {
+    // ---- the stage: a moving picture and a button to go fullscreen on the screen this window is on
+    document.body.innerHTML = '<canvas id="stage"></canvas><div id="stagebar"><button id="fs">fullscreen here</button> <span class="dim" id="where"></span></div>'
+    const c = $('stage'), g = c.getContext('2d')
+    const fit = () => { c.width = innerWidth; c.height = innerHeight }
+    fit(); addEventListener('resize', fit)
+    const draw = (t) => { const grd = g.createLinearGradient(0, 0, c.width, c.height); grd.addColorStop(0, `hsl(${(t / 30) % 360}, 80%, 40%)`); grd.addColorStop(1, `hsl(${(t / 30 + 180) % 360}, 80%, 30%)`); g.fillStyle = grd; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#fff'; g.font = '48px monospace'; g.fillText('stage ' + Math.round(t / 1000) + 's', 40, 80); requestAnimationFrame(draw) }
+    requestAnimationFrame(draw)
+    const tell = async () => { const info = await getScreens(); const s = info.screens[info.current]; $('where').textContent = s ? `on ${screenId(s, info.screens)} (${s.label || 'no label'}) ${info.granted ? '' : '(no permission here)'}` : '' }
+    tell()
+    $('fs').onclick = async () => { const info = await getScreens({ ask: true }); await fullscreenOn(document.documentElement, info.current, info); tell() }
+  } else {
+    // ---- the controls
+    document.body.innerHTML = `<main>
+      <h3>windows.js: screens, placement, memory</h3>
+      <div>
+        <button id="ask">ask permission (getScreenDetails)</button>
+        <button id="refresh">refresh</button>
+        <span id="status" class="dim"></span>
+      </div>
+      <table id="screens"></table>
+      <div>
+        <button id="panel">open panel (portal: window, or box if blocked)</button>
+        <button id="panelbox">open panel as a box</button>
+        <button id="stagewin">open stage window (?stage=1) on the stage screen</button>
+        <button id="fshere">fullscreen this page on the stage screen</button>
+      </div>
+      <div>
+        <button id="forget">forget this rig's layout</button>
+        <button id="forgetall">forget all</button>
+        <span class="dim">drag a window somewhere, close it, open it again: it comes back there (on this rig)</span>
+      </div>
+      <h4>remembered <span class="dim">(key hydra.windows.test)</span></h4><pre id="saved"></pre>
+      <h4>log <span class="dim">(keys pressed in the panel window arrive here too)</span></h4><pre id="log"></pre>
+    </main>`
+    const log = (m) => { $('log').textContent = `${new Date().toTimeString().slice(0, 8)} ${m}\n` + $('log').textContent }
+    let info = null
+    const show = async (ask = false) => {
+      info = await getScreens({ ask })
+      const fp = fingerprint(info.screens)
+      $('status').textContent = `${info.granted ? 'permission granted' : 'no permission'} · ${info.screens.length} screen(s) · extended: ${info.extended} · fingerprint ${fp} · panel -> ${homeFor('panel', info.screens)}, stage -> ${homeFor('stage', info.screens)}`
+      $('screens').innerHTML = '<tr><th>#</th><th>id</th><th>label</th><th>left,top</th><th>size</th><th>avail</th><th>dpr</th><th>internal</th><th>primary</th></tr>' +
+        info.screens.map(s => `<tr class="${s.current ? 'cur' : ''}"><td>${s.index}${s.current ? ' *' : ''}</td><td>${screenId(s, info.screens)}</td><td>${s.label || '<span class=dim>none</span>'}</td><td>${s.left},${s.top}</td><td>${s.width}x${s.height}</td><td>${s.availLeft},${s.availTop} ${s.availWidth}x${s.availHeight}</td><td>${s.dpr}</td><td>${s.internal}</td><td>${s.primary}</td></tr>`).join('')
+      $('saved').textContent = JSON.stringify(store.all(), null, 1)
+      if (info.details) onScreensChange(info.details, () => { log('screens changed'); show() })
+    }
+    $('ask').onclick = () => show(true).then(() => log('asked; granted: ' + info.granted))
+    $('refresh').onclick = () => show()
+    setInterval(() => { $('saved').textContent = JSON.stringify(store.all(), null, 1) }, 1000)
+    const fillPanel = (p) => {
+      p.root.innerHTML = `<h3 style="margin:4px 0">test panel ${p.boxed ? '(box over the page)' : '(own window)'}</h3>
+        <p>Type here (keys stay in the field): <input id="fld" size="30" /></p>
+        <p>Type anywhere else in this panel: the key is forwarded to the main page's log.</p>
+        <p><button id="pclose">close</button> <span id="pclock"></span></p>`
+      const d = p.root.ownerDocument
+      const t = setInterval(() => { if (p.closed) clearInterval(t); else d.getElementById('pclock').textContent = new Date().toTimeString().slice(0, 8) }, 1000)
+      d.getElementById('pclose').onclick = () => p.close()
+      p.onClose(() => log('panel closed'))
+      log(`panel opened ${p.boxed ? 'as a box' : 'in a window'}`)
+    }
+    $('panel').onclick = async () => fillPanel(await portal('test-panel', { role: 'panel', title: 'Test panel', width: 700, height: 400, store }))
+    $('panelbox').onclick = async () => fillPanel(await portal('test-panel-box', { box: 'always', store }))
+    $('stagewin').onclick = async () => { const w = await openWindow('test-stage', { role: 'stage', url: 'test-windows.html?stage=1', width: 960, height: 540, store }); log(w ? 'stage window opened' : 'stage window blocked') }
+    $('fshere').onclick = async () => { const ok = await fullscreenOn(document.documentElement, 'stage', await getScreens({ ask: true })); log('fullscreen on stage screen: ' + ok) }
+    $('forget').onclick = () => { store.forget(fingerprint(info.screens)); log('forgot this rig') }
+    $('forgetall').onclick = () => { store.forget(); log('forgot all') }
+    document.addEventListener('keydown', (e) => { if (!/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) log(`key ${e.key}${e.isTrusted ? '' : ' (forwarded)'}`) })
+    show()
+  }
+</script>
+</body>
+</html>

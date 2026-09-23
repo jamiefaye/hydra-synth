@@ -27,6 +27,9 @@
     },
     "./extensions/midi": {
       "import": "./extensions/midi/index.js"
+    },
+    "./src/lib/windows.js": {
+      "import": "./src/lib/windows.js"
     }
   },
   "unpkg": "./dist/hydra-synth.js",
@@ -39,7 +42,7 @@
     "build:vertex-webgpu": "VERTEX_TARGET=webgpu vite build --config vite.config.vertex.js",
     "build:midi": "EXT_TARGET=midi vite build --config vite.config.vertex.js",
     "build:herder": "vite build --config vite.config.herder.js && cp dev/HERDER.md dist/herder/ && cp -R dev/media dist/herder/ && cp dist/herder/herder.html dist/herder/index.html",
-    "test": "node --test \"extensions/midi/core/*.test.js\" \"src/lib/*.test.js\"",
+    "test": "node --test \"extensions/midi/core/*.test.js\" \"extensions/vertex/*.test.js\" \"src/lib/*.test.js\"",
     "dev-budo": "budo ./dev/index.js --open --live --port 8000 -- -p esmify",
     "build-browserify": "browserify ./src/index.js -p esmify --standalone Hydra > dist/hydra-synth.js"
   },
