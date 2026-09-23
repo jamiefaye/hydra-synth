@@ -71,3 +71,4 @@ pnpm-lock.yaml
 public/
 dist/extensions/*/UltimateFoodPack/
 dist/herder/
+dist/UltimateFoodPack/
