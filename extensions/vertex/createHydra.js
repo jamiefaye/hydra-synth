@@ -216,6 +216,12 @@ export async function createHydra({
       hydra.wgslHydra.resizeOutputsTo(w, h)
     }
     hydra.o.forEach(o => o.resize && o.resize(w, h))
+    // regl caches the drawing buffer size for the default framebuffer's viewport; nothing here runs
+    // regl.frame(), which would poll it, so poll now or the blit keeps the old viewport (picture
+    // in the bottom left, the new width and height black)
+    if (hydra.regl && !hydra.useWGSL) hydra.regl.poll()
+    // sketches read _h.width; the legacy window globals are copied once at start, so update them too
+    if (hydra.makeGlobal && typeof window !== 'undefined') { window.width = w; window.height = h }
   }.bind(hydra)
 
   hydra.synth.hush = hydra.hush = function() {
