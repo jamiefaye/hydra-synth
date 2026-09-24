@@ -12,7 +12,8 @@
  *   locate(number, channel) -> [group, n] | null   the inverse, for display labels
  *   setup     the EC4 setup this layout lives in (labels go there)
  *   names     { alias: [group, n] }  user-defined names for encoders
- *   layout    rows of the surface for a panel and for parm: [{ group, kind, count, label, closed, mode }]
+ *   layout    rows of the surface for a panel and for parm: [{ group, kind, count, label, closed, mode, fill, role }]
+ *             role 'pages' = a button row that selects a page each; 'pageStep' with step [prev, next] = two buttons that step
  *             kind 'endless' (the host can set where it stands: a relative encoder, or an absolute one the
  *             device takes a written value for; closed = 0..127 is the whole range), 'bounded' (a pot or
  *             fader: the hand alone sets it, so the host does pickup), 'button'
@@ -220,7 +221,7 @@ const NANO_ROWS = [
   { kind: 'button', first: 32, count: 8, label: 'S buttons' },
   { kind: 'button', first: 48, count: 8, label: 'M buttons' },
   { kind: 'button', first: 64, count: 8, label: 'R buttons' },
-  { kind: 'button', numbers: [58, 59, 46, 43, 44, 42, 41, 45], count: 8, label: 'transport: track <, track >, cycle, rewind, forward, stop, play, record' },
+  { kind: 'button', numbers: [58, 59, 46, 43, 44, 42, 41, 45], count: 8, label: 'transport: track <, track >, cycle, rewind, forward, stop, play, record', role: 'pageStep', step: [1, 2] },
   { kind: 'button', numbers: [60, 61, 62], count: 3, label: 'marker: set, <, >' }
 ]
 const nanoNumber = (row, n) => (row.numbers ? row.numbers[n - 1] : row.first + (n - 1))
@@ -233,7 +234,7 @@ export const nano = {
   channel: null,     // the value model takes any channel; lamps go on the learned global channel
   groups: NANO_ROWS.length,
   encodersPerGroup: 8,
-  layout: NANO_ROWS.map((r, i) => ({ group: i + 1, kind: r.kind, count: r.count, label: r.label, fill: r.fill })),
+  layout: NANO_ROWS.map((r, i) => ({ group: i + 1, kind: r.kind, count: r.count, label: r.label, fill: r.fill, role: r.role, step: r.step })),
   encoder: (group, n) => {
     const row = NANO_ROWS[group - 1]
     if (!row || n < 1 || n > row.count) throw new Error(`midi: no nanoKONTROL2 control at [${group}, ${n}]`)

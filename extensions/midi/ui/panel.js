@@ -86,6 +86,7 @@ export function mountPanel (element, controller, options = {}) {
   const cells = []
   const titles = new Map()
   const pagers = []
+  const rowsOf = []
   const line = (tip, cls, text) => { if (!text) return; const el = document.createElement('span'); el.className = cls; el.textContent = text; tip.appendChild(el) }
 
   // bytes a turn on this device's control would send
@@ -237,6 +238,7 @@ export function mountPanel (element, controller, options = {}) {
       const name = document.createElement('div'); name.className = 'mp-rowname'; name.textContent = r.label || `row ${r.group}`
       box.appendChild(name)
       const row = document.createElement('div'); row.className = 'mp-row'; row.style.gridTemplateColumns = `repeat(${r.count || 8}, auto)`
+      rowsOf.push({ name, row, cells: [] })
       for (let n = 1; n <= (r.count || 8); n++) {
         let push = null
         try { push = dev.profile.push ? dev.profile.push(r.group, n) : null } catch (e) { push = null }
@@ -245,10 +247,21 @@ export function mountPanel (element, controller, options = {}) {
         const rec = makeCell({ device: dev, group: r.group, n, channel: at.channel, number: at.number, push: r.kind === 'button' ? push : (r.kind === 'endless' ? push : null), kind: r.kind, label: '' },
           [['mp-tip-name', ''], ['mp-tip-desc', ''], ['mp-tip-how', how], ['mp-tip-tech', `${dev.id}: ${r.label || 'row ' + r.group} ${n}, cc ${at.number} ch ${at.channel ?? 'any'}`]])
         row.appendChild(rec.cell)
+        rowsOf[rowsOf.length - 1].cells.push(rec)
       }
       box.appendChild(row)
     }
     root.appendChild(box)
+  }
+  // rows with nothing on them fold away, so a small sketch's panel stays small (the first row always shows)
+  const foldEmpty = () => {
+    for (const box of root.querySelectorAll('.mp-device')) {
+      const rows = rowsOf.filter(r => r.row.parentNode === box)
+      rows.forEach((r, i) => {
+        const live = i === 0 || r.cells.some(c => !c.cell.classList.contains('mp-dark'))
+        r.row.style.display = live ? '' : 'none'; r.name.style.display = live ? '' : 'none'
+      })
+    }
   }
 
   // the cell of the last event lights for a moment: which knob just moved
@@ -293,8 +306,9 @@ export function mountPanel (element, controller, options = {}) {
       }
     }
   }
-  refresh()
-  const timer = setInterval(refresh, opts.refreshMs)
+  const refreshAll = () => { refresh(); foldEmpty() }
+  refreshAll()
+  const timer = setInterval(refreshAll, opts.refreshMs)
 
   return {
     root,
