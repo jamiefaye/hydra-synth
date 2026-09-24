@@ -18,10 +18,20 @@
  * With relative modes the value lives here, not on the device, so a knob moves a
  * parameter by how far it turned and never jumps. That is what makes it safe to
  * hand the controller to someone else mid-performance.
+ *
+ * Bounded controls (pots, faders: absolute modes) have a position of their own that the
+ * host cannot move, so an absolute control takes a pickup mode:
+ *   'jump'      the value is wherever the control stands (the default: a knob box)
+ *   'soft'      the value waits until the control crosses it, then follows (position = value,
+ *               nothing jumps; the event and positions() say whether it is caught yet)
+ *   'distance'  the value moves by how far the control moved, scaled by pickupScale
+ *               (lightherder's fader: never jumps, position means nothing, clamps at the ends)
+ * Setting a value from outside (set, restore, init) lets go of a soft pickup again.
  */
 
 export const MODES = ['r1', 'r2', 'abs', 'abs14']
 export const CURVES = ['linear', 'log', 'exp']
+export const PICKUPS = ['jump', 'soft', 'distance']
 
 export function decodeRelative (mode, v) {
   if (mode === 'r1') return v === 0 ? 0 : (v < 64 ? -v : 128 - v)
@@ -73,7 +83,9 @@ export class MidiState {
       open: false,     // relative: no rails; min..max sets the detent size and the value keeps going past either end
                        //   ('up': past max only, 'down': past min only; log never reaches 0). Endless encoders only
       fine: 0,         // relative: divide the step by this while the encoder's push note is held (0 = off)
-      snap: true       // relative: detents land on the grid of steps (of steps * fine while fine), so ends and round values are reachable
+      snap: true,      // relative: detents land on the grid of steps (of steps * fine while fine), so ends and round values are reachable
+      pickup: 'jump',  // absolute: 'jump' | 'soft' | 'distance', see above
+      pickupScale: 1   // distance: value travel per full control travel
     }, defaults)
     this.controls = new Map()   // key -> control record
     this.notes = new Map()      // key -> registered note record
@@ -98,18 +110,20 @@ export class MidiState {
     if (!MODES.includes(cfg.mode)) throw new Error(`midi.cc: unknown mode "${cfg.mode}", use one of ${MODES.join(', ')}`)
     if (!CURVES.includes(cfg.curve)) throw new Error(`midi.cc: unknown curve "${cfg.curve}", use one of ${CURVES.join(', ')}`)
     if (cfg.curve === 'log' && (cfg.min <= 0 || cfg.max <= 0)) throw new Error('midi.cc: log curve needs min and max > 0')
+    if (!PICKUPS.includes(cfg.pickup)) throw new Error(`midi.cc: unknown pickup "${cfg.pickup}", use one of ${PICKUPS.join(', ')}`)
     if (cfg.fineNote === undefined) cfg.fineNote = number   // EC4 "Note" push sends the encoder's own number
 
     const k = key(cfg.channel, number)
     let rec = this.controls.get(k)
     if (!rec) {
-      rec = { number, config: cfg, pos: valueToPos(cfg, cfg.init), lastChannel: cfg.channel || 1, aliases: [{ channel: cfg.channel, number }] }
+      rec = { number, config: cfg, pos: valueToPos(cfg, cfg.init), lastChannel: cfg.channel || 1, aliases: [{ channel: cfg.channel, number }], phys: undefined, caught: cfg.pickup !== 'soft' }
       this.controls.set(k, rec)
     } else {
       // Re-registering (sketch re-eval): keep the live value, re-fit it into the new range/curve
       const value = posToValue(rec.config, rec.pos)
       rec.config = cfg
       rec.pos = valueToPos(cfg, value)
+      if (cfg.pickup !== 'soft') rec.caught = true
     }
     return this._fnFor(rec, number)
   }
@@ -118,12 +132,14 @@ export class MidiState {
     const get = () => posToValue(rec.config, rec.pos)
     const fn = () => get()
     fn.value = get
-    fn.set = (v) => { rec.pos = valueToPos(rec.config, v); this._emitSet(rec); return get() }
+    fn.set = (v) => { rec.pos = valueToPos(rec.config, v); this._letGo(rec); this._emitSet(rec); return get() }
     fn.reset = () => fn.set(rec.config.init)
     fn.number = number
     Object.defineProperty(fn, 'config', { get: () => rec.config })
     Object.defineProperty(fn, 'v', { get })
     Object.defineProperty(fn, 'pos', { get: () => rec.pos })
+    Object.defineProperty(fn, 'caught', { get: () => rec.caught })
+    Object.defineProperty(fn, 'phys', { get: () => rec.phys })
     Object.defineProperty(fn, 'aliases', { get: () => rec.aliases.slice() })
     return fn
   }
@@ -174,16 +190,19 @@ export class MidiState {
   restore (snap) {
     for (const [k, v] of Object.entries(snap || {})) {
       const rec = this.controls.get(k)
-      if (rec) { rec.pos = valueToPos(rec.config, v); this._emitSet(rec) }
+      if (rec) { rec.pos = valueToPos(rec.config, v); this._letGo(rec); this._emitSet(rec) }
     }
   }
+
+  // A value set from outside: a soft pickup has to catch it again
+  _letGo (rec) { if (rec.config.pickup === 'soft') rec.caught = false }
 
   /** Every registered control as {channel, number, pos, value}, e.g. to refresh a device display. */
   positions () {
     const out = []
     for (const [k, rec] of this.controls) {
       if (k !== key(rec.aliases[0].channel, rec.number)) continue
-      for (const a of rec.aliases) out.push({ channel: a.channel || rec.lastChannel, number: a.number, pos: rec.pos, value: posToValue(rec.config, rec.pos) })
+      for (const a of rec.aliases) out.push({ channel: a.channel || rec.lastChannel, number: a.number, pos: rec.pos, value: posToValue(rec.config, rec.pos), caught: rec.caught, phys: rec.phys })
     }
     return out
   }
@@ -282,8 +301,27 @@ export class MidiState {
   _applyPos (rec, channel, raw, pos, how) {
     const cfg = rec.config
     const before = posToValue(cfg, rec.pos)
-    rec.pos = clamp01(pos)
-    const ev = { type: 'cc', channel, number: rec.number, value: raw, registered: true, mode: how, before, after: posToValue(cfg, rec.pos), pos: rec.pos, aliases: rec.aliases }
+    pos = clamp01(pos)
+    const prev = rec.phys
+    rec.phys = pos
+    if (cfg.pickup === 'soft' && !rec.caught) {
+      // caught when the control lands on the value or crosses it (was on one side, is now on the other)
+      const near = Math.abs(pos - rec.pos) < 1 / 127
+      const crossed = prev !== undefined && (prev - rec.pos) * (pos - rec.pos) <= 0
+      if (!near && !crossed) {
+        const ev = { type: 'cc', channel, number: rec.number, value: raw, registered: true, mode: how, before, after: before, pos: rec.pos, phys: pos, caught: false, aliases: rec.aliases }
+        this._emit(ev)
+        return ev
+      }
+      rec.caught = true
+    }
+    if (cfg.pickup === 'distance') {
+      // the first message only tells us where the control stands
+      if (prev !== undefined) rec.pos = rail(cfg, rec.pos + (pos - prev) * cfg.pickupScale)
+    } else {
+      rec.pos = pos
+    }
+    const ev = { type: 'cc', channel, number: rec.number, value: raw, registered: true, mode: how, before, after: posToValue(cfg, rec.pos), pos: rec.pos, phys: pos, caught: rec.caught, aliases: rec.aliases }
     this._emit(ev)
     return ev
   }

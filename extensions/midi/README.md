@@ -32,6 +32,46 @@ midi.note('gain', { toggle: true })   // the encoder's push (EC4 push type Note)
 raw numbers only. Profiles live in `core/profiles.js`; the EC4 one encodes setup SE01 as
 programmed in September 2026 (groups by CC offset, channel 1, CCr2).
 
+## Several controllers at once
+
+A controller owns one or more devices, each with its own profile, value model, ports and
+feedback, so two boxes that both speak on channel 1 never collide. The first device is the
+default and `midi.cc` / `midi.note` / `midi.snapshot` are its; add others with `midi.add`
+(or `install(hydra, { devices: [xl3daw] })`) and address them by id:
+
+```javascript
+const xl = midi.add(xl3daw)                              // or midi.device('xl3daw')
+osc(midi.cc([1, 1], 5, 60)).rotate(xl.cc([1, 1], { label: 'ROT', colour: 21 })).out(o0)
+xl.note([1, 1])            // the encoder's touch;  xl.note([5, 3]) a button
+xl.colour([2, 1], 5)       // a palette index (core/palette.js);  xl.lamp([6, 1], 1);  xl.text([1, 1], ['osc1', '10.0'])
+xl.screen(['hydra', 'ready'])
+```
+
+The Web MIDI adapter gives each device the ports its profile's `match` names (the XL3's
+DAW port pair for `xl3daw`, its MIDI pair for `xl3`); the default device takes what is left.
+Feedback is paced per device (`profile.pace`, 20 ms on the XL3, which drops a burst) and a
+control's value, colour or text frames coalesce while they wait.
+
+### Bounded controls: pickup
+
+A relative encoder's value lives in the browser and never jumps. A pot or fader has a position
+of its own, so an absolute control takes a `pickup`: `'jump'` (the value is where the control
+stands, the default for a plain CC box), `'soft'` (the value waits until the control crosses it,
+then follows; the event and `fn.caught` say whether it has), or `'distance'` (the value moves
+by how far the control moved, scaled by `pickupScale`, and never jumps). A profile's `layout`
+marks rows as `endless`, `bounded` or `button`, and a bounded row takes soft pickup unless told
+otherwise.
+
+### Launch Control XL 3
+
+Two profiles for the one unit, one at a time. `xl3` is the factory custom mode on the MIDI port
+pair: absolute CCs, a written value sets an encoder (its LED shows it as brightness), colours
+fixed in Components, buttons as notes, lamps by value. `xl3daw` is DAW mode on the DAW port pair:
+the profile greets the unit and switches its encoders relative, touch and buttons arrive as
+notes, every LED takes a palette colour, each control has a text page on the OLED (shown when it
+turns) and there is a static page; a value cannot be written. The unit is released (DAW mode off)
+on `close()`.
+
 ## Labelling and configuring the EC4 from code
 
 The EC4's setups travel as a SysEx image (format from Faderfox, via the MIT
@@ -77,7 +117,9 @@ mountPanel(document.getElementById('panel'), midi, {
 ## Layout
 
 ```
-core/midi-state.js    value model: decode, curves, wrap, fine, snapshots   (no deps)
+core/midi-state.js    value model: decode, curves, wrap, fine, pickup, snapshots   (no deps)
+core/device.js        one surface: profile + value model + ports + paced feedback
+core/palette.js       Novation's 128-entry LED palette
 core/profiles.js      device layouts and id resolution                    (no deps)
 core/controller.js    Controller = state + profile + feedback + transport (no deps)
 core/ec4-sysex.js     EC4 setup image: parse/encode dumps, edit names and settings (no deps)

@@ -2,9 +2,12 @@
  * MIDI extension for Hydra: Hydra glue around a transport-agnostic controller core.
  *
  *   core/midi-state.js   value model (relative/absolute decode, curves, wrap, fine, snapshots)
- *   core/profiles.js     device layouts (Faderfox EC4 setup 1, EC4 setup 14 PARM, generic CC)
+ *   core/palette.js      Novation's 128-entry LED palette (XL3 DAW mode colours, Launchpads)
+ *   core/profiles.js     device layouts (Faderfox EC4 setup 1 and 14 PARM, Launch Control XL 3 custom and DAW, nanoKONTROL2, generic CC)
+ *   core/nano-sysex.js   the nanoKONTROL2 scene codec; adapters/nano.js the LED-mode handshake
+ *   core/device.js       Device = one surface: profile + value model + ports + paced feedback
  *   core/ec4-display.js  live OLED writes (names, whole screen) and the labels model
- *   core/controller.js   Controller = state + profile + feedback + transport interface
+ *   core/controller.js   Controller = the devices; its own cc/note/... are the default device's
  *   adapters/web-midi.js browser ports          adapters/virtual.js  tests / bridges
  *   index.js             this file: install(hydra) -> window.midi and hydra.synth.midi
  *
@@ -34,8 +37,11 @@
  */
 
 import { Controller } from './core/controller.js'
+import { Device } from './core/device.js'
 import { MidiState, describeEvent, MODES, CURVES } from './core/midi-state.js'
-import { profiles, ec4, parm, generic } from './core/profiles.js'
+import { profiles, ec4, parm, generic, xl3, xl3daw, nano } from './core/profiles.js'
+import { nanoTools } from './adapters/nano.js'
+import * as palette from './core/palette.js'
 import { connectWebMidi } from './adapters/web-midi.js'
 import { connectVirtual } from './adapters/virtual.js'
 import { ec4Tools } from './adapters/sysex.js'
@@ -43,13 +49,14 @@ import { Ec4Image, parseDump, encodeDump } from './core/ec4-sysex.js'
 import { Ec4Labels, labelsFromControls, namesBytes, screenBytes, hideScreenBytes } from './core/ec4-display.js'
 
 export const VERSION = '0.3.0'
-export { Controller, MidiState, describeEvent, MODES, CURVES, profiles, ec4, parm, generic, connectWebMidi, connectVirtual, ec4Tools, Ec4Image, parseDump, encodeDump, Ec4Labels, labelsFromControls, namesBytes, screenBytes, hideScreenBytes }
+export { Controller, Device, MidiState, describeEvent, MODES, CURVES, profiles, ec4, parm, generic, xl3, xl3daw, nano, nanoTools, connectWebMidi, connectVirtual, ec4Tools, Ec4Image, parseDump, encodeDump, Ec4Labels, labelsFromControls, namesBytes, screenBytes, hideScreenBytes, palette }
 
 let _midi = null
 
 /**
  * install(hydra, options)
- *   profile      device profile (default: ec4); pass generic for plain absolute CC boxes, or null
+ *   profile      device profile of the default device (default: ec4); generic for plain absolute CC boxes, or null
+ *   devices      more devices, each a profile or { profile, id, match, pace, ... }: midi.device('xl3daw').cc(...)
  *   mode/channel/steps/feedback/log   Controller options (profile supplies mode/channel defaults)
  *   inputFilter/outputFilter          port name filters for the Web MIDI adapter
  *   sysex        request SysEx access too (separate browser prompt); enables midi.ec4.receive()/send()
@@ -79,6 +86,8 @@ export async function install (hydra = null, options = {}) {
   if (_hydra && _hydra.synth) _hydra.synth.midi = midi
   if (opts.makeGlobal && typeof window !== 'undefined') window.midi = midi
 
+  for (const d of opts.devices || []) { const { profile: p, ...o } = (d && d.profile) ? d : { profile: d }; midi.add(p, o) }
+  for (const d of midi.devices.values()) if (d.profile.id === 'nano') nanoTools(midi, d)   // the LED-mode handshake
   midi.ec4 = ec4Tools(midi)
   midi.ready = connectWebMidi(midi, { inputFilter: opts.inputFilter, outputFilter: opts.outputFilter, sysex: opts.sysex })
   _midi = midi

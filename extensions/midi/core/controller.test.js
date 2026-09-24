@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Controller } from './controller.js'
-import { ec4, generic, resolveControl } from './profiles.js'
+import { ec4, generic, xl3, resolveControl } from './profiles.js'
 import { connectVirtual } from '../adapters/virtual.js'
 
 const cc = (ch, n, v) => [0xB0 | (ch - 1), n, v]
@@ -134,4 +134,16 @@ test('ec4 display: labels follow registrations, go out on connect and group chan
   // without sysex on the transport nothing is sent and nothing throws
   t.sysex = false
   assert.equal(ec4.display.names(1, ['B']), false); assert.equal(ec4.display.text('x'), false)
+})
+
+test('xl3 profile: rows are groups, cc by column, and locate is the inverse', () => {
+  assert.deepEqual(xl3.encoder(1, 1), { number: 13, channel: 1 })
+  assert.deepEqual(xl3.encoder(3, 8), { number: 36, channel: 1 })
+  assert.deepEqual(xl3.encoder(4, 1), { number: 5, channel: 1 })
+  assert.deepEqual(xl3.encoder(6, 8), { number: 52, channel: 1 })
+  for (let g = 1; g <= 6; g++) for (let n = 1; n <= 8; n++) assert.deepEqual(xl3.locate(xl3.encoder(g, n).number, 1), [g, n])
+  assert.equal(xl3.locate(53, 1), null)
+  assert.equal(xl3.locate(13, 2), null)
+  assert.throws(() => xl3.push(1, 1), /no encoder push/)
+  assert.ok(xl3.match.test('LCXL3 1 MIDI Out') && !xl3.match.test('LCXL3 1 DAW Out'))
 })

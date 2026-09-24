@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Launch Control XL 3 DAW mode test</title>
+    <style>
+      body { margin: 0; background: black; color: #ddd; font-family: monospace; font-size: 13px; }
+      canvas { width: 100vw; height: 60vh; display: block; }
+      #panel { padding: 8px; height: 40vh; overflow: auto; box-sizing: border-box; }
+      #log { white-space: pre; color: #9f9; }
+      .val { color: #ff9; }
+      .caught { color: #6f6; } .waiting { color: #f66; }
+      button { font: inherit; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="1280" height="720"></canvas>
+    <div id="panel">
+      <div id="ports">Requesting MIDI access...</div>
+      <div>
+        top 1 freq <span class="val" id="v1"></span> &nbsp; top 2 sync <span class="val" id="v2"></span> &nbsp; middle 1 rotate <span class="val" id="v3"></span> &nbsp;
+        fader 1 mix <span class="val" id="v4"></span> <span id="p4"></span> &nbsp; touch top 1: <span class="val" id="t1"></span> &nbsp; upper button 1 (toggle): <span class="val" id="b1"></span>
+      </div>
+      <div>
+        <button id="page">static page</button> <button id="paint">paint rows</button> <button id="reset">reset values</button> <button id="release">release DAW mode</button>
+        &nbsp; profile: <span id="prof"></span>
+      </div>
+      <div id="log"></div>
+    </div>
+    <script type="module">
+      import HydraRenderer from '../src/hydra-synth.js'
+      import { install, describeEvent, ec4, xl3daw, palette } from '../extensions/midi/index.js'
+
+      const canvas = document.getElementById('c')
+      const hydra = new HydraRenderer({ canvas, width: 1280, height: 720, detectAudio: false, makeGlobal: true })
+      await hydra.ready()
+
+      // the EC4 stays the default device (it may or may not be plugged in); the XL3 in DAW mode is the second
+      const midi = await install(hydra, { profile: ec4, devices: [xl3daw], sysex: true, log: false })   // DAW mode is entered by sysex
+      const xl = midi.device('xl3daw')
+      document.getElementById('prof').textContent = xl.profile.name
+      const showPorts = () => {
+        document.getElementById('ports').textContent =
+          `xl3daw in: ${xl.inputs.join(', ') || '(none)'}  out: ${xl.outputs.join(', ') || '(none)'}   |   default (${midi.default.id}) in: ${midi.default.inputs.join(', ') || '(none)'}`
+      }
+      midi.onInputsChanged = showPorts
+      xl.onTransport(showPorts)
+      midi.ready.then(showPorts)
+
+      const { hue, families } = palette
+      const freq = xl.cc([1, 1], { min: 1, max: 60, init: 10, curve: 'log', label: 'freq', colour: hue('red') })
+      const sync = xl.cc([1, 2], { min: 0, max: 1, init: 0.1, label: 'sync', colour: hue('orange') })
+      const rot = xl.cc([2, 1], { min: 0, max: 6.283, init: 0, wrap: true, label: 'rotate', colour: hue('green') })
+      const mix = xl.cc([4, 1], { min: 0, max: 1, init: 0.5, label: 'mix' })       // a fader: soft pickup by default
+      const touch = xl.note([1, 1])
+      const tog = xl.note([5, 1], { toggle: true })
+      xl.colour([5, 1], hue('blue'))
+
+      osc(freq, sync, 0.8).rotate(rot).blend(noise(3), mix).out(o0)
+
+      // the OLED shows a knob's page when it turns: keep the value line current
+      const fmt = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3))
+      const lines = { freq: ['freq', () => fmt(freq()), 'log 1..60'], sync: ['sync', () => fmt(sync())], rotate: ['rotate', () => fmt(rot()), 'wraps'], mix: ['mix', () => fmt(mix()), () => (mix.caught ? 'caught' : 'move to ' + fmt(mix()))] }
+      const idOf = { freq: [1, 1], sync: [1, 2], rotate: [2, 1], mix: [4, 1] }
+      const showLines = (name) => xl.text(idOf[name], lines[name].map(l => (typeof l === 'function' ? l() : l)))
+
+      const logEl = document.getElementById('log')
+      const lg = []
+      midi.onEvent((ev) => {
+        lg.unshift(`${ev.device}: ${describeEvent(ev)}`)
+        if (lg.length > 12) lg.pop()
+        logEl.textContent = lg.join('\n')
+        if (ev.device === 'xl3daw' && ev.registered && ev.type === 'cc') {
+          const at = xl.profile.locate(ev.number, ev.channel)
+          const name = at && Object.keys(idOf).find(k => idOf[k][0] === at[0] && idOf[k][1] === at[1])
+          if (name) showLines(name)
+        }
+      })
+      setInterval(() => {
+        document.getElementById('v1').textContent = fmt(freq())
+        document.getElementById('v2').textContent = fmt(sync())
+        document.getElementById('v3').textContent = fmt(rot())
+        document.getElementById('v4').textContent = fmt(mix())
+        const p = document.getElementById('p4'); p.textContent = mix.caught ? 'caught' : 'waiting'; p.className = mix.caught ? 'caught' : 'waiting'
+        document.getElementById('t1').textContent = touch()
+        document.getElementById('b1').textContent = tog()
+        xl.lamp([5, 1], tog() ? 1 : 0.2)
+      }, 100)
+
+      document.getElementById('page').onclick = () => xl.screen(['hydra xl3 test', new Date().toLocaleTimeString()])
+      document.getElementById('paint').onclick = () => {
+        for (let n = 1; n <= 8; n++) { xl.colour([1, n], hue('red', n % 4)); xl.colour([2, n], hue('green', n % 4)); xl.colour([3, n], hue('blue', n % 4)) }
+      }
+      document.getElementById('reset').onclick = () => { freq.reset(); sync.reset(); rot.reset(); mix.reset(); Object.keys(idOf).forEach(showLines) }
+      document.getElementById('release').onclick = () => xl.release()
+      window.addEventListener('beforeunload', () => midi.close())
+      Object.keys(idOf).forEach(showLines)
+      window.xl = xl; window.midiCtl = midi
+    </script>
+  </body>
+</html>

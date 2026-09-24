@@ -215,3 +215,47 @@ test('set/restore emit set events and positions() reports 0..1', () => {
   assert.equal(seen.at(-1).type, 'set'); assert.equal(seen.at(-1).pos, 1)
   assert.equal(describeEvent(seen.at(-1)), 'set ch 4 cc 3 -> 20.000')
 })
+
+test('soft pickup: a fader is ignored until it crosses the value, then followed', () => {
+  const st = new MidiState({ mode: 'abs', channel: 1 })
+  const fn = st.cc(5, { min: 0, max: 1, init: 0.5, pickup: 'soft' })
+  assert.equal(fn.caught, false)
+  const abs = (v) => st.handleMessage([0xB0, 5, v])
+  let ev = abs(10)                                   // fader at the bottom: nothing moves
+  assert.equal(ev.caught, false); assert.equal(fn(), 0.5); assert.equal(ev.phys, 10 / 127)
+  abs(40)
+  assert.equal(fn(), 0.5)
+  ev = abs(70)                                       // crossed the value on the way up
+  assert.equal(ev.caught, true); assert.ok(Math.abs(fn() - 70 / 127) < 1e-9)
+  abs(20)                                            // followed from now on
+  assert.ok(Math.abs(fn() - 20 / 127) < 1e-9)
+  fn.set(0.9)                                        // a value from outside lets go again
+  assert.equal(fn.caught, false)
+  abs(30); assert.equal(fn(), 0.9)
+  abs(115); assert.equal(fn.caught, true)            // landed within a step of it
+  assert.equal(st.positions()[0].caught, true)
+})
+
+test('distance pickup: the value moves by how far the fader moved and never jumps', () => {
+  const st = new MidiState({ mode: 'abs', channel: 1 })
+  const fn = st.cc(6, { min: 0, max: 10, init: 5, pickup: 'distance' })
+  const abs = (v) => st.handleMessage([0xB0, 6, v])
+  abs(0)                                             // first message only says where the fader is
+  assert.equal(fn(), 5)
+  abs(127)                                           // a whole travel: a whole range, clamped
+  assert.equal(fn(), 10)
+  abs(0)
+  assert.equal(fn(), 0)
+  st.cc(7, { min: 0, max: 10, init: 5, pickup: 'distance', pickupScale: 0.5 })
+  const g = st.controls.get('1:7')
+  st.handleMessage([0xB0, 7, 64]); st.handleMessage([0xB0, 7, 127])
+  assert.ok(Math.abs((5 + 0.5 * (63 / 127) * 10) - (g.pos * 10)) < 1e-9)
+})
+
+test('jump pickup is the default for absolute controls and rejects unknown modes', () => {
+  const st = new MidiState({ mode: 'abs', channel: 1 })
+  const fn = st.cc(8, 0, 1, 0.5)
+  assert.equal(fn.caught, true)
+  st.handleMessage([0xB0, 8, 0]); assert.equal(fn(), 0)
+  assert.throws(() => st.cc(9, { pickup: 'magnet' }), /unknown pickup/)
+})

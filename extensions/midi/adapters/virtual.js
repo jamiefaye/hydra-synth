@@ -9,7 +9,8 @@ export function connectVirtual (controller, { name = 'virtual' } = {}) {
     inputs: [name],
     outputs: [name],
     sent: [],
-    send: (bytes) => { transport.sent.push(Array.from(bytes)) },
+    at: [],       // the timestamp each frame was scheduled for (undefined = now)
+    send: (bytes, at) => { transport.sent.push(Array.from(bytes)); transport.at.push(at) },
     close: () => {}
   }
   controller.attachTransport(transport)

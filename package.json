@@ -28,6 +28,12 @@
     "./extensions/midi": {
       "import": "./extensions/midi/index.js"
     },
+    "./extensions/midi/ui/panel.js": {
+      "import": "./extensions/midi/ui/panel.js"
+    },
+    "./extensions/midi/core/*": {
+      "import": "./extensions/midi/core/*"
+    },
     "./src/lib/windows.js": {
       "import": "./src/lib/windows.js"
     }
