@@ -253,8 +253,17 @@ export function mountPanel (element, controller, options = {}) {
     }
     root.appendChild(box)
   }
-  // rows with nothing on them fold away, so a small sketch's panel stays small (the first row always shows)
+  // rows with nothing on them fold away, so a small sketch's panel stays small (the first row always shows);
+  // so do live-labelled groups (the EC4 under parm): only the groups a sketch reaches are drawn, herder's fixed ones always
   const foldEmpty = () => {
+    let first = true
+    for (const g of opts.groups) {
+      const title = titles.get(g.group); const box = title && title.parentNode
+      if (!box || g.labels) continue
+      const live = first || cells.some(c => !c.target.device && c.target.group === g.group && !c.cell.classList.contains('mp-dark'))
+      box.style.display = live ? '' : 'none'
+      first = false
+    }
     for (const box of root.querySelectorAll('.mp-device')) {
       const rows = rowsOf.filter(r => r.row.parentNode === box)
       rows.forEach((r, i) => {
@@ -294,8 +303,9 @@ export function mountPanel (element, controller, options = {}) {
       const colour = c.device._colours && c.device._colours.get(`${t.channel}:${t.number}`)
       c.cell.style.borderLeftColor = colour ? PALETTE[colour] : 'transparent'
       if (!rec) { c.val.textContent = fmt(null); c.fill.style.width = '0'; c.phys.style.display = 'none'; c.cell.classList.add('mp-dark'); if (!t.fixed) { c.lab.textContent = '     '; c.label = '' } continue }
-      c.cell.classList.remove('mp-dark')
       const label = t.fixed ? t.label : (rec.config.label && rec.config.label !== '----' ? rec.config.label : '')
+      // a knob parm let go of keeps its control under the blank name '----' (so the OLED clears): dark, like one never registered
+      c.cell.classList.toggle('mp-dark', !t.fixed && rec.config.label === '----')
       if (!t.fixed && label !== c.label) { c.label = label; c.lab.textContent = (label || '').padEnd(4) + ' '; const nm = c.tip.querySelector('.mp-tip-name'); if (nm) nm.textContent = label }
       c.val.textContent = fmt(valueOf(rec))
       c.fill.style.width = `${Math.round(Math.min(Math.max(rec.pos, 0), 1) * 100)}%`

@@ -297,7 +297,10 @@ export async function portal (name, opts = {}) {
   const fire = () => { cleanups.splice(0).forEach(f => { try { f() } catch (e) { /* */ } }); closers.splice(0).forEach(f => { try { f() } catch (e) { /* */ } }) }
   const win = box === 'always' ? null : await openWindow(name, { role, width, height, screens, store })
   if (win) {
-    const d = win.document
+    let d = win.document
+    // a fresh popup is about:blank with no doctype: quirks mode, where a <table> does not inherit colour or
+    // font size but takes the body's (a panel's icons went grey). A doctype puts the document in standards mode
+    if (d.compatMode !== 'CSS1Compat') { d.open(); d.write('<!DOCTYPE html><html><head></head><body></body></html>'); d.close(); d = win.document }
     d.title = title
     d.body.innerHTML = ''
     d.body.style.cssText = 'margin: 8px; background: #111; color: #ccc; font: 12px monospace;'
