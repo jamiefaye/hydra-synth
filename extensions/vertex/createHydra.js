@@ -27,6 +27,23 @@ import regl from 'regl'
 // GeneratorFunction constructor for yield support in sketches
 const GeneratorFunction = Object.getPrototypeOf(async function*(){}).constructor
 
+// The sketch's own line of an error thrown inside the eval'd function: V8 puts the parameter list
+// and the opening brace on two lines above the body (`function anonymous(osc,noise,...\n) {\n`), and
+// Deglobalize keeps every line of the sketch where it was, so <anonymous>:L:C is line L - 2 of the
+// sketch. Undefined when the stack has no such frame (a SyntaxError from the compile has none).
+const WRAPPER_LINES = 2
+function sketchLine (err, code) {
+  if (!err || typeof err.stack !== 'string' || typeof code !== 'string') return undefined
+  const max = code.split('\n').length
+  for (const frame of err.stack.split('\n')) {
+    const m = /<anonymous>:(\d+):(\d+)/.exec(frame)
+    if (!m) continue
+    const line = Number(m[1]) - WRAPPER_LINES
+    if (line >= 1 && line <= max) return line
+  }
+  return undefined
+}
+
 // RAF loop - use a simple implementation
 function createLoop(fn) {
   let running = false
@@ -224,7 +241,21 @@ export async function createHydra({
     if (hydra.makeGlobal && typeof window !== 'undefined') { window.width = w; window.height = h }
   }.bind(hydra)
 
+  /**
+   * halt(): end a running sequence (a sketch stepping through yields) where it is; the picture
+   * stays as the last step left it. hush() halts too, since it clears everything the sketch set
+   * up. A sketch can call halt() itself, and a new eval always replaces the sequence anyway.
+   * (Named halt, not stop: the synth's names are copied onto window with makeGlobal, and
+   * window.stop() is the browser's.)
+   */
+  hydra.synth.halt = hydra.halt = function() {
+    delete hydra.generatorFunction
+    hydra.generatorFunctionTimer = -1
+    hydra._stepping = false
+  }
+
   hydra.synth.hush = hydra.hush = function() {
+    hydra.halt()
     hydra.s.forEach(source => source.clear && source.clear())
     hydra.o.forEach(output => {
       if (output.clearSprites) output.clearSprites()
@@ -483,7 +514,7 @@ export async function createHydra({
     // Reset render target
     hydra.synth.render(hydra.o[0])
 
-    // Transform primitive global refs to member expressions
+    // Transform primitive global refs to member expressions (line for line: the text is spliced, not regenerated)
     let code
     try {
       code = Deglobalize(codeIn, '_h')
@@ -491,6 +522,7 @@ export async function createHydra({
       console.warn('[hydra] Deglobalize error:', err)
       code = codeIn
     }
+    hydra.lastCode = code
 
     // Build local bindings from synth object
     const h = hydra.synth
@@ -503,6 +535,7 @@ export async function createHydra({
     keys.push('_h')
     values.push(h)
 
+    hydra._stepping = false
     try {
       const fn = new GeneratorFunction(...keys, code)
       hydra.generatorFunction = fn(...values)
@@ -514,15 +547,21 @@ export async function createHydra({
 
     hydra.generatorFunctionTimer = -1
 
+    // An async generator's next() is a promise: the sketch has run (to its first yield, or to the
+    // end) when it settles, and a throw in the sketch rejects it, stack and all
+    const gen = hydra.generatorFunction
     try {
-      const reply = hydra.generatorFunction.next()
-      hydra._planNext(reply)
+      const reply = await gen.next()
+      if (hydra.generatorFunction === gen) hydra._planNext(reply)
     } catch (err) {
-      console.error('[hydra] Error calling initial generator function.next():', err)
-      delete hydra.generatorFunction
+      const line = sketchLine(err, code)
+      console.error('[hydra] Error running the sketch' + (line ? ` (line ${line})` : '') + ':', err)
+      if (hydra.generatorFunction === gen) delete hydra.generatorFunction
       throw err
     }
   }
+  /** The sketch line an error from the last eval points at, or undefined. */
+  hydra.sketchLine = (err) => sketchLine(err, hydra.lastCode)
 
   /**
    * Called from tick() to step the generator if a yield timer has elapsed.
@@ -534,16 +573,20 @@ export async function createHydra({
     const f = hydra.generatorFunction
     if (!f) {
       hydra.generatorFunctionTimer = -1
-    } else {
-      try {
-        const reply = f.next()
-        hydra._planNext(reply)
-      } catch (err) {
-        console.error('[hydra] Error calling generator function.next():', err)
-        hydra.generatorFunctionTimer = -1
-        delete hydra.generatorFunction
-      }
+      return
     }
+    // one step at a time: no next() while the last one's promise is pending (an await in the sketch)
+    if (hydra._stepping) return
+    hydra._stepping = true
+    f.next().then(reply => {
+      hydra._stepping = false
+      if (hydra.generatorFunction === f) hydra._planNext(reply)
+    }, err => {
+      hydra._stepping = false
+      const line = sketchLine(err, hydra.lastCode)
+      console.error('[hydra] Error in the sketch after a yield' + (line ? ` (line ${line})` : '') + ':', err)
+      if (hydra.generatorFunction === f) { hydra.generatorFunctionTimer = -1; delete hydra.generatorFunction }
+    })
   }
 
   /**

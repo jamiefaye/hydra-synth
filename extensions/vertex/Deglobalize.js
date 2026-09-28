@@ -1,5 +1,4 @@
 import { Parser } from 'acorn'
-import { generate } from 'astring'
 
 // The synth globals a sketch reads live: `time` in `() => time * 0.1` must be read every frame, but
 // the function the eval builds would capture a primitive's value once. So every *reference* to one
@@ -7,6 +6,7 @@ import { generate } from 'astring'
 const watchListArray = ['time', 'fps', 'speed', 'bpm']
 const watchList = new Set(watchListArray)
 const SKIP_KEYS = new Set(['type', 'start', 'end', 'loc', 'range', 'comments', 'leadingComments', 'trailingComments'])
+const PREFIX = 'async function* f() {\n'
 
 /**
  * Rewrite references to the watched globals as `prefix.name`. Only references: a declaration
@@ -14,12 +14,16 @@ const SKIP_KEYS = new Set(['type', 'start', 'end', 'loc', 'range', 'comments', '
  * (`foo.speed`), a label or an import name is not a reference and is left as written. A name the
  * sketch declares itself is the sketch's own and is left alone everywhere. `{ time }` shorthand
  * becomes `{ time: prefix.time }`. Text that will not parse comes back unchanged (the eval reports
- * the error). Comments are dropped when anything is rewritten, kept when nothing is.
+ * the error).
+ *
+ * The rewrite splices the text at the identifiers' own spans (acorn's start/end) rather than
+ * regenerating the program, so everything else is as written: comments, spacing, and above all
+ * line and column numbers, which is what lets an error in the eval point at the editor's line.
  */
 function Deglobalize (textIn, prefix) {
   // filter-out "zero length space" characters.
   const textCleaned = textIn.replace(/[\u200B-\u200D\uFEFF]/g, '')
-  const text = 'async function* f() {\n' + textCleaned + '\n}' // Hack to get acorn to accept yield statement.
+  const text = PREFIX + textCleaned + '\n}' // the wrapper lets acorn accept yield and await at the top level
   let ast
   try {
     ast = Parser.parse(text, { locations: false, ecmaVersion: 'latest', allowReserved: true, allowAwaitOutsideFunction: true })
@@ -59,8 +63,8 @@ function Deglobalize (textIn, prefix) {
   }
   scan(ast)
 
-  // the references to rewrite
-  const refs = []
+  // the references to rewrite: { start, end, text } spans in textCleaned
+  const edits = []
   const visit = (node, parent, key) => {
     if (node.type === 'Identifier') {
       if (!watchList.has(node.name) || declared.has(node.name)) return
@@ -70,16 +74,13 @@ function Deglobalize (textIn, prefix) {
         if (parent.type === 'LabeledStatement' || parent.type === 'BreakStatement' || parent.type === 'ContinueStatement') return
         if (parent.type === 'ImportSpecifier' || parent.type === 'ImportDefaultSpecifier' || parent.type === 'ExportSpecifier') return
       }
-      refs.push(node)
+      edits.push({ start: node.start, end: node.end, text: prefix + '.' + node.name })
       return
     }
     if (node.type === 'Property' && node.shorthand && node.value.type === 'Identifier') {
-      // acorn shares one node between key and value here: keep the key, give the value its own node
-      if (watchList.has(node.value.name) && !declared.has(node.value.name)) {
-        node.shorthand = false
-        node.value = { type: 'Identifier', name: node.value.name }
-        refs.push(node.value)
-      }
+      // `{ time }`: acorn shares one node between key and value; the key stays, the value reads through
+      const name = node.value.name
+      if (watchList.has(name) && !declared.has(name)) edits.push({ start: node.key.start, end: node.key.end, text: name + ': ' + prefix + '.' + name })
       return
     }
     eachChild(node, (child, k) => visit(child, node, k))
@@ -87,27 +88,13 @@ function Deglobalize (textIn, prefix) {
   visit(ast, null, null)
 
   // If none found, just return the input.
-  if (refs.length === 0) return textCleaned
+  if (edits.length === 0) return textCleaned
 
-  for (const node of refs) {
-    const vn = node.name
-    // Transform Identifier node into MemberExpression node
-    node.type = 'MemberExpression'
-    delete node.name
-    node.object = { type: 'Identifier', name: prefix }
-    node.property = { type: 'Identifier', name: vn }
-    node.computed = false
-    node.optional = false
-  }
-  return stripOutStuff(generate(ast))
-}
-
-function stripOutStuff (inp) {
-  // get rid of the async function at the front and that final '}'.
-  const firstX = inp.indexOf('{')
-  const lastX = inp.lastIndexOf('}')
-  if (firstX === -1 || lastX === -1) return inp
-  return inp.substring(firstX + 1, lastX)
+  // splice from the end so earlier offsets stay valid; every edit is within one line, so lines keep their numbers
+  let out = textCleaned
+  edits.sort((a, b) => b.start - a.start)
+  for (const e of edits) out = out.slice(0, e.start - PREFIX.length) + e.text + out.slice(e.end - PREFIX.length)
+  return out
 }
 
 export { Deglobalize }
