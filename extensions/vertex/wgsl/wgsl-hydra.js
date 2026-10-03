@@ -997,7 +997,7 @@ class wgslHydra {
 		const owned = ['vertexBuffer', 'uvBuffer', 'faceIdBuffer', 'normalBuffer', 'tangentBuffer', 'colorBuffer',
 			'vertexUniformBuffer', 'spriteGridBuffer', 'facesPerInstanceBuffer',
 			'instanceOffsetBuffer', 'instanceRotationBuffer', 'instanceScaleBuffer',
-			'fragmentCenterBuffer', 'fragmentSeedBuffer', 'fragmentDistanceBuffer'];
+			'fragmentCenterBuffer', 'fragmentSeedBuffer', 'fragmentDistanceBuffer', 'valueStructBuffer'];
 		for (const k of owned) {
 			const b = spe[k];
 			if (b && typeof b.destroy === 'function') b.destroy();
