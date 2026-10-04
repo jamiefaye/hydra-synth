@@ -347,7 +347,12 @@ class InActState {
     let ix = 0
     let working = []
     let runL = 0
-    let lastDur = 0, marked = false, keyFlag = false
+    // A //+ line belongs to the sketch below it. head: what the last //+ line said, waiting for
+    // that sketch's first line; info: the same for the sketch being gathered.
+    // (Both used to be one set of variables, so a sketch was pushed with the next one's line:
+    // every duration and mark sat one sketch early and the last sketch had none.)
+    const noHead = () => ({ dur: 0, mark: false, key: false })
+    let head = noHead(), info = noHead()
 
     for (ix = 0; ix < aSize; ++ix) {
       const ln = textA[ix]
@@ -361,35 +366,34 @@ class InActState {
         }
         const tokens = restOfLine.split(' ')
 
-        keyFlag = false
-        marked = false
+        head = noHead()
 
         if (tokens.length > 0) {
           const dur = Number.parseFloat(tokens[0])
-          lastDur = isNaN(dur) ? 1.0 : dur
+          head.dur = isNaN(dur) ? 1.0 : dur
         }
 
         for (let i = 1; i < tokens.length; ++i) {
           const s = tokens[i]
-          if (s === 'key') keyFlag = true
-          else if (s === 'mark') marked = true
+          if (s === 'key') head.key = true
+          else if (s === 'mark') head.mark = true
         }
       } else {
         if (runL >= 3 && working.length > 0) {
           const sketch = working.join('\n')
-          this.playA.push({ dur: lastDur, mark: marked, key: keyFlag, sketch })
+          this.playA.push({ dur: info.dur, mark: info.mark, key: info.key, sketch })
           working = []
         }
+        // a sketch's first line: the //+ line above it is its own
+        if (working.length === 0) { info = head; head = noHead() }
         runL = 0
         working.push(ln)
-        lastDur = 0
-        marked = false
       }
     }
 
     if (working.length > 0) {
       const lastSketch = working.join('\n')
-      this.playA.push({ dur: lastDur, mark: marked, key: keyFlag, sketch: lastSketch })
+      this.playA.push({ dur: info.dur, mark: info.mark, key: info.key, sketch: lastSketch })
     }
 
     this.statusObj.hasplay = this.playA.length > 0
