@@ -335,7 +335,7 @@ class InActState {
 
   loadPlayer(text) {
     this.playA = []
-    this.playerIndex = 0
+    this.playerIndex = -1   // none of the file is up yet: the first play or step forward shows the first sketch
     const textA = text.split(/\r\n|\n/)
     const aSize = textA.length
 
@@ -422,7 +422,7 @@ class InActState {
       }
     }
 
-    this.playerIndex = 0
+    this.playerIndex = -1
     this.statusObj.hasplay = this.playA.length > 0
     this.emit()
   }
